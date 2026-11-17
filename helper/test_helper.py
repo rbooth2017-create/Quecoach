@@ -106,7 +106,7 @@ class WithFakeDatabase(unittest.TestCase):
         self.assertEqual(t["energy"], 6)
         self.assertEqual(t["playCount"], 3)
         self.assertEqual(t["fileName"], "Kora Vale - Tides.mp3")
-        self.assertTrue(t["path"].endswith("Music/Kora Vale - Tides.mp3"))
+        self.assertTrue(t["path"].replace("\\", "/").endswith("Music/Kora Vale - Tides.mp3"))  # Windows uses \\
         cues = t["cues"]
         self.assertEqual([c["num"] for c in cues], [-1, 0, 3])  # memory, hot A, hot D
         self.assertEqual([c["loop"] for c in cues], [False, False, True])
