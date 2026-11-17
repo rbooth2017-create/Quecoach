@@ -1,1 +1,1 @@
-pyrekordbox>=0.4
+pyrekordbox==0.4.4
