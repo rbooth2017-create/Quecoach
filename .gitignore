@@ -4,3 +4,5 @@ dist/
 dist-helper/
 build/
 *.log
+.DS_Store
+__pycache__/
