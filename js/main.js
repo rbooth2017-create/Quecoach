@@ -158,8 +158,12 @@ const otherId = (id) => (id === 'A' ? 'B' : 'A');
 
 /** The track that is playing "for real": rekordbox's (via the helper) or the live deck here. */
 function currentTrack() {
-  if (state.helper && state.rbNow) return { track: state.rbNow, where: 'rekordbox' };
-  if (state.mode === 'panel') return state.manualNow ? { track: state.manualNow, where: 'manual' } : null;
+  // Whichever is newer wins: rekordbox's play history, or the track you marked with "Now".
+  const rb = state.helper && state.rbNow ? { track: state.rbNow, where: 'rekordbox', at: state.rbNowAt || 0 } : null;
+  const manual = state.manualNow ? { track: state.manualNow, where: 'manual', at: state.manualNowAt || 0 } : null;
+  if (rb && manual) return rb.at > manual.at ? rb : manual;
+  if (rb) return rb;
+  if (state.mode === 'panel') return manual;
   const m = masterId();
   return m && decks[m].track ? { track: decks[m].track, where: m } : null;
 }
@@ -246,15 +250,17 @@ function renderLibrary() {
     let match = '';
     if (cur && cur.id !== t.id) {
       const k = keyRelation(cur.camelot, t.camelot), p = pitchNeeded(cur.bpm, t.bpm);
-      const cls = k.score >= 0.85 && Math.abs(p.pct) <= 4 ? 'k-good' : k.score >= 0.55 && Math.abs(p.pct) <= 6 ? 'k-mid' : 'k-bad';
-      match = `<span class="pill ${cls}" title="${esc(k.label)}">${esc(k.label.split(' ·')[0])} · ${p.pct >= 0 ? '+' : ''}${p.pct.toFixed(1)}%</span>`;
+      const ap = p.pct == null ? 99 : Math.abs(p.pct);
+      const cls = k.score >= 0.85 && ap <= 4 ? 'k-good' : k.score >= 0.5 && ap <= 6 ? 'k-mid' : 'k-bad';
+      const tempo = p.pct == null ? 'no BPM' : `${p.pct >= 0 ? '+' : ''}${p.pct.toFixed(1)}%`; // unanalysed tracks have no BPM
+      match = `<span class="pill ${cls}" title="${esc(k.label)}">${esc(k.label.split(' ·')[0])} · ${tempo}</span>`;
     }
     const playing = decks.A.track?.id === t.id || decks.B.track?.id === t.id;
     return `<tr class="${playing ? 'playing' : state.played.has(t.id) || state.rbHistory.includes(t.id) ? 'played' : ''}">
       <td class="t"><b>${esc(t.title)}</b><br><span class="muted">${esc(t.artist)}</span></td><td class="c-genre">${esc(t.genre)}</td><td>${t.bpm ? t.bpm.toFixed(1) : '–'}</td>
       <td>${esc(t.camelot || t.key || '–')}</td><td class="c-energy">${t.energy ?? '–'}</td><td class="c-rating">${'★'.repeat(t.rating || 0)}</td><td>${match}</td>
       <td><div class="rowbtns"><button class="practice-only" data-load="${esc(t.id)}" data-deck="A">A</button><button class="practice-only" data-load="${esc(t.id)}" data-deck="B">B</button>
-      ${state.helper ? '' : `<button class="panel-only" data-now="${esc(t.id)}" title="Mark as playing now">Now</button>`}<button class="panel-only" data-next="${esc(t.id)}" title="Plan the mix into this track">Next</button></div></td></tr>`;
+      <button class="panel-only" data-now="${esc(t.id)}" title="Mark as playing now">Now</button><button class="panel-only" data-next="${esc(t.id)}" title="Plan the mix into this track">Next</button></div></td></tr>`;
   }).join('') || `<tr><td colspan="8" class="muted">${state.library.length ? 'No matches.' : 'Import your rekordbox collection (File → Export Collection in xml format) or load the demo library.'}</td></tr>`;
 }
 
@@ -306,10 +312,10 @@ async function renderPanel() {
   if (token !== panelToken) return;
   const nowBox = $('#pvNow'), nextBox = $('#pvNext');
   nowBox.className = 'panel card now'; nextBox.className = 'panel card next';
-  const source = state.helper ? '<span style="color:var(--ok)">● from rekordbox</span>' : '<span>set by you</span>';
+  const source = currentTrack()?.where === 'rekordbox' ? '<span style="color:var(--ok)">● from rekordbox</span>' : '<span>set by you</span>';
   if (!cur) {
     nowBox.innerHTML = `<div class="eyebrow"><span>Now playing</span></div><div class="empty">${state.helper
-      ? 'Waiting for rekordbox — play a track and it appears here once rekordbox adds it to its history.'
+      ? 'rekordbox hasn\'t logged a played track yet. It records play history in <b>Performance</b> mode (not Export), after a track has played for a while. Until then, press <b>Now</b> on the track you\'re playing (Library below).'
       : state.library.length ? 'Press <b>Now</b> on the track you are playing (Library below), or connect rekordbox.' : 'Connect rekordbox, or load the demo library from the ☰ menu.'}</div>`;
     nextBox.innerHTML = '<div class="eyebrow"><span>Up next</span></div><div class="empty">Suggestions and a mix plan appear once a track is playing.</div>';
     return;
@@ -462,7 +468,7 @@ document.addEventListener('click', (e) => {
   if (nw) {
     const t = state.library.find((x) => x.id === nw.dataset.now);
     if (state.manualNow && state.manualNow.id !== t.id) { state.played.add(state.manualNow.id); state.history.push(state.manualNow); }
-    state.manualNow = t; if (state.nextId === t.id) state.nextId = null; state.panelIn = null;
+    state.manualNow = t; state.manualNowAt = Date.now(); if (state.nextId === t.id) state.nextId = null; state.panelIn = null;
     refreshAll(); $('#panelView').scrollIntoView({ behavior: 'smooth' }); return;
   }
   const pb = e.target.closest('[data-pin]');
@@ -509,6 +515,7 @@ async function pollNowPlaying() {
     const np = await (await fetch(`${HELPER}/now-playing`)).json();
     const id = np.track?.id;
     const changed = id !== state.rbNow?.id || np.history.length !== state.rbHistory.length;
+    if (id && id !== state.rbNow?.id) state.rbNowAt = Date.now(); // rekordbox logged a new track
     state.rbHistory = np.history;
     state.rbNow = id ? state.library.find((t) => t.id === id) || { ...np.track, camelot: toCamelot(np.track.key) } : null;
     if (changed && state.rbNow && state.nextId === state.rbNow.id) { state.nextId = null; state.panelIn = null; } // you mixed it in

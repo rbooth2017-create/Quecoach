@@ -52,7 +52,7 @@ export function scoreCandidate(current, cand, opts = {}) {
 export function suggestNext(current, library, opts = {}) {
   const played = opts.played || new Set();
   return library
-    .filter((t) => t.id !== current.id && !played.has(t.id) && t.bpm)
+    .filter((t) => t.id !== current.id && !played.has(t.id) && t.bpm && !(t.duration > 0 && t.duration < 60)) // skip samples/loops
     .map((t) => scoreCandidate(current, t, opts))
     .sort((a, b) => b.score - a.score)
     .slice(0, opts.limit || 12);
@@ -139,7 +139,8 @@ export function mixInPoints(track, analysis, phraseBars = 16) {
     if (pts.some((p) => Math.abs(p.time - t) < 0.05)) continue;
     pts.push({ bar: barAt(g, t + 0.01), time: t, label: c.num >= 0 ? `Hot cue ${'ABCDEFGH'[c.num] || c.num}` : 'Memory cue', detail: c.name || 'your cue' });
   }
-  return pts.sort((a, b) => a.time - b.time);
+  const end = track.duration > 0 ? track.duration - barLen(g) * 4 : Infinity; // keep at least 4 bars to play
+  return pts.filter((p) => p.time === g.firstDownbeat || p.time < end).sort((a, b) => a.time - b.time);
 }
 
 /** Where to start bringing the next track in, on the outgoing track. */

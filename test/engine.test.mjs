@@ -88,3 +88,13 @@ test('rekordbox phrases drive drop and outro', async () => {
   assert.equal(out.bar, 129);
   assert.match(out.why, /Outro/);
 });
+
+test('samples and loops are not suggested; start points stay inside the track', async () => {
+  const { suggestNext, mixInPoints } = await import('../js/engine.js');
+  const cur = { id: 'a', bpm: 128, camelot: '8A', duration: 300 };
+  const loop = { id: 'b', bpm: 128, camelot: '8A', duration: 7 };
+  const song = { id: 'c', bpm: 127, camelot: '8A', duration: 320 };
+  assert.deepEqual(suggestNext(cur, [cur, loop, song]).map((x) => x.track.id), ['c']);
+  const pts = mixInPoints({ ...loop, grid: { bpm: 128, firstDownbeat: 0 }, cues: [] }, null);
+  assert.deepEqual(pts.map((p) => p.bar), [1]);
+});
