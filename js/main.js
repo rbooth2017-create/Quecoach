@@ -159,12 +159,17 @@ const otherId = (id) => (id === 'A' ? 'B' : 'A');
 
 /** The track that is playing "for real": rekordbox's (via the helper) or the live deck here. */
 function currentTrack() {
-  // Whichever is newer wins: rekordbox's play history, or the track you marked with "Now".
-  const rb = state.helper && state.rbNow ? { track: state.rbNow, where: 'rekordbox', at: state.rbNowAt || 0 } : null;
-  const manual = state.manualNow ? { track: state.manualNow, where: 'manual', at: state.manualNowAt || 0 } : null;
-  if (rb && manual) return rb.at > manual.at ? rb : manual;
-  if (rb) return rb;
-  if (state.mode === 'panel') return manual;
+  // Live: the playing deck read off rekordbox's screen (Mix page, beat view on) wins.
+  const mp = mixPage?.state;
+  if (mp?.decks[mp.live] && mp.fromScreen[mp.live] && mixPage.beat.cam.state === 'live') return { track: mp.decks[mp.live], where: 'rekordbox' };
+  // Otherwise whichever is newest: rekordbox's play history, "Now", or the playing deck picked on the Mix page.
+  const cands = [
+    state.helper && state.rbNow ? { track: state.rbNow, where: 'rekordbox', at: state.rbNowAt || 0 } : null,
+    state.manualNow ? { track: state.manualNow, where: 'manual', at: state.manualNowAt || 0 } : null,
+    mp?.decks[mp.live] ? { track: mp.decks[mp.live], where: 'manual', at: mp.decksAt?.[mp.live] || 0 } : null,
+  ].filter(Boolean);
+  if (cands.length) return cands.sort((a, b) => b.at - a.at)[0];
+  if (state.mode === 'panel') return null;
   const m = masterId();
   return m && decks[m].track ? { track: decks[m].track, where: m } : null;
 }
@@ -191,8 +196,8 @@ function renderSuggestions() {
   if (!state.library.length) { box.innerHTML = '<div class="muted">Import your rekordbox XML (or the demo library) to get suggestions.</div>'; lastSugg = []; return; }
   lastSugg = suggestNext(cur, state.library, { played: new Set([...state.played, ...state.rbHistory, decks.A.track?.id, decks.B.track?.id]), direction: state.direction, limit: 25 });
   box.innerHTML = lastSugg.slice(0, 6).map((s) => `
-    <div class="row">
-      <div><div><b>${esc(s.track.title)}</b> <span class="muted">— ${esc(s.track.artist)}</span></div>
+    <div class="row" ${dragAttrs(s.track)}>
+      <div><div>${dragGrip(s.track)}<b>${esc(s.track.title)}</b> <span class="muted">— ${esc(s.track.artist)}</span></div>
       <div class="meta">${esc(s.track.genre)} · ${s.track.bpm.toFixed(1)} BPM · ${s.reasons.map(esc).join(' · ')}</div></div>
       <div style="display:flex;gap:6px;align-items:center"><span class="score">${Math.round(s.score * 100)}</span>
       <button class="practice-only" data-load="${esc(s.track.id)}" data-deck="${otherId(m)}">Load ${otherId(m)}</button>
@@ -265,6 +270,18 @@ function renderLibrary() {
   }).join('') || `<tr><td colspan="8" class="muted">${state.library.length ? 'No matches.' : 'Import your rekordbox collection (File → Export Collection in xml format) or load the demo library.'}</td></tr>`;
 }
 
+// ---------- Drag a track onto rekordbox ----------
+/** Make an element draggable onto a rekordbox deck (desktop app, tracks with a file). */
+function dragAttrs(t) { return t?.path && desktop ? `draggable="true" data-drag="${esc(t.id)}" title="Drag onto the empty deck in rekordbox"` : ''; }
+function dragGrip(t) { return t?.path && desktop ? '<span class="grip" aria-hidden="true">⠿</span>' : ''; }
+document.addEventListener('dragstart', (e) => {
+  const el = e.target.closest?.('[data-drag]');
+  if (!el) return;
+  e.preventDefault(); // the desktop app starts a real file drag instead
+  const t = state.library.find((x) => x.id === el.dataset.drag);
+  if (t?.path && desktop?.startDrag) desktop.startDrag(t.path);
+});
+
 function refreshAll() { renderLibrary(); renderSuggestions(); renderPlan(); renderPanel(); mixPage?.render(); }
 let mixPage = null;
 
@@ -336,7 +353,8 @@ async function renderPanel() {
   const tagIn = (txt) => txt.replace(/\{IN\}/g, 'the new track').replace(/\{OUT\}/g, 'the playing track').replace(/(^|\. )([a-z])/g, (_, a, c) => a + c.toUpperCase());
   nextBox.innerHTML = `
     <div class="eyebrow"><span>Up next ${state.nextId ? '' : '· top suggestion'}</span><span class="score">${Math.round(sc.score * 100)}</span></div>
-    <div class="big">${esc(next.title)}</div><div class="sub">${esc([next.artist, next.genre].filter(Boolean).join(' · '))}</div>
+    <div class="big" ${dragAttrs(next)}>${dragGrip(next)}${esc(next.title)}</div><div class="sub">${esc([next.artist, next.genre].filter(Boolean).join(' · '))}</div>
+    ${next.path && desktop ? '<div class="draghint">Drag the title onto the empty deck in rekordbox to load it.</div>' : ''}
     <div class="chips"><span class="chip"><b>${esc(next.camelot || '?')}</b> ${esc(sc.key.label)}</span>
       ${sc.pitch.pct != null ? `<span class="chip">Tempo <b>${sc.pitch.pct >= 0 ? '+' : ''}${sc.pitch.pct.toFixed(1)}%</b>${sc.pitch.mode !== '1x' ? ` (${sc.pitch.mode})` : ''}</span>` : ''}
       ${plan ? `<span class="chip"><b>${plan.blendBars}</b>-bar blend</span>` : ''}</div>
@@ -563,14 +581,15 @@ $('#settingsClose').addEventListener('click', () => {
 });
 $('#aiBtn').addEventListener('click', async () => {
   const m = masterId() || 'A', cur = currentTrack()?.track, out = $('#aiOut');
-  if (!cur || !lastSugg.length) return toast('Play a track first so the coach knows where you are.');
+  if (!cur) return toast('The coach needs to know what\'s playing: turn on the beat view on the Mix page, pick the playing deck\'s track there, or press Now in the library.');
+  if (!lastSugg.length) return toast(`No tracks in your library mix well with ${cur.title} yet — analyse more tracks in rekordbox (BPM and key).`);
   if (!state.apiKey) { $('#settings').showModal(); return toast('Add your Anthropic API key first.'); }
   out.hidden = false; out.innerHTML = '<span class="muted">Asking the coach…</span>'; $('#aiBtn').disabled = true;
   try {
     const { askCoach } = await import('./ai.js');
     const r = await askCoach({ apiKey: state.apiKey, current: cur, history: state.helper ? state.rbHistory.map((id) => state.library.find((t) => t.id === id)).filter(Boolean) : state.history, candidates: lastSugg, direction: state.direction, level: $('#level').value });
     out.innerHTML = `<div class="muted">${esc(r.set_note)}</div>` + r.picks.map((p, i) => `
-      <div class="pick"><b>${i + 1}. ${esc(p.cand.track.title)}</b> <span class="muted">— ${esc(p.cand.track.artist)}</span>
+      <div class="pick" ${dragAttrs(p.cand.track)}>${dragGrip(p.cand.track)}<b>${i + 1}. ${esc(p.cand.track.title)}</b> <span class="muted">— ${esc(p.cand.track.artist)}</span>
       <button class="practice-only" data-load="${esc(p.id)}" data-deck="${otherId(m)}" style="float:right">Load ${otherId(m)}</button>
       <button class="panel-only" data-next="${esc(p.id)}" style="float:right">Set next</button>
       <div style="margin-top:4px">${esc(p.why)}</div><div class="muted" style="margin-top:4px">🎛 ${esc(p.transition_tip)}</div></div>`).join('');
@@ -629,6 +648,9 @@ mixPage = initMix({
   nowTrack: () => currentTrack()?.track || null,
   nextTrack: () => state.library.find((t) => t.id === state.nextId) || null,
   toast, phraseBars,
+  onDecksChanged: () => { renderSuggestions(); renderLibrary(); renderPanel(); },
+  suggestion: () => state.library.find((t) => t.id === state.nextId) || lastSugg[0]?.track || null,
+  dragAttrs, dragGrip,
   onMini: () => { if (state.mode !== 'panel') setMode('panel'); setTab('mix'); },
 });
 function setTab(tab) {

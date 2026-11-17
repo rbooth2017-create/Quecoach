@@ -10,12 +10,13 @@ import { matchDeck } from './deckreader.js';
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, onMini }) {
+export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, onMini, onDecksChanged = () => {}, suggestion = () => null, dragAttrs = () => '', dragGrip = () => '' }) {
   const mix = {
     decks: { 1: null, 2: null },  // tracks on rekordbox deck 1 / 2
     live: 1,                      // the deck the crowd hears
     step: 0, done: new Set(), stepStart: Date.now(), trimAtStart: null,
     fromScreen: { 1: false, 2: false }, // card filled in by reading rekordbox's screen
+    decksAt: { 1: 0, 2: 0 },            // when each card last changed
     stepsCollapsed: (() => { try { return localStorage.getItem('cuecoach.stepsCollapsed') === '1'; } catch { return false; } })(),
     mini: false,                        // mini view: only the beatmatch card
     ctl: emptyController(), device: '', devices: [], profile: null,
@@ -47,10 +48,31 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, on
     const before = mix.screen[no];
     mix.screen[no] = { found: !!m.track, bpm: m.bpm, at: Date.now() };
     if (m.track && m.track.id !== mix.decks[no]?.id) {
-      mix.decks[no] = m.track; mix.fromScreen[no] = true;
+      mix.decks[no] = m.track; mix.fromScreen[no] = true; mix.decksAt[no] = Date.now();
+      onDecksChanged();
       if (no === N()) restart(false); // a new track on the next deck: start its steps again
       else render();
     } else if (!before || before.found !== mix.screen[no].found) render();
+  }
+
+  /** ↻ Refresh: read both decks now and set the playing deck from what's scrolling (even mid-mix). */
+  async function refreshDecks() {
+    if (mix.refreshing) return;
+    if (beat.cam.state !== 'live') {
+      toast('Turn on the beat view below so Cue Coach can see what\'s on rekordbox\'s decks.');
+      return;
+    }
+    mix.refreshing = true; render();
+    try {
+      await beat.refresh();
+      const mv = beat.cam.moving, solo = mv[1] && !mv[2] ? 1 : mv[2] && !mv[1] ? 2 : null;
+      if (solo && solo !== mix.live) { mix.live = solo; startStep(0); mix.done.clear(); advance(); }
+      onDecksChanged();
+      const desc = (no) => `Deck ${no}: ${mix.decks[no]?.title || 'nothing found'} (${mv[no] ? 'playing' : 'stopped'})`;
+      toast(`${desc(1)} · ${desc(2)}`);
+    } finally {
+      mix.refreshing = false; render();
+    }
   }
 
   /** Only one waveform scrolling for 2 s → that's the deck the crowd hears (not mid-mix). */
@@ -59,6 +81,7 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, on
     if (solo !== mix.soloSince.deck) mix.soloSince = { deck: solo, at: Date.now() };
     if (solo && solo !== mix.live && mix.step <= 1 && Date.now() - mix.soloSince.at > 2000) {
       mix.live = solo; startStep(0); mix.done.clear(); advance();
+      onDecksChanged();
       return true;
     }
     return false;
@@ -132,8 +155,9 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, on
     advance(); render();
   }
   function restart(swap) {
-    if (swap) { mix.live = N(); mix.decks[N()] = null; }
+    if (swap) { mix.live = N(); mix.decks[N()] = null; mix.decksAt[mix.live] = Date.now(); }
     mix.done.clear(); startStep(0); advance(); render();
+    if (swap) onDecksChanged();
   }
 
   // ---------- picking tracks ----------
@@ -154,16 +178,18 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, on
   $('#pickerList').addEventListener('click', (e) => {
     const b = e.target.closest('[data-pick]'); if (!b) return;
     mix.decks[pickFor] = getLibrary().find((t) => t.id === b.dataset.pick) || null;
-    mix.fromScreen[pickFor] = false;
+    mix.fromScreen[pickFor] = false; mix.decksAt[pickFor] = Date.now();
+    onDecksChanged();
     picker.close(); advance(); render();
   });
   $('#pickerClose').addEventListener('click', () => picker.close());
 
   root.addEventListener('click', (e) => {
     const t = e.target.closest('[data-choose]'); if (t) return openPicker(+t.dataset.choose);
-    const l = e.target.closest('[data-live]'); if (l) { mix.live = +l.dataset.live; restart(false); return; }
+    const l = e.target.closest('[data-live]'); if (l) { mix.live = +l.dataset.live; restart(false); onDecksChanged(); return; }
     const k = e.target.closest('[data-tick]'); if (k) return tick(+k.dataset.tick);
     if (e.target.closest('[data-restart]')) return restart(false);
+    if (e.target.closest('[data-refresh]')) return refreshDecks();
     if (e.target.closest('[data-steps-toggle]')) {
       mix.stepsCollapsed = !mix.stepsCollapsed;
       try { localStorage.setItem('cuecoach.stepsCollapsed', mix.stepsCollapsed ? '1' : '0'); } catch { /* ignore */ }
@@ -254,6 +280,17 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, on
     fitMini();
   }
 
+  /** "Suggested next" under the deck cards, draggable onto the next deck in rekordbox. */
+  function suggestBox(n) {
+    const sug = suggestion();
+    if (!sug || sug.id === mix.decks[n]?.id || sug.id === mix.decks[mix.live]?.id) return '';
+    const drag = dragAttrs(sug);
+    return `<div class="suggest" ${drag}>
+      <div class="sline">${dragGrip(sug)}💡 <span class="muted">Suggested next:</span> <b>${esc(sug.title)}</b> <span class="muted">${esc(sug.artist || '')}</span></div>
+      <div class="shint">${drag ? `Drag it onto <b>Deck ${n}</b> in rekordbox to load it.` : `Load it on Deck ${n} in rekordbox.`}</div>
+    </div>`;
+  }
+
   function render() {
     if (!root) return;
     // Fill empty decks from the Set tab: now playing → live deck, chosen next → next deck.
@@ -284,8 +321,9 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, on
 
     root.innerHTML = `
       <div class="panel card">
-        <div class="eyebrow"><span>Your decks</span><span class="seg small">${[1, 2].map((d) => `<button data-live="${d}" class="${mix.live === d ? 'sel' : ''}" title="Which deck is playing to the crowd?">Deck ${d} playing</button>`).join('')}</span></div>
+        <div class="eyebrow"><span>Your decks <button class="link refresh" data-refresh title="Read rekordbox's decks again and check which one is playing">${mix.refreshing ? '↻ Reading…' : '↻ Refresh'}</button></span><span class="seg small">${[1, 2].map((d) => `<button data-live="${d}" class="${mix.live === d ? 'sel' : ''}" title="Which deck is playing to the crowd?">Deck ${d} playing</button>`).join('')}</span></div>
         <div class="mdecks">${deckCard(1)}${deckCard(2)}</div>
+        ${suggestBox(n)}
         <div class="ctlline">${ctlLine}</div>
       </div>
       ${beatCard()}

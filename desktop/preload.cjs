@@ -15,4 +15,5 @@ contextBridge.exposeInMainWorld('cueDesktop', {
   findRekordbox: () => ipcRenderer.invoke('find-rekordbox'),
   openScreenSettings: () => ipcRenderer.invoke('open-screen-settings'),
   ocr: (pngBytes) => ipcRenderer.invoke('ocr', pngBytes),
+  startDrag: (filePath) => ipcRenderer.send('start-drag', String(filePath)),
 });

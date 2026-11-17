@@ -2,7 +2,7 @@
 // - serves the web app on 127.0.0.1:8642 (only index.html and js/)
 // - starts the rekordbox helper (helper/rekordbox_helper.py) and stops it on quit
 // - docks a 420 px window to the right edge of the screen, floating over rekordbox
-const { app, BrowserWindow, Menu, ipcMain, screen, session, shell, desktopCapturer, systemPreferences } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, screen, session, shell, desktopCapturer, systemPreferences, nativeImage } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -207,6 +207,18 @@ ipcMain.handle('ocr', async (e, bytes) => {
   return data.text;
 });
 app.on('will-quit', () => { ocrWorker?.then((w) => w.terminate()).catch(() => {}); });
+
+// ---------- Drag a track onto a rekordbox deck ----------
+// The page starts a real file drag (like dragging from Finder/Explorer); rekordbox loads the
+// file on whichever deck it's dropped on. Only audio files that exist are allowed.
+const AUDIO = /\.(mp3|m4a|aac|wav|aiff?|flac|ogg|alac|mp4)$/i;
+const dragIcon = nativeImage.createFromPath(path.join(__dirname, 'drag-icon.png'));
+ipcMain.on('start-drag', (e, filePath) => {
+  if (!fromUs(e) || typeof filePath !== 'string' || !AUDIO.test(filePath)) return;
+  const file = path.normalize(filePath);
+  if (!fs.existsSync(file)) return;
+  e.sender.startDrag({ file, icon: dragIcon });
+});
 
 ipcMain.handle('open-screen-settings', (e) => {
   if (fromUs(e) && IS_MAC) shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');

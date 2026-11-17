@@ -61,6 +61,14 @@ export function fileNameOf(location) {
   return p.split(/[\\/]/).pop();
 }
 
+/** rekordbox Location URL → local file path ("file://localhost/C:/x.mp3" → "C:/x.mp3"). */
+export function pathOf(location) {
+  if (!location || !/^file:/i.test(location)) return '';
+  let p = location.replace(/^file:\/\/(localhost)?/i, '');
+  try { p = decodeURIComponent(p); } catch { /* keep raw */ }
+  return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p; // Windows drive letter
+}
+
 /** Parse rekordbox "Export Collection in xml format" output. */
 export function parseRekordboxXML(text) {
   const start = text.indexOf('<COLLECTION');
@@ -91,6 +99,7 @@ export function parseRekordboxXML(text) {
       playCount: +a.PlayCount || 0,
       location: a.Location || '',
       fileName: fileNameOf(a.Location),
+      path: pathOf(a.Location),
       energy: energy ? +energy[1] : null,
       grid: gridFromTempos(tempos, bpm),
       cues,

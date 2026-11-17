@@ -157,5 +157,13 @@ export function createBeatCam(onUpdate, onDeckText = () => {}) {
     }
   }
 
-  return { start, stop, cam, openSettings: () => desktop?.openScreenSettings() };
+  /** Read both decks right now (waits for a read in progress). Resolves false if not watching. */
+  async function refresh() {
+    if (!cam.stream || !cam.layout) return false;
+    for (let i = 0; i < 40 && cam.reading; i++) await new Promise((r) => setTimeout(r, 100));
+    await readDecks(cam.layout);
+    return true;
+  }
+
+  return { start, stop, cam, refresh, openSettings: () => desktop?.openScreenSettings() };
 }

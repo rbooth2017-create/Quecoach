@@ -150,6 +150,7 @@ class Library:
             "energy": int(energy.group(1)) if energy else None,
             "fileName": path.name if path else "",
             "location": "",
+            "path": str(path) if path else "",  # lets the desktop app hand the file to rekordbox by drag
             "helper": True,
             # A rough grid until /track/<id> reads the real one from the analysis files.
             "grid": {"bpm": bpm, "firstDownbeat": 0.0, "approx": True} if bpm else None,

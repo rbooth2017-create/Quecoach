@@ -64,7 +64,7 @@ export function compatChecks(live, next, { liveTempo = null, nextTempo = null, t
 export const STEPS = [
   {
     id: 'load', title: 'Load the next track on Deck {N}',
-    how: 'Pick it in the Deck {N} card above (and load the same track in rekordbox: select it, press LOAD {N} on the controller).',
+    how: 'Drag the suggested track from Cue Coach onto Deck {N} in rekordbox — or select it in rekordbox and press LOAD {N} on the controller. With the beat view on, Cue Coach sees it arrive.',
     why: 'Deck {L} keeps playing to the crowd while you get Deck {N} ready.',
     auto: ({ hasNext }) => hasNext || undefined,
   },

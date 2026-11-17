@@ -38,6 +38,7 @@ test('parse rekordbox xml', () => {
   assert.equal(t.rating, 4);
   assert.equal(t.energy, 7);
   assert.equal(t.fileName, 'Song Co.mp3');
+  assert.equal(t.path, '/Users/me/Music/Song Co.mp3');
   // Battito 3 at 0.512s → downbeat 2 beats earlier, wrapped into first bar
   const beat = 60 / 124;
   assert.ok(Math.abs(t.grid.firstDownbeat - (0.512 - 2 * beat + 4 * beat)) < 1e-9);
@@ -97,4 +98,11 @@ test('samples and loops are not suggested; start points stay inside the track', 
   assert.deepEqual(suggestNext(cur, [cur, loop, song]).map((x) => x.track.id), ['c']);
   const pts = mixInPoints({ ...loop, grid: { bpm: 128, firstDownbeat: 0 }, cues: [] }, null);
   assert.deepEqual(pts.map((p) => p.bar), [1]);
+});
+
+test('file paths from rekordbox locations (Mac and Windows)', async () => {
+  const { pathOf } = await import('../js/library.js');
+  assert.equal(pathOf('file://localhost/Users/me/Music/A%20B.mp3'), '/Users/me/Music/A B.mp3');
+  assert.equal(pathOf('file://localhost/C:/Music/x.wav'), 'C:/Music/x.wav');
+  assert.equal(pathOf(''), '');
 });
