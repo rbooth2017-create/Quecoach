@@ -197,6 +197,20 @@ button.link { background: none; border: 0; color: var(--muted); padding: 0; font
 .bnote { font-size: 13px; margin: 6px 0; line-height: 1.4; }
 .bsteps { font-size: 13px; padding-left: 18px; margin: 6px 0; display: grid; gap: 4px; }
 .brow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+
+/* ---- collapsible steps + mini view ---- */
+button.link.fold { font-size: 11px; text-decoration: none; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; font-weight: 600; }
+.steps2 li.compact { align-items: center; }
+.steps2 .crow { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.steps2 .crow .sdone { margin-top: 0; flex: none; }
+.minidecks { font-size: 12px; color: var(--muted); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.mini header, body.mini #tabs, body.mini main > section:not(#mixView), body.mini #mixView > :not(.beatcard) { display: none !important; }
+body.mini main { padding: 6px; max-width: none; }
+body.mini .beatcard { border: 0; }
+body.mini .beatcard .eyebrow { -webkit-app-region: drag; cursor: move; }
+body.mini .beatcard button, body.mini .beatcard .eyebrow button { -webkit-app-region: no-drag; }
+body.mini .bmeter { height: 48px; }
+body.mini .advice div { padding: 4px 8px; font-size: 13px; }
 @media (max-width: 1050px) { .decks { grid-template-columns: 1fr; } .center { order: 3; } .lower { grid-template-columns: 1fr; } }
 </style>
 </head>

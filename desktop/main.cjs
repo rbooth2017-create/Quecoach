@@ -101,6 +101,7 @@ function workArea() {
 function boundsFor(m) {
   const wa = workArea();
   if (m === 'panel') return { x: wa.x + wa.width - PANEL_W, y: wa.y, width: PANEL_W, height: wa.height };
+  if (m === 'mini') return { x: wa.x + wa.width - PANEL_W, y: wa.y, width: PANEL_W, height: 300 }; // the page fits it to its content
   const width = Math.min(1440, wa.width), height = Math.min(940, wa.height);
   return { x: wa.x + Math.round((wa.width - width) / 2), y: wa.y + Math.round((wa.height - height) / 2), width, height };
 }
@@ -117,7 +118,7 @@ function setPinned(v) {
 }
 
 function setMode(m) {
-  mode = m === 'practice' ? 'practice' : 'panel';
+  mode = ['practice', 'mini'].includes(m) ? m : 'panel';
   if (win) win.setBounds(boundsFor(mode), true);
   buildMenu();
 }
@@ -125,7 +126,7 @@ function setMode(m) {
 function createWindow() {
   win = new BrowserWindow({
     ...boundsFor('panel'),
-    minWidth: 340, minHeight: 480,
+    minWidth: 340, minHeight: 160,
     title: 'Cue Coach',
     autoHideMenuBar: !IS_MAC, // Windows/Linux: menu shows with Alt
     backgroundColor: '#0d0f13',
@@ -153,6 +154,7 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Side Panel', type: 'radio', checked: mode === 'panel', accelerator: 'CmdOrCtrl+1', click: () => win?.webContents.send('set-mode', 'panel') },
         { label: 'Practice Decks', type: 'radio', checked: mode === 'practice', accelerator: 'CmdOrCtrl+2', click: () => win?.webContents.send('set-mode', 'practice') },
+        { label: 'Mini Beatmatch', type: 'radio', checked: mode === 'mini', accelerator: 'CmdOrCtrl+3', click: () => win?.webContents.send('set-mode', 'mini') },
         { label: 'Dock to Right Edge', accelerator: 'CmdOrCtrl+Shift+D', click: () => win?.setBounds(boundsFor(mode), true) },
         { type: 'separator' },
         { role: 'reload' }, { role: 'toggleDevTools' },
@@ -167,6 +169,12 @@ const fromUs = (e) => e.senderFrame?.url?.startsWith(ORIGIN);
 ipcMain.handle('pin', (e, v) => (fromUs(e) ? setPinned(v) : pinned));
 ipcMain.handle('get-pin', () => pinned);
 ipcMain.handle('mode', (e, m) => { if (fromUs(e)) setMode(m); return mode; });
+// mini view: the page asks for the height its content needs
+ipcMain.handle('fit-height', (e, h) => {
+  if (!fromUs(e) || mode !== 'mini' || !win) return;
+  const [w] = win.getContentSize();
+  win.setContentSize(w, Math.max(140, Math.min(700, Math.round(Number(h) || 0))), true);
+});
 ipcMain.handle('helper-status', () => helperStatus);
 
 // ---------- Beat view: capture only rekordbox's window ----------

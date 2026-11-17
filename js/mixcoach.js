@@ -10,12 +10,14 @@ import { matchDeck } from './deckreader.js';
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars }) {
+export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, onMini }) {
   const mix = {
     decks: { 1: null, 2: null },  // tracks on rekordbox deck 1 / 2
     live: 1,                      // the deck the crowd hears
     step: 0, done: new Set(), stepStart: Date.now(), trimAtStart: null,
     fromScreen: { 1: false, 2: false }, // card filled in by reading rekordbox's screen
+    stepsCollapsed: (() => { try { return localStorage.getItem('cuecoach.stepsCollapsed') === '1'; } catch { return false; } })(),
+    mini: false,                        // mini view: only the beatmatch card
     ctl: emptyController(), device: '', devices: [], profile: null,
     // Options (saved): which controller, rekordbox tempo range, slider direction
     opts: { controller: 'auto', tempoRange: 10, invertTempo: false, ...loadOpts() },
@@ -162,6 +164,13 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars }) 
     const l = e.target.closest('[data-live]'); if (l) { mix.live = +l.dataset.live; restart(false); return; }
     const k = e.target.closest('[data-tick]'); if (k) return tick(+k.dataset.tick);
     if (e.target.closest('[data-restart]')) return restart(false);
+    if (e.target.closest('[data-steps-toggle]')) {
+      mix.stepsCollapsed = !mix.stepsCollapsed;
+      try { localStorage.setItem('cuecoach.stepsCollapsed', mix.stepsCollapsed ? '1' : '0'); } catch { /* ignore */ }
+      return render();
+    }
+    if (e.target.closest('[data-mini]')) return setMini(true);
+    if (e.target.closest('[data-full]')) return setMini(false);
     if (e.target.closest('[data-options]')) return $('#settings').showModal();
     if (e.target.closest('[data-beat-on]')) return beatOn();
     if (e.target.closest('[data-beat-off]')) return beatOff();
@@ -210,7 +219,13 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars }) 
       body = `<p class="bnote">See which tracks are on your decks and whether the beats match, like a phase meter. Cue Coach watches rekordbox's window (only that window; nothing is saved or sent anywhere).</p>
         <div class="brow"><button class="primary" data-beat-on>Turn on beat view</button></div>${isMac && window.cueDesktop ? '<p class="optnote">Your Mac will ask once for Screen Recording permission.</p>' : ''}`;
     }
-    return `<div class="panel card" data-beatstate="${st}"><div class="eyebrow"><span>Beatmatch</span>${st === 'live' ? '<span class="tag-live">● watching rekordbox</span>' : ''}</div>${body}</div>`;
+    const deckLine = [1, 2].map((no) => `<span class="${no === mix.live ? 'tag-live' : 'tag-next'}">D${no}</span> ${st === 'live' ? (beat.cam.moving[no] ? '▶︎' : '⏸') : ''} ${esc(mix.decks[no]?.title || '—')}`).join(' &nbsp;·&nbsp; ');
+    const sizeBtn = mix.mini
+      ? '<button class="link" data-full title="Back to the full panel">⤢ Full view</button>'
+      : '<button class="link" data-mini title="Shrink to just the beatmatch meter">⤡ Mini view</button>';
+    return `<div class="panel card beatcard" data-beatstate="${st}">
+      <div class="eyebrow"><span>Beatmatch${st === 'live' && !mix.mini ? ' <span class="tag-live">● watching rekordbox</span>' : ''}</span>${sizeBtn}</div>
+      ${mix.mini ? `<div class="minidecks">${deckLine}</div>` : ''}${body}</div>`;
   }
 
   /** Update the meter in place (called ~15×/s), without rebuilding the page. */
@@ -236,6 +251,7 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars }) 
     const line = (ok, txt) => `<div class="${ok ? 'good' : 'warn'}">${ok ? '✓ ' : ''}${esc(txt)}</div>`;
     root.querySelector('#badvice').innerHTML = line(a.tempoOk, a.tempo) + line(a.phaseOk, a.beats)
       + (Math.abs(a.phase) < 0.15 ? line(a.barOk, a.bars) : '');
+    fitMini();
   }
 
   function render() {
@@ -275,10 +291,15 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars }) 
       ${beatCard()}
       ${checks.length ? `<div class="panel card"><div class="eyebrow"><span>Do they mix?</span></div>
         <ul class="checks">${checks.map((c) => `<li class="${c.ok === true ? 'yes' : c.ok === false ? 'no' : 'unk'}"><span class="box">${c.ok === true ? '✓' : c.ok === false ? '✕' : '?'}</span><span><b>${esc(c.label)}</b><br><span class="muted">${esc(c.detail)}</span></span></li>`).join('')}</ul></div>` : ''}
-      <div class="panel card">
-        <div class="eyebrow"><span>Mix Deck ${n} in · step ${Math.min(mix.step + 1, STEPS.length)} of ${STEPS.length}</span><button class="link" data-restart>Start over</button></div>
+      <div class="panel card stepscard ${mix.stepsCollapsed ? 'collapsed' : ''}">
+        <div class="eyebrow"><button class="link fold" data-steps-toggle title="${mix.stepsCollapsed ? 'Show all the steps' : 'Hide the steps'}">${mix.stepsCollapsed ? '▸' : '▾'} Mix Deck ${n} in · step ${Math.min(mix.step + 1, STEPS.length)} of ${STEPS.length}</button><button class="link" data-restart>Start over</button></div>
         <ol class="steps2">${STEPS.map((s, i) => {
           const state = i < mix.step ? 'done' : i === mix.step ? 'current' : 'todo';
+          if (mix.stepsCollapsed && state !== 'current') return '';
+          if (mix.stepsCollapsed) {
+            return `<li class="current compact"><button class="tick" data-tick="${i}" title="Mark as done">${i + 1}</button>
+              <div class="crow"><div class="stitle">${esc(fill(s.title))}</div><button class="primary sdone" data-tick="${i}">Done ✓</button></div></li>`;
+          }
           return `<li class="${state}">
             <button class="tick" data-tick="${i}" title="${state === 'done' ? 'Untick — go back to this step' : 'Mark as done'}">${state === 'done' ? '✓' : i + 1}</button>
             <div><div class="stitle">${esc(fill(s.title))}</div>
@@ -288,6 +309,29 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars }) 
         ${finished ? `<div class="callout">🎉 Mix complete! Deck ${n} is playing now. <button class="primary" data-nextmix>Start the next mix</button></div>` : ''}
       </div>`;
     drawBeat();
+    fitMini();
+  }
+
+  // ---------- Mini view ----------
+  function setMini(on) {
+    if (mix.mini === on) return;
+    mix.mini = on;
+    document.body.classList.toggle('mini', on);
+    if (on) onMini?.();               // make sure the Mix tab is showing
+    render();
+    if (window.cueDesktop) window.cueDesktop.setMode(on ? 'mini' : 'panel');
+    fitMini();
+  }
+  /** Desktop: size the mini window to its content. */
+  let lastFit = 0;
+  function fitMini() {
+    if (!mix.mini || !window.cueDesktop?.fitHeight) return;
+    requestAnimationFrame(() => {
+      const card = root.querySelector('.beatcard');
+      if (!card) return;
+      const h = Math.ceil(card.getBoundingClientRect().height + 16);
+      if (Math.abs(h - lastFit) > 4) { lastFit = h; window.cueDesktop.fitHeight(h); }
+    });
   }
 
   // ---------- Options: controller ----------
@@ -321,5 +365,5 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars }) 
   setInterval(() => { if (mix.ctl.connected) { const before = mix.step; advance(); if (mix.step !== before) render(); } }, 500);
   choose();
   try { if (window.cueDesktop && localStorage.getItem('cuecoach.beatview') === 'on') beat.start(); } catch { /* ignore */ }
-  return { render, state: mix, choose, beat };
+  return { render, state: mix, choose, beat, setMini };
 }

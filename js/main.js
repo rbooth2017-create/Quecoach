@@ -347,6 +347,7 @@ async function renderPanel() {
 }
 
 function setMode(mode, save = true) {
+  if (mode === 'practice' && mixPage?.state.mini) { mixPage.state.mini = false; document.body.classList.remove('mini'); }
   state.mode = mode;
   document.body.classList.toggle('sidepanel', mode === 'panel');
   $('#modeBtn').textContent = mode === 'panel' ? 'Switch to practice decks' : 'Switch to side panel';
@@ -628,6 +629,7 @@ mixPage = initMix({
   nowTrack: () => currentTrack()?.track || null,
   nextTrack: () => state.library.find((t) => t.id === state.nextId) || null,
   toast, phraseBars,
+  onMini: () => { if (state.mode !== 'panel') setMode('panel'); setTab('mix'); },
 });
 function setTab(tab) {
   document.body.dataset.tab = tab;
@@ -646,7 +648,11 @@ async function initDesktop() {
   showPin(await desktop.getPinned());
   desktop.onPinned(showPin);
   pin.addEventListener('click', async () => showPin(await desktop.setPinned(!pin.classList.contains('on'))));
-  desktop.onSetMode((m) => setMode(m));
+  desktop.onSetMode((m) => {
+    if (m === 'mini') return mixPage.setMini(true);
+    if (mixPage.state.mini) { mixPage.state.mini = false; document.body.classList.remove('mini'); }
+    setMode(m);
+  });
   // The desktop app starts the rekordbox helper itself; connect as soon as it's up.
   $('#conn').textContent = 'starting rekordbox…';
   for (let i = 0; i < 40; i++) {
