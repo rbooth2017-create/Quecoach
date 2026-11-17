@@ -2,6 +2,7 @@ import { parseRekordboxXML, demoLibrary, keyRelation, toCamelot } from './librar
 import { suggestNext, scoreCandidate, structureFromEnergy, structureFromPhrases, mixInPoints, planTransition, barAt, timeOfBar, barLen, beatLen, fmtTime, pitchNeeded } from './engine.js';
 import { ctx, Deck, setCrossfader, beatmatch, barEnergy, estimateGrid, synthDemoTrack } from './audio.js';
 import * as midi from './midi.js';
+import { initMix } from './mixcoach.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -264,7 +265,8 @@ function renderLibrary() {
   }).join('') || `<tr><td colspan="8" class="muted">${state.library.length ? 'No matches.' : 'Import your rekordbox collection (File → Export Collection in xml format) or load the demo library.'}</td></tr>`;
 }
 
-function refreshAll() { renderLibrary(); renderSuggestions(); renderPlan(); renderPanel(); }
+function refreshAll() { renderLibrary(); renderSuggestions(); renderPlan(); renderPanel(); mixPage?.render(); }
+let mixPage = null;
 
 // ---------- Side panel (sits next to rekordbox) ----------
 const PHRASE_COLOR = { Intro: '#5aa9ff', Up: '#b892ff', Down: '#46d68c', Chorus: '#ff6b78', Outro: '#5aa9ff', Bridge: '#9aa3b2' };
@@ -620,6 +622,21 @@ $('#popBtn').addEventListener('click', () => {
 });
 state.modeReady = true;
 
+// ---------- Mix page (opening page for beginners) + tabs ----------
+mixPage = initMix({
+  getLibrary: () => state.library,
+  nowTrack: () => currentTrack()?.track || null,
+  nextTrack: () => state.library.find((t) => t.id === state.nextId) || null,
+  toast, phraseBars,
+});
+function setTab(tab) {
+  document.body.dataset.tab = tab;
+  for (const b of $('#tabs').children) b.classList.toggle('sel', b.dataset.tab === tab);
+  store.set('cuecoach.tab', tab);
+}
+$('#tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab); });
+setTab(store.get('cuecoach.tab', 'mix'));
+
 // ---------- Desktop app (Electron) ----------
 async function initDesktop() {
   document.body.classList.add('desktop');
@@ -646,4 +663,4 @@ async function initDesktop() {
   $('#conn').textContent = '';
 }
 if (desktop) initDesktop();
-window.cueCoach = { state, decks }; // handy for debugging in the console
+window.cueCoach = { state, decks, get mix() { return mixPage; } }; // handy for debugging in the console

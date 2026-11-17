@@ -2,7 +2,7 @@
 // - serves the web app on 127.0.0.1:8642 (only index.html and js/)
 // - starts the rekordbox helper (helper/rekordbox_helper.py) and stops it on quit
 // - docks a 420 px window to the right edge of the screen, floating over rekordbox
-const { app, BrowserWindow, Menu, ipcMain, screen, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, screen, session, shell, desktopCapturer, systemPreferences } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -169,10 +169,47 @@ ipcMain.handle('get-pin', () => pinned);
 ipcMain.handle('mode', (e, m) => { if (fromUs(e)) setMode(m); return mode; });
 ipcMain.handle('helper-status', () => helperStatus);
 
+// ---------- Beat view: capture only rekordbox's window ----------
+ipcMain.handle('screen-access', () => (IS_MAC ? systemPreferences.getMediaAccessStatus('screen') : 'granted'));
+ipcMain.handle('find-rekordbox', async (e) => {
+  if (!fromUs(e)) return null;
+  const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false });
+  const rb = sources.find((s) => /^rekordbox\b/i.test(s.name.trim())) || sources.find((s) => /rekordbox/i.test(s.name) && !/cue coach/i.test(s.name));
+  return rb ? { id: rb.id, name: rb.name } : null;
+});
+// ---------- Deck reader: OCR of rekordbox's deck headers (offline, bundled English data) ----------
+let ocrWorker = null;
+function ocr() {
+  if (!ocrWorker) {
+    const { createWorker } = require('tesseract.js');
+    // packaged app: these files are unpacked next to app.asar (see build.asarUnpack)
+    const unpacked = (p) => p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+    ocrWorker = createWorker('eng', 1, {
+      langPath: unpacked(path.join(ROOT, 'node_modules', '@tesseract.js-data', 'eng', '4.0.0_best_int')),
+      gzip: true,
+      cachePath: path.join(app.getPath('userData'), 'ocr'),
+    }).catch((err) => { ocrWorker = null; throw err; });
+  }
+  return ocrWorker;
+}
+ipcMain.handle('ocr', async (e, bytes) => {
+  if (!fromUs(e) || !(bytes instanceof Uint8Array) || bytes.length > 20e6) return null;
+  const worker = await ocr();
+  const { data } = await worker.recognize(Buffer.from(bytes));
+  return data.text;
+});
+app.on('will-quit', () => { ocrWorker?.then((w) => w.terminate()).catch(() => {}); });
+
+ipcMain.handle('open-screen-settings', (e) => {
+  if (fromUs(e) && IS_MAC) shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+});
+
 app.whenReady().then(async () => {
-  // Web MIDI for the controller; nothing else.
-  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'midi'));
-  session.defaultSession.setPermissionCheckHandler((_wc, perm) => perm === 'midi');
+  // Web MIDI for the controller, and video-only capture (the rekordbox window) for the beat view.
+  const allowed = (perm, url, media) => perm === 'midi'
+    || ((perm === 'display-capture' || perm === 'media') && String(url).startsWith(ORIGIN) && (media || ['video']).every((t) => t === 'video'));
+  session.defaultSession.setPermissionRequestHandler((wc, perm, cb, details) => { if (process.env.CUECOACH_DEBUG) console.log('perm request', perm, JSON.stringify(details)); cb(allowed(perm, details.requestingUrl || wc.getURL(), details.mediaTypes)); });
+  session.defaultSession.setPermissionCheckHandler((wc, perm, origin, details) => { if (process.env.CUECOACH_DEBUG) console.log('perm check', perm, origin, JSON.stringify(details)); return allowed(perm, origin || wc?.getURL(), null); });
   try { await startServer(); } catch (err) { console.error('Cannot serve Cue Coach:', err.message); app.quit(); return; }
   startHelper();
   buildMenu();

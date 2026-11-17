@@ -9,4 +9,9 @@ contextBridge.exposeInMainWorld('cueDesktop', {
   helperStatus: () => ipcRenderer.invoke('helper-status'),
   onPinned: (cb) => ipcRenderer.on('pinned', (_e, v) => cb(!!v)),
   onSetMode: (cb) => ipcRenderer.on('set-mode', (_e, m) => cb(m)),
+  // beat view
+  screenAccess: () => ipcRenderer.invoke('screen-access'),
+  findRekordbox: () => ipcRenderer.invoke('find-rekordbox'),
+  openScreenSettings: () => ipcRenderer.invoke('open-screen-settings'),
+  ocr: (pngBytes) => ipcRenderer.invoke('ocr', pngBytes),
 });

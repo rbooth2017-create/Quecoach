@@ -9,23 +9,36 @@ let map = {};
 try { map = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { map = {}; }
 let learning = null, handler = () => {}, monitor = () => {};
 export let inputs = [];
+const rawListeners = [], deviceListeners = [];
+/** Every incoming message: cb(bytes, deviceName). */
+export function onRaw(cb) { rawListeners.push(cb); }
+/** Called with the list of input names whenever devices change. */
+export function onDevices(cb) { deviceListeners.push(cb); cb(inputs.map((i) => i.name)); }
+let accessPromise = null;
 
 const sig = (d) => `${(d[0] & 0xf0) === 0x80 ? 0x90 : d[0] & 0xf0}:${d[0] & 0x0f}:${d[1]}`;
 
 export async function initMIDI(onAction, onMonitor) {
-  handler = onAction; monitor = onMonitor || monitor;
+  if (onAction) handler = onAction;
+  if (onMonitor) monitor = onMonitor;
   if (!navigator.requestMIDIAccess) throw new Error('This browser has no Web MIDI — use Chrome or Edge.');
-  const access = await navigator.requestMIDIAccess();
-  const bind = () => {
-    inputs = [...access.inputs.values()];
-    for (const inp of inputs) inp.onmidimessage = (e) => onMessage(e.data, inp.name);
-  };
-  access.onstatechange = bind; bind();
+  accessPromise ??= navigator.requestMIDIAccess().then((access) => {
+    const bind = () => {
+      inputs = [...access.inputs.values()].filter((i) => i.state !== 'disconnected');
+      for (const inp of inputs) inp.onmidimessage = (e) => onMessage(e.data, inp.name);
+      for (const l of deviceListeners) l(inputs.map((i) => i.name));
+    };
+    access.onstatechange = bind; bind();
+    return access;
+  });
+  accessPromise.catch(() => { accessPromise = null; });
+  await accessPromise;
   return inputs.map((i) => i.name);
 }
 
 function onMessage(d, device) {
   if (d.length < 3) return;
+  for (const l of rawListeners) l(d, device);
   const type = d[0] & 0xf0;
   if (type !== 0x90 && type !== 0x80 && type !== 0xb0) return;
   monitor(`${device}: ${type === 0xb0 ? 'CC' : 'Note'} ch${(d[0] & 15) + 1} #${d[1]} = ${d[2]}`);
