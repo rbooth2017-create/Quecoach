@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cue Coach</title>
+<style>
+:root {
+  --bg: #0d0f13; --panel: #161a21; --panel-2: #1d222b; --line: #2a303b;
+  --text: #e6e9ef; --muted: #8b93a3;
+  --a: #3fb6ff; --b: #ff8a3d; --ok: #3ddc84; --warn: #ffcc4d; --bad: #ff5d6c; --phrase: #ff5d6c;
+  --radius: 10px;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; }
+button, select, input { font: inherit; color: inherit; }
+button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.primary { background: #2a3a52; border-color: #3f5a80; }
+button.on { background: var(--bad); border-color: var(--bad); color: #000; }
+button:disabled { opacity: .45; cursor: default; }
+header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 17px; margin: 0 10px 0 0; letter-spacing: .02em; }
+header .now { margin-left: auto; color: var(--muted); font-size: 13px; }
+header .now b { color: var(--text); }
+main { padding: 14px 16px 40px; display: grid; gap: 14px; max-width: 1500px; margin: 0 auto; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; min-width: 0; }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+.decks { display: grid; grid-template-columns: 1fr 260px 1fr; gap: 14px; }
+.deck { border-top: 3px solid var(--deck); }
+.deck[data-deck="A"] { --deck: var(--a); } .deck[data-deck="B"] { --deck: var(--b); }
+.deck .title { font-weight: 650; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.deck .artist { color: var(--muted); font-size: 13px; min-height: 18px; }
+.stats { display: flex; gap: 14px; margin: 8px 0; font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+.stats div { display: grid; } .stats small { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.stats span { font-size: 18px; font-weight: 600; }
+canvas { display: block; width: 100%; border-radius: 6px; background: #0a0c10; }
+canvas.wave { height: 110px; } canvas.overview { height: 44px; margin-top: 6px; cursor: pointer; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.controls label { display: grid; gap: 2px; font-size: 11px; color: var(--muted); }
+.controls input[type=range] { width: 120px; }
+.drop { border: 1px dashed var(--line); border-radius: 7px; padding: 8px; text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+.deck.dragover .drop { border-color: var(--deck); color: var(--text); }
+.beats { display: flex; gap: 4px; } .beats i { width: 16px; height: 8px; border-radius: 2px; background: var(--line); }
+.beats i.lit { background: var(--deck); } .beats i.one.lit { background: #fff; }
+.center { display: grid; gap: 10px; align-content: start; }
+.meter { height: 46px; }
+.advice { font-size: 13px; display: grid; gap: 6px; }
+.advice div { padding: 6px 8px; border-radius: 6px; background: var(--panel-2); }
+.advice .good { color: var(--ok); } .advice .warn { color: var(--warn); }
+.xf { width: 100%; }
+.lower { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.steps { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.steps li { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 7px 8px; border-radius: 6px; background: var(--panel-2); }
+.steps li.active { outline: 1px solid var(--warn); }
+.steps li.done { opacity: .5; }
+.steps .t { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+.countdown { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 4px 0; }
+.points { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.points button { font-size: 12px; text-align: left; } .points button.sel { border-color: var(--b); }
+.points small { display: block; color: var(--muted); }
+.sugg { display: grid; gap: 6px; }
+.sugg .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px; background: var(--panel-2); border-radius: 7px; }
+.sugg .meta { color: var(--muted); font-size: 12px; }
+.score { font-variant-numeric: tabular-nums; font-weight: 700; }
+.pill { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 11px; background: var(--line); }
+.pill.k-good { background: #1f4d33; color: var(--ok); } .pill.k-mid { background: #4d401f; color: var(--warn); } .pill.k-bad { background: #4d1f25; color: var(--bad); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; } .seg button.sel { background: #2a3a52; }
+.ai { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.ai .pick { padding: 8px; border-radius: 7px; background: #1a2232; margin-top: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; position: sticky; top: 0; background: var(--panel); }
+td.t { white-space: normal; min-width: 180px; } tr.playing td { color: var(--ok); } tr.played td { opacity: .45; }
+.tablewrap { max-height: 420px; overflow: auto; }
+.libhead { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.libhead input { flex: 1; min-width: 160px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; }
+.muted { color: var(--muted); }
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); max-width: 520px; width: calc(100% - 32px); }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+dialog label { display: grid; gap: 4px; margin: 10px 0; }
+dialog input[type=password], dialog select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
+.midirow { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 4px 0; }
+#midiLog { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); min-height: 16px; }
+#toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10; }
+#toast.show { opacity: 1; }
+
+/* ---- header menu ---- */
+header .conn { font-size: 12px; color: var(--muted); }
+header .conn.on { color: var(--ok); }
+.menu { position: relative; }
+.menu summary { list-style: none; cursor: pointer; padding: 5px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }
+.menu summary::-webkit-details-marker { display: none; }
+.menulist { position: absolute; right: 0; top: calc(100% + 6px); display: grid; gap: 4px; min-width: 230px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 30px rgba(0,0,0,.5); z-index: 20; }
+.menulist button { text-align: left; border-color: transparent; background: transparent; }
+.menulist button:hover { background: var(--panel-2); }
+.menulist hr { border: 0; border-top: 1px solid var(--line); margin: 2px 0; width: 100%; }
+header .menu { margin-left: auto; }
+body:not(.sidepanel) header .now { margin-left: 0; order: 10; flex-basis: 100%; }
+
+/* ---- desktop app ---- */
+body:not(.desktop) .desktop-only, body.desktop .web-only { display: none !important; }
+#pinBtn.on { background: #2a3a52; border-color: #3f5a80; }
+body.desktop header { -webkit-app-region: drag; }
+body.desktop header button, body.desktop header details, body.desktop header .menulist { -webkit-app-region: no-drag; }
+
+/* ---- modes ---- */
+body.sidepanel .practice-only, body:not(.sidepanel) .panel-only { display: none !important; }
+body.sidepanel main { max-width: 560px; padding: 10px 10px 30px; gap: 10px; }
+body.sidepanel header { padding: 8px 10px; gap: 8px; }
+body.sidepanel header h1 { font-size: 15px; margin-right: 0; }
+body.sidepanel .lower { grid-template-columns: 1fr; gap: 10px; }
+body.sidepanel .panel { padding: 10px; }
+body.sidepanel .c-genre, body.sidepanel .c-energy, body.sidepanel .c-rating { display: none; }
+body.sidepanel td.t { min-width: 0; white-space: normal; }
+body.sidepanel th, body.sidepanel td { padding: 6px 5px; }
+body.sidepanel td .pill { white-space: normal; }
+body.sidepanel .tablewrap { max-height: 300px; }
+
+/* ---- side panel cards ---- */
+.pview { display: grid; gap: 10px; }
+.card .eyebrow { display: flex; justify-content: space-between; align-items: center; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.card .big { font-size: 19px; font-weight: 700; margin-top: 6px; line-height: 1.2; }
+.card .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { padding: 3px 9px; border-radius: 99px; background: var(--panel-2); border: 1px solid var(--line); font-size: 12px; font-variant-numeric: tabular-nums; }
+.chip b { font-weight: 700; }
+.strip { position: relative; display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin: 12px 0 4px; background: var(--panel-2); }
+.strip > div { height: 100%; font-size: 10px; line-height: 26px; padding-left: 4px; overflow: hidden; white-space: nowrap; color: rgba(0,0,0,.75); font-weight: 650; border-right: 1px solid rgba(0,0,0,.35); }
+.strip .mark { position: absolute; top: -3px; bottom: -3px; width: 3px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6); border: 0; padding: 0; }
+.strip-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.callout { margin-top: 8px; padding: 8px 10px; border-radius: 7px; background: #1a2232; font-size: 13px; }
+.callout b { color: var(--warn); }
+.card.next { border-top: 3px solid var(--b); } .card.now { border-top: 3px solid var(--a); }
+.pv-steps { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4px; font-size: 13px; }
+.pv-steps li { display: grid; grid-template-columns: 78px 1fr; gap: 8px; padding: 6px 8px; background: var(--panel-2); border-radius: 6px; }
+.pv-steps .t { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; line-height: 1.35; }
+.empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+.rowbtns { display: flex; gap: 4px; justify-content: flex-end; }
+.sugg .row { cursor: default; } .sugg .row.sel { outline: 1px solid var(--b); }
+@media (max-width: 1050px) { .decks { grid-template-columns: 1fr; } .center { order: 3; } .lower { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎧 Cue Coach</h1>
+  <span class="conn" id="conn"></span>
+  <button id="pinBtn" class="desktop-only" title="Keep Cue Coach on top of rekordbox (⇧⌘T)">📌</button>
+  <button id="rbBtn" class="primary" title="Needs the Cue Coach helper running on this Mac">Connect rekordbox</button>
+  <details class="menu" id="menu">
+    <summary title="Menu">☰</summary>
+    <div class="menulist">
+      <button id="modeBtn">Switch to practice decks</button>
+      <button id="popBtn" class="web-only">Open as side panel window</button>
+      <hr>
+      <button id="importBtn">Import rekordbox XML…</button><input id="xmlFile" type="file" accept=".xml" hidden>
+      <button id="demoBtn">Load demo library</button>
+      <button id="folderBtn" class="practice-only">Link music folder…</button>
+      <button id="midiBtn" class="practice-only">Controller (MIDI)…</button>
+      <hr>
+      <button id="settingsBtn">AI coach &amp; settings…</button>
+    </div>
+  </details>
+  <div class="now practice-only" id="nowPlaying">No track playing</div>
+</header>
+
+<main>
+  <section class="pview panel-only" id="panelView">
+    <div class="panel card" id="pvNow"></div>
+    <div class="panel card" id="pvNext"></div>
+  </section>
+  <section class="decks practice-only">
+    <div class="panel deck" data-deck="A" id="deckA"></div>
+    <div class="panel center">
+      <h2>Beatmatch</h2>
+      <canvas class="meter" id="meter" width="520" height="92"></canvas>
+      <div class="advice" id="advice"><div class="muted">Load a track on both decks and press play.</div></div>
+      <label class="muted" style="font-size:12px">Crossfader<input class="xf" id="xfader" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+    </div>
+    <div class="panel deck" data-deck="B" id="deckB"></div>
+  </section>
+
+  <section class="lower">
+    <div class="panel practice-only">
+      <h2>Transition plan</h2>
+      <div id="plan" class="muted">Load the playing track on one deck and the next track on the other.</div>
+    </div>
+    <div class="panel">
+      <h2><span class="practice-only">Next track</span><span class="panel-only">Suggestions</span></h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="muted">Energy</span>
+        <div class="seg" id="direction"><button data-v="down">↓ Calm</button><button data-v="hold" class="sel">→ Hold</button><button data-v="up">↑ Lift</button></div>
+        <button id="aiBtn" class="primary" style="margin-left:auto">Ask AI coach</button>
+      </div>
+      <div class="sugg" id="sugg" style="margin-top:10px"><div class="muted">Pick or play a track to get suggestions.</div></div>
+      <div class="ai" id="aiOut" hidden></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="libhead">
+      <h2 style="margin:0">Library</h2><span class="muted" id="libCount"></span>
+      <input id="search" placeholder="Search title, artist, genre, key (e.g. 8A)…">
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Title</th><th class="c-genre">Genre</th><th>BPM</th><th>Key</th><th class="c-energy">Energy</th><th class="c-rating">★</th><th>Match</th><th></th></tr></thead>
+      <tbody id="libBody"></tbody>
+    </table></div>
+  </section>
+</main>
+
+<dialog id="settings">
+  <h2 style="margin-top:0">AI coach &amp; settings</h2>
+  <p class="muted">The AI coach uses your own Anthropic API key. It is sent only to the Anthropic API from this browser, together with track names, BPM, key and genre — never your audio.</p>
+  <label>Anthropic API key<input id="apiKey" type="password" placeholder="sk-ant-…" autocomplete="off"></label>
+  <label style="display:flex;gap:8px;align-items:center"><input id="rememberKey" type="checkbox"> Remember the key on this device</label>
+  <label>Your level<select id="level"><option>beginner</option><option>intermediate</option><option>advanced</option></select></label>
+  <label>Phrase length<select id="phrase"><option value="8">8 bars</option><option value="16" selected>16 bars</option><option value="32">32 bars</option></select></label>
+  <div style="display:flex;justify-content:flex-end;gap:8px"><button id="settingsClose" class="primary">Done</button></div>
+</dialog>
+
+<dialog id="midi">
+  <h2 style="margin-top:0">Controller (MIDI)</h2>
+  <p class="muted">Cue Coach can listen to your controller at the same time as rekordbox. Click <b>Learn</b>, then move that control.</p>
+  <div id="midiDevices" class="muted"></div>
+  <div id="midiRows"></div>
+  <div id="midiLog"></div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button id="midiClose" class="primary">Done</button></div>
+</dialog>
+
+<div id="toast"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

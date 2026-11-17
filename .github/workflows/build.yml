@@ -1,0 +1,61 @@
+# Builds Cue Coach for Mac (Apple Silicon + Intel), Windows and Linux.
+# Each build runs on its own OS because the rekordbox helper is compiled per platform.
+# Run it from the Actions tab, or push a tag like v0.1.0.
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, name: mac-arm64, target: --mac --arm64 }
+          - { os: macos-15-intel, name: mac-x64, target: --mac --x64 }
+          - { os: windows-latest, name: windows-x64, target: --win --x64 }
+          - { os: ubuntu-latest, name: linux-x64, target: --linux --x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+
+      # rekordbox only exists on Mac and Windows, so Linux ships without the helper.
+      - uses: actions/setup-python@v5
+        if: runner.os != 'Linux'
+        with:
+          python-version: '3.12'
+
+      - name: Build rekordbox helper
+        if: runner.os != 'Linux'
+        run: |
+          python -m pip install -r helper/requirements.txt pyinstaller==6.22.3
+          python -m unittest discover -s helper -p "test_*.py"
+          python helper/build_helper.py
+
+      - name: Build installer
+        shell: bash
+        run: mkdir -p dist-helper/cuecoach-helper && npx electron-builder ${{ matrix.target }} --publish never
+        env:
+          # No signing certificates yet: unsigned builds.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cue-coach-${{ matrix.name }}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
