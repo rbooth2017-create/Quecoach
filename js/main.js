@@ -527,7 +527,10 @@ async function connectHelper() {
     await pollNowPlaying(); pollTimer = setInterval(pollNowPlaying, 3000);
   } catch (err) {
     console.error(err);
-    toast('Could not reach the helper. Start it with: python3 helper/rekordbox_helper.py');
+    if (desktop) {
+      const st = await desktop.helperStatus();
+      toast(`rekordbox isn't connected: ${(st.state === 'running' ? 'the helper is running but not answering' : st.message || st.state).replace(/[.?!\s]+$/, '')}. Open ☰ › Options › Connection check.`);
+    } else toast('Could not reach the rekordbox helper. Start it with: npm run helper');
   }
 }
 async function pollNowPlaying() {
@@ -572,7 +575,16 @@ $('#phrase').addEventListener('change', () => { for (const id of ['A', 'B']) { c
 state.apiKey = store.get('cuecoach.apikey', '');
 $('#apiKey').value = state.apiKey; $('#rememberKey').checked = !!state.apiKey;
 $('#level').value = store.get('cuecoach.level', 'beginner');
-$('#settingsBtn').addEventListener('click', () => $('#settings').showModal());
+$('#settingsBtn').addEventListener('click', () => { $('#settings').showModal(); runConnectionCheck(); });
+$('#diagRun')?.addEventListener('click', runConnectionCheck);
+$('#diagLog')?.addEventListener('click', () => desktop?.showHelperLog());
+$('#diagRetry')?.addEventListener('click', async () => {
+  $('#diag').innerHTML = '<p class="optnote">Restarting the rekordbox helper…</p>';
+  if (state.helper) disconnectHelper();
+  await desktop.restartHelper();
+  watchHelper().then(runConnectionCheck);
+  setTimeout(runConnectionCheck, 1500);
+});
 $('#settingsClose').addEventListener('click', () => {
   state.apiKey = $('#apiKey').value.trim();
   if ($('#rememberKey').checked && state.apiKey) store.set('cuecoach.apikey', state.apiKey); else store.del('cuecoach.apikey');
@@ -676,19 +688,48 @@ async function initDesktop() {
     setMode(m);
   });
   // The desktop app starts the rekordbox helper itself; connect as soon as it's up.
-  $('#conn').textContent = 'starting rekordbox…';
-  for (let i = 0; i < 40; i++) {
+  $('#conn').addEventListener('click', () => { if (!state.helper) openConnectionCheck(); });
+  watchHelper();
+}
+
+/**
+ * Wait for the rekordbox helper and connect. The first start of the packaged helper can be slow
+ * (Windows scans new programs), so keep checking instead of giving up.
+ */
+async function watchHelper() {
+  const conn = $('#conn');
+  conn.textContent = 'starting rekordbox…'; conn.title = '';
+  for (let i = 0; ; i++) {
     const st = await desktop.helperStatus();
     if (st.state === 'running') { if (!state.helper) await connectHelper(); return; }
-    if (st.state === 'unavailable') { $('#conn').textContent = ''; $('#rbBtn').hidden = true; toast(st.message); return; }
+    if (st.state === 'unavailable') { conn.textContent = ''; $('#rbBtn').hidden = true; toast(st.message); return; }
     if (st.state === 'failed' || st.state === 'stopped') {
-      $('#conn').textContent = 'rekordbox not connected'; $('#conn').title = st.message;
-      toast(`rekordbox helper: ${st.message || 'stopped'}`);
+      conn.textContent = 'rekordbox not connected ⓘ'; conn.title = `${st.message} (click for the connection check)`;
+      toast(`rekordbox isn't connected: ${(st.message || 'the helper stopped').replace(/[.?!\s]+$/, '')}. Open ☰ › Options › Connection check.`);
       return;
     }
-    await new Promise((r) => setTimeout(r, 750));
+    if (i === 40) conn.textContent = 'still starting rekordbox…';
+    await new Promise((r) => setTimeout(r, i < 40 ? 750 : 3000));
   }
-  $('#conn').textContent = '';
+}
+
+// ---------- Connection check (Options, desktop app) ----------
+function openConnectionCheck() { $('#settings').showModal(); runConnectionCheck(); $('#diagSection')?.scrollIntoView(); }
+async function runConnectionCheck() {
+  const box = $('#diag'); if (!box || !desktop?.diagnostics) return;
+  box.innerHTML = '<p class="optnote">Checking…</p>';
+  const d = await desktop.diagnostics();
+  const os = { darwin: 'Mac', win32: 'Windows', linux: 'Linux' }[d.platform] || d.platform;
+  const row = (ok, label, detail) => `<li class="${ok === true ? 'yes' : ok === false ? 'no' : 'unk'}"><span class="box">${ok === true ? '✓' : ok === false ? '✕' : '–'}</span><span><b>${esc(label)}</b><br><span class="muted">${esc(detail)}</span></span></li>`;
+  const h = d.helper;
+  box.innerHTML = `<ul class="checks">
+    ${row(null, 'This computer', `${os} (${d.arch}) · Cue Coach ${d.app}`)}
+    ${row(d.helperFound, 'rekordbox helper installed', d.helperFound ? 'Found' : `Missing: ${d.helperProgram || 'not included in this build'}`)}
+    ${row(h.state === 'running' && d.helperAnswers, 'rekordbox helper running', h.state === 'running' ? (d.helperAnswers ? 'Running and answering' : 'Started, but not answering') : `${h.state}${h.message ? `: ${h.message}` : ''}`)}
+    ${row(state.helper ? true : false, 'Library connected', state.helper ? `${state.library.length} tracks from rekordbox` : 'Not connected yet')}
+    ${row(d.rekordboxWindow ? true : false, 'rekordbox window', d.rekordboxWindow ? `Found: "${d.rekordboxWindow}"` : 'Not found — is rekordbox open (and not minimised)?')}
+    ${d.platform === 'darwin' ? row(d.screenAccess === 'granted', 'Screen Recording permission', d.screenAccess) : ''}
+  </ul><p class="optnote">Helper log: ${esc(d.log)}</p>`;
 }
 if (desktop) initDesktop();
 window.cueCoach = { state, decks, get mix() { return mixPage; } }; // handy for debugging in the console

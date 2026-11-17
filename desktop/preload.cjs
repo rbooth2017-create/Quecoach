@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('cueDesktop', {
   setMode: (m) => ipcRenderer.invoke('mode', ['practice', 'mini'].includes(m) ? m : 'panel'),
   fitHeight: (px) => ipcRenderer.invoke('fit-height', Number(px)),
   helperStatus: () => ipcRenderer.invoke('helper-status'),
+  restartHelper: () => ipcRenderer.invoke('restart-helper'),
+  showHelperLog: () => ipcRenderer.invoke('show-helper-log'),
+  diagnostics: () => ipcRenderer.invoke('diagnostics'),
   onPinned: (cb) => ipcRenderer.on('pinned', (_e, v) => cb(!!v)),
   onSetMode: (cb) => ipcRenderer.on('set-mode', (_e, m) => cb(m)),
   // beat view

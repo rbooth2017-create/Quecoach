@@ -77,11 +77,18 @@ async function startHelper() {
     return;
   }
   let errText = '';
-  helperProc = spawn(hc.cmd, [...hc.args, ...extra], { cwd: hc.cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1' } });
-  helperProc.stdout.on('data', (d) => { if (/Listening/.test(String(d))) helperStatus = { state: 'running', message: String(d).trim() }; });
-  helperProc.stderr.on('data', (d) => { errText = (errText + d).slice(-2000); });
-  helperProc.on('error', (err) => { helperStatus = { state: 'failed', message: `Could not start Python: ${err.message}` }; });
-  helperProc.on('exit', (code) => {
+  helperStatus = { state: 'starting', message: '' };
+  // Everything the helper prints goes to helper.log in the app's settings folder (for support).
+  const log = fs.createWriteStream(helperLogPath(), { flags: 'w' });
+  log.write(`Cue Coach ${app.getVersion()} · ${process.platform} ${process.arch} · ${new Date().toISOString()}\n${hc.cmd}\n\n`);
+  const proc = spawn(hc.cmd, [...hc.args, ...extra], { cwd: hc.cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1' } });
+  helperProc = proc;
+  proc.stdout.on('data', (d) => { log.write(d); if (/Listening/.test(String(d))) helperStatus = { state: 'running', message: String(d).trim() }; });
+  proc.stderr.on('data', (d) => { log.write(d); errText = (errText + d).slice(-2000); });
+  proc.on('error', (err) => { log.write(`\n${err.stack || err}\n`); helperStatus = { state: 'failed', message: `Couldn't start the rekordbox helper: ${err.message}` }; });
+  proc.on('exit', (code) => {
+    log.end(`\n[helper exited with code ${code}]\n`);
+    if (helperProc !== proc) return; // replaced by a restart
     helperProc = null;
     if (helperStatus.state !== 'running' || code) {
       const lines = errText.trim().split('\n').filter((l) => !/^\s*(Traceback|File |\^)/.test(l));
@@ -89,6 +96,8 @@ async function startHelper() {
     } else helperStatus = { state: 'stopped', message: '' };
   });
 }
+
+const helperLogPath = () => path.join(app.getPath('userData'), 'helper.log');
 
 function stopHelper() {
   if (helperProc) { helperProc.kill(); helperProc = null; } // SIGTERM; TerminateProcess on Windows
@@ -176,6 +185,32 @@ ipcMain.handle('fit-height', (e, h) => {
   win.setContentSize(w, Math.max(140, Math.min(700, Math.round(Number(h) || 0))), true);
 });
 ipcMain.handle('helper-status', () => helperStatus);
+ipcMain.handle('restart-helper', async (e) => {
+  if (!fromUs(e)) return helperStatus;
+  stopHelper();
+  await new Promise((r) => setTimeout(r, 500)); // let the old one release its port
+  await startHelper();
+  return helperStatus;
+});
+ipcMain.handle('show-helper-log', (e) => { if (fromUs(e) && fs.existsSync(helperLogPath())) shell.showItemInFolder(helperLogPath()); });
+// Connection check (Options): everything needed to see why rekordbox isn't connecting.
+ipcMain.handle('diagnostics', async (e) => {
+  if (!fromUs(e)) return null;
+  let window = null;
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false });
+    const rb = sources.find((s) => /rekordbox/i.test(s.name) && !/cue coach/i.test(s.name));
+    window = rb ? rb.name : null;
+  } catch (err) { window = `error: ${err.message}`; }
+  const hc = helperCommand();
+  return {
+    app: app.getVersion(), platform: process.platform, arch: process.arch,
+    helper: helperStatus, helperProgram: hc ? hc.cmd : null, helperFound: !!hc && (hc.cmd.includes(path.sep) ? fs.existsSync(hc.cmd) : true),
+    helperAnswers: await ping(`${HELPER}/status`),
+    screenAccess: IS_MAC ? systemPreferences.getMediaAccessStatus('screen') : 'not needed',
+    rekordboxWindow: window, log: helperLogPath(),
+  };
+});
 
 // ---------- Beat view: capture only rekordbox's window ----------
 ipcMain.handle('screen-access', () => (IS_MAC ? systemPreferences.getMediaAccessStatus('screen') : 'granted'));

@@ -43,6 +43,7 @@ jobs:
           python -m pip install -r helper/requirements.txt pyinstaller==6.22.3
           python -m unittest discover -s helper -p "test_*.py"
           python helper/build_helper.py
+          python helper/smoke_helper.py  # the built program opens an encrypted rekordbox-style library
 
       - name: Build installer
         shell: bash

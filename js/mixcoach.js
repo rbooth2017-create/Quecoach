@@ -233,10 +233,13 @@ export function initMix({ getLibrary, nowTrack, nextTrack, toast, phraseBars, on
       body = `<canvas class="bmeter" id="bmeter" width="760" height="120"></canvas>
         <div class="blights"><span>Deck 1</span><span class="bl" id="bl1">${'<i></i>'.repeat(4)}</span><span>Deck 2</span><span class="bl" id="bl2">${'<i></i>'.repeat(4)}</span></div>
         <div class="advice" id="badvice"></div>`;
-    } else if (st === 'need-permission') {
-      body = `<p class="bnote">${isMac ? 'Your Mac needs to let Cue Coach see rekordbox\'s window.' : 'Cue Coach needs permission to see rekordbox\'s window.'}</p>
+    } else if (st === 'need-permission' && isMac) {
+      body = `<p class="bnote">Your Mac needs to let Cue Coach see rekordbox's window.</p>
         <ol class="bsteps"><li>Open <b>System Settings → Privacy &amp; Security → Screen &amp; System Audio Recording</b>.</li><li>Turn on <b>Cue Coach</b> (it may be listed as <b>Electron</b> while testing).</li><li>Quit and reopen Cue Coach, then press <b>Try again</b>.</li></ol>
-        <div class="brow">${isMac ? '<button data-screen-settings>Open the settings</button>' : ''}<button class="primary" data-beat-on>Try again</button></div>`;
+        <div class="brow"><button data-screen-settings>Open the settings</button><button class="primary" data-beat-on>Try again</button></div>`;
+    } else if (st === 'need-permission') {
+      body = `<p class="bnote">Cue Coach couldn't see rekordbox's window. Make sure rekordbox is open and not minimised, then try again.</p>
+        <div class="brow"><button class="primary" data-beat-on>Try again</button></div>`;
     } else if (st === 'searching') {
       body = `<p class="bnote">Looking for rekordbox's waveforms… Use rekordbox's <b>2 Deck Horizontal</b> layout so both zoomed waveforms are visible, and load a track on each deck.</p><div class="brow"><button data-beat-off>Turn off</button></div>`;
     } else if (st === 'no-window' || st === 'error') {
