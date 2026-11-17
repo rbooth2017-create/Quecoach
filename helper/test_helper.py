@@ -55,6 +55,7 @@ def build_fake_db(root: Path) -> Path:
             row(T.DjmdSongHistory, ID="s2", HistoryID="h1", ContentID="101", TrackNo=2, created_at=t0 + timedelta(minutes=5)),
         ])
         s.commit()
+    engine.dispose()  # Windows can't delete a database file that's still open
     return db
 
 
@@ -92,6 +93,7 @@ class WithFakeDatabase(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.lib.db.close()
+        cls.lib.db.engine.dispose()  # release the file so Windows can delete it
         cls.tmp.cleanup()
 
     def get(self, path, origin="http://localhost:8642"):
