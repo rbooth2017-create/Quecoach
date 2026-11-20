@@ -1,6 +1,7 @@
 // Audio: decks, demo synth, per-bar energy analysis, BPM estimate, beatmatch maths.
 import { DEMO_STRUCTURE, camelotRoot } from './library.js';
 import { barLen, beatLen } from './engine.js';
+import { analyseGrid } from './beatgrid.js';
 
 export const ctx = new (window.AudioContext || window.webkitAudioContext)();
 const master = ctx.createGain();
@@ -121,38 +122,9 @@ export function barEnergy(buffer, grid) {
   return Array.from(out);
 }
 
-/** Estimate BPM + first downbeat for files rekordbox didn't give us a grid for. */
+/** BPM + first downbeat for files rekordbox didn't give us a grid for: fitted to the kicks of the whole track. */
 export function estimateGrid(buffer) {
-  const lp = lowpass(buffer), sr = buffer.sampleRate;
-  const hop = Math.floor(sr / 200); // ~5 ms frames
-  const HPS = sr / hop;             // exact frames per second
-  const len = Math.min(lp.length, sr * 75);
-  const env = new Float32Array(Math.floor(len / hop));
-  let prev = 0;
-  for (let f = 0; f < env.length; f++) {
-    let e = 0; const i = f * hop; for (let j = 0; j < hop; j++) e += lp[i + j] * lp[i + j];
-    env[f] = Math.max(0, e - prev); prev = e;
-  }
-  const at = (x) => { const i = Math.floor(x), fr = x - i; return i + 1 < env.length ? env[i] * (1 - fr) + env[i + 1] * fr : 0; };
-  // Compare each onset with the ones 1, 2, 4 and 8 beats later: long lags make the tempo precise.
-  const score = (bpm) => {
-    const lag = HPS * 60 / bpm; let s = 0;
-    for (let i = 0; i + 8 * lag < env.length; i++) if (env[i]) s += env[i] * (at(i + lag) + at(i + 2 * lag) + at(i + 4 * lag) + at(i + 8 * lag));
-    return s * (bpm >= 100 && bpm <= 150 ? 1 : 0.7); // prefer 100–150 so we don't land on half/double time
-  };
-  let best = 120, bs = -1;
-  for (let bpm = 90; bpm <= 180; bpm += 0.5) { const s = score(bpm); if (s > bs) { bs = s; best = bpm; } }
-  const lo = best - 0.6;
-  for (let bpm = lo; bpm <= lo + 1.2; bpm += 0.01) { const s = score(bpm); if (s > bs) { bs = s; best = bpm; } }
-  const bpm = Math.round(best * 100) / 100;
-  const beatF = HPS * 60 / bpm;
-  let phase = 0, ps = -1;
-  for (let p = 0; p < beatF; p += 0.25) {
-    let s = 0; for (let k = p; k < env.length; k += beatF) s += at(k) + 0.5 * at(k + 1);
-    if (s > ps) { ps = s; phase = p; }
-  }
-  // onsets are detected a frame late; shift back half a frame
-  return { bpm, firstDownbeat: Math.max(0, phase - 0.5) / HPS, estimated: true };
+  return analyseGrid(buffer.getChannelData(0), buffer.sampleRate);
 }
 
 // ---------- Demo synth: a 4/4 track with intro / build / drop / break / outro ----------

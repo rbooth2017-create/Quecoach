@@ -14,7 +14,8 @@ const ON = {
   lesson:        ['starter', 'improver', 'confident'], // the step card at the top
   lessonDetail:  ['starter'],                          // full sentences, not just the step title
   keyHints:      ['starter', 'improver'],              // keyboard chips next to controls
-  beatLane:      ['starter', 'improver'],              // always visible
+  beatLane:      ['starter', 'improver', 'pro'],       // zoomed waveforms with the beat grid (Confident trains by ear)
+  beatDots:      ['starter', 'improver'],              // big "1" dots over the grid lines, to learn counting
   beatLaneCheck: ['confident'],                        // hidden; "Check" shows it for a few seconds
   offsetHint:    ['starter', 'improver'],              // "Right is 40 ms late: nudge it forward"
   matchLabels:   ['starter', 'improver', 'confident'], // "Great match" instead of raw key/BPM numbers
@@ -26,6 +27,8 @@ const ON = {
   bassEQ:        ['improver', 'confident', 'pro'],     // the bass swap is the next skill after beatmatching
   highEQ:        ['confident', 'pro'],                 // treble, for cleaner blends
   fullEQ:        ['pro'],                              // adds the mid band
+  hotCues:       ['improver', 'confident', 'pro'],     // 4 cue pads per deck
+  gridEdit:      ['improver', 'confident', 'pro'],     // fine-tune a beat grid Cue Coach worked out itself
   barCounter:    ['improver', 'confident', 'pro'],     // "Bar 17 · phrase 2"
   phraseMarks:   ['improver', 'confident', 'pro'],     // phrase lines on the waveform
   pitchPercent:  ['confident', 'pro'],                 // speed shown as ±% rather than BPM only

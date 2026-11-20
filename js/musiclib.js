@@ -3,6 +3,7 @@
 import { toCamelot, demoLibrary } from './library.js';
 import { scoreCandidate } from './engine.js';
 import { readTags, TAG_BYTES } from './tags.js';
+import { GRID_VERSION } from './beatgrid.js';
 
 export const AUDIO_EXT = /\.(mp3|m4a|aac|mp4|wav|aif|aiff|flac|ogg|oga|opus)$/i;
 export const isAudioFile = (name) => AUDIO_EXT.test(name) && !name.startsWith('._');
@@ -18,6 +19,7 @@ export function parseFileName(name) {
 
 /** A library track from a file in a music folder, its tags, and any cached analysis. */
 export function trackFromFile({ name, relPath, size, lastModified }, tags = {}, analysis = null) {
+  if (analysis && !(analysis.grid?.v >= GRID_VERSION)) analysis = null; // analysed by an older, less accurate method
   const fromName = parseFileName(name);
   const bpm = analysis?.grid?.bpm || tags.bpm || null;
   return {
@@ -35,6 +37,7 @@ export function trackFromFile({ name, relPath, size, lastModified }, tags = {}, 
     rating: 0,
     grid: analysis?.grid || (tags.bpm ? { bpm: tags.bpm, firstDownbeat: 0, approx: true } : null),
     analysed: !!analysis?.grid,
+    phrases: analysis?.phrases || [],
     cues: [],
   };
 }
@@ -183,25 +186,31 @@ export async function tracksFromFileList(files) {
  * Analyse tracks one at a time in the background (beat grid and length), caching the result.
  * decode(arrayBuffer) → AudioBuffer and estimate(AudioBuffer) → grid are passed in from audio.js.
  */
-export async function analyseInBackground(tracks, { decode, estimate, onTrack = () => {}, shouldStop = () => false }) {
+export async function analyseInBackground(tracks, { decode, estimate, phrases = () => null, onTrack = () => {}, shouldStop = () => false }) {
   for (const t of tracks) {
     if (shouldStop()) return;
     if (t.analysed || !t.file) continue;
     try {
       const buffer = await decode(await (await t.file()).arrayBuffer());
-      saveAnalysis(t, buffer, estimate(buffer));
+      const grid = estimate(buffer);
+      saveAnalysis(t, buffer, grid, phrases(buffer, grid));
       onTrack(t);
     } catch (err) { t.analyseError = err.message; console.warn('analysis failed', t.relPath, err); }
     await new Promise((r) => setTimeout(r, 30)); // let the UI breathe
   }
 }
 
-/** Store a beat grid we worked out (in the background or when the track was loaded on a deck). */
-export function saveAnalysis(t, buffer, grid) {
+/** Store a beat grid (and phrases) we worked out, in the background or when the track was loaded on a deck. */
+export function saveAnalysis(t, buffer, grid, phrases = null) {
   const g = reconcileBpm(grid, t.bpm && !t.analysed ? t.bpm : null);
   Object.assign(t, { grid: g, bpm: g.bpm, duration: buffer.duration, analysed: true });
-  if (t.source === 'folder') anaSet(cacheKey(t), { grid: g, duration: buffer.duration });
+  if (phrases) t.phrases = phrases;
+  persistAnalysis(t);
   return t;
+}
+/** Save a track's grid and phrases again, e.g. after the DJ fine-tunes the grid. */
+export function persistAnalysis(t) {
+  if (t.source === 'folder') anaSet(cacheKey(t), { grid: t.grid, duration: t.duration, phrases: t.phrases || [] });
 }
 
 /** The tag BPM is usually right about half/double time; the audio estimate is right about the phase. */

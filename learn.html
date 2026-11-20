@@ -110,7 +110,7 @@ html.win32 .titlebar, html.linux .titlebar { padding-right: 146px; }  /* room fo
 /* beat lane */
 .lane-panel { padding-bottom: 8px; }
 .lane-wrap { position: relative; margin: 6px 10px 0; }
-#lane { width: 100%; height: 78px; display: block; border-radius: 8px; background: var(--card-2); }
+#lane { width: 100%; height: 118px; display: block; border-radius: 8px; background: var(--card-2); }
 .lane-cover { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 16px; border-radius: 8px; background: var(--card-2); }
 .hint { font-weight: 600; font-size: 12px; padding: 3px 10px; border-radius: 99px; background: var(--card-2); color: var(--ink-2); transition: background .2s, color .2s; }
 .hint.ok { background: var(--ok-soft); color: var(--ok); }
@@ -149,7 +149,14 @@ input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; bor
 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--card); border: 1.5px solid var(--ink-3); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
 input[type=range].vfader { writing-mode: vertical-lr; direction: rtl; width: 4px; height: 118px; }
 input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; border-radius: 4px; border-color: var(--c, var(--ink-3)); }
-.deckfoot { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--ink-2); min-height: 24px; }
+.deckfoot { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; font-size: 11px; color: var(--ink-2); min-height: 24px; }
+.pads { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 2px; }
+.pad { width: 24px; height: 22px; padding: 0; justify-content: center; border-radius: 5px; font-size: 11px; font-weight: 750; color: var(--ink-3); background: var(--card-2); border-color: var(--line-2); }
+.pad.set { background: var(--pc); border-color: var(--pc); color: #fff; }
+.gridtools { display: inline-flex; align-items: center; gap: 3px; }
+.gridtools button { padding: 0 7px; font-size: 11px; line-height: 18px; border-radius: 5px; }
+.phrase-key { display: flex; gap: 8px; flex-wrap: wrap; font-size: 10px; color: var(--ink-3); }
+.phrase-key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
 .deckfoot .grow { flex: 1; }
 .barcount { font-variant-numeric: tabular-nums; }
 .empty-deck { grid-row: 2 / -1; display: grid; place-items: center; align-content: center; gap: 8px; text-align: center; border: 1.5px dashed var(--line-2); border-radius: 10px; color: var(--ink-2); min-height: 230px; transition: background .15s, border-color .15s; }
@@ -358,7 +365,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 <div class="workspace">
 <main class="stage">
   <section class="panel lane-panel" id="lanePanel">
-    <div class="panel-head"><span class="panel-title">Beat lane</span><span class="hint" id="hint">Play both decks to compare beats</span></div>
+    <div class="panel-head"><span class="panel-title" id="laneTitle">Beat lane</span><span class="hint" id="hint">Play both decks to compare beats</span></div>
     <div class="lane-wrap"><canvas id="lane"></canvas>
       <div class="lane-cover hidden" id="laneCover"><div><b>Beatmatch by ear</b><div class="muted small">Listen for the kick drums. When you think they're together, check.</div></div><button class="primary" id="checkBtn">Check my beats <kbd>C</kbd></button></div>
     </div>

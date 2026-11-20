@@ -54,8 +54,11 @@ test('tracks from files prefer tags, then cached analysis', () => {
   const t = trackFromFile(meta, { bpm: 124, key: 'Am' });
   assert.equal(t.title, 'B'); assert.equal(t.camelot, '8A'); assert.equal(t.bpm, 124);
   assert.equal(t.grid.approx, true); assert.equal(t.analysed, false);
-  const a = trackFromFile(meta, { bpm: 124 }, { grid: { bpm: 123.98, firstDownbeat: 0.2 }, duration: 300 });
-  assert.equal(a.bpm, 123.98); assert.equal(a.analysed, true); assert.equal(a.duration, 300);
+  const a = trackFromFile(meta, { bpm: 124 }, { grid: { bpm: 123.98, firstDownbeat: 0.2, v: 2 }, duration: 300, phrases: [{ label: 'Intro', start: 0.2, end: 31.2 }] });
+  assert.equal(a.bpm, 123.98); assert.equal(a.analysed, true); assert.equal(a.duration, 300); assert.equal(a.phrases.length, 1);
+  // a grid from the old, drift-prone estimator is ignored so the track gets analysed again
+  const old = trackFromFile(meta, { bpm: 124 }, { grid: { bpm: 123.9, firstDownbeat: 0.2 }, duration: 300 });
+  assert.equal(old.analysed, false); assert.equal(old.bpm, 124);
 });
 
 test('tag BPM fixes half/double time from the audio estimate', () => {
@@ -117,13 +120,16 @@ import { LEVELS, featuresFor, tempoRange, suggestLevelUp, FEATURES, eqBands } fr
 test('coaching fades out and tools fade in as the level goes up', () => {
   const starter = featuresFor('starter'), pro = featuresFor('pro');
   assert.equal(starter.lesson, true); assert.equal(pro.lesson, false);
-  assert.equal(starter.beatLane, true); assert.equal(pro.beatLane, false);
+  assert.equal(starter.beatLane, true); assert.equal(pro.beatLane, true); // Pro keeps the waveforms, like rekordbox
+  assert.equal(starter.beatDots, true); assert.equal(pro.beatDots, false); // …but the counting dots go
+  assert.equal(featuresFor('confident').beatLane, false); // Confident beatmatches by ear
+  assert.equal(starter.hotCues, false); assert.equal(featuresFor('improver').hotCues, true);
   assert.equal(featuresFor('confident').beatLaneCheck, true);
   assert.equal(starter.bassEQ, false); assert.equal(pro.fullEQ, true);
   assert.deepEqual(Object.keys(featuresFor('nonsense')), FEATURES); // unknown → starter
   assert.equal(featuresFor('nonsense').lessonDetail, true);
   // every coaching aid that is off at one level stays off at the levels above it
-  for (const f of ['lesson', 'lessonDetail', 'keyHints', 'offsetHint', 'matchLabels', 'matchReasons', 'friendlyRoles']) {
+  for (const f of ['lesson', 'lessonDetail', 'keyHints', 'offsetHint', 'matchLabels', 'matchReasons', 'friendlyRoles', 'beatDots']) {
     const on = LEVELS.map((l) => featuresFor(l.id)[f]);
     assert.ok(on.every((v, i) => i === 0 || !v || on[i - 1]), `${f} comes back after switching off`);
   }

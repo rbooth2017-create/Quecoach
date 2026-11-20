@@ -9,6 +9,13 @@ import { LESSONS, TIERS, lessonById, advanceLesson, stepIndex, nextLesson, cours
 import { VIBES, quickSet, setMinutes } from './setbuilder.js';
 import { aiStatus, aiSetKey, aiClearKey, buildSetAI, suggestAI } from './coachai.js';
 import { keyRelation } from './library.js';
+import { bandPeaks, barEnergies, phrasesFromEnergy } from './beatgrid.js';
+
+// Colours that read on every theme: hot cue pads and phrase sections.
+const CUE_COLORS = ['#ef4f5c', '#22b573', '#f0a020', '#8b6cf6'];
+const PHRASE_COLORS = { Intro: '#2bb5a0', Up: '#f0a020', Chorus: '#ef4f5c', Down: '#8b6cf6', Outro: '#4a90e2', Verse: '#7cbf3a', Bridge: '#c06cd8' };
+const phraseColor = (label = '') => PHRASE_COLORS[label] || PHRASE_COLORS[Object.keys(PHRASE_COLORS).find((k) => label.startsWith(k))] || '#888';
+const PHRASE_NAMES = { Up: 'Build', Down: 'Breakdown' };
 import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex, eqBands } from './levels.js';
 import { JogWheel, jogHTML, dialHTML, setDial, bindDials } from './controls.js';
 import { icon } from './icons.js';
@@ -153,6 +160,7 @@ function renderDeck(side) {
         <button class="play" data-a="play" aria-label="Play or pause (${side === 'left' ? 'Q' : 'P'})" title="Play / pause">${icon(d.playing ? 'pause' : 'play', 22)}</button>
         <button class="round" data-a="restart" aria-label="Back to the first beat" title="Back to the first beat">${icon('restart', 15)}</button>
         <div class="tlabel">Start</div>
+        ${f.hotCues ? `<div class="pads">${cuesFor(t).map((c, i) => `<button class="pad ${c != null ? 'set' : ''}" data-cue="${i}" style="--pc:${CUE_COLORS[i]}" title="${c != null ? `Hot cue ${i + 1}: jump here. Alt-click to clear.` : `Set hot cue ${i + 1} here`}">${i + 1}</button>`).join('')}</div><div class="tlabel" style="margin-top:0">Cues</div>` : ''}
       </div>
       ${jogHTML(side, f.keyHints && !state.jogUsed ? 'Spin me to nudge' : '')}
       <div class="pitch" title="Speed: up is faster">
@@ -162,7 +170,9 @@ function renderDeck(side) {
         <div class="val" data-pct></div>
       </div>
     </div>
-    <div class="deckfoot"><span class="role" data-live></span>${keys}<span class="grow"></span>${f.barCounter ? '<span class="barcount" data-bar></span>' : ''}
+    <div class="deckfoot"><span class="role" data-live></span>${keys}<span class="grow"></span>
+      ${f.gridEdit && t.grid?.estimated ? `<span class="gridtools" title="Cue Coach worked out this beat grid. If the beats sound off, nudge it.">Grid <button data-grid="-1" aria-label="Move grid earlier">‹</button><button data-grid="1" aria-label="Move grid later">›</button><button data-grid="one" title="Move the &quot;1&quot; to the next beat">1 ›</button></span>` : ''}
+      ${f.barCounter ? '<span class="barcount" data-bar></span>' : ''}
       <button class="ghost small" data-a="choose" title="Load a different track">${icon('eject', 14)} Change</button></div>`;
   jogs[side] = new JogWheel($('[data-jog]', el), () => decks[side], (kind) => {
     state.jogUsed = true; $('.jog', el)?.classList.add('used');
@@ -246,10 +256,12 @@ async function loadTo(side, track) {
     else if (track.source === 'rekordbox') buffer = await ctx.decodeAudioData(await lib.rekordboxDetail(track));
     else if (track.file) buffer = await ctx.decodeAudioData(await (await track.file()).arrayBuffer());
     else throw new Error('this track has no audio file');
-    if (!track.grid || track.grid.approx || !track.analysed) lib.saveAnalysis(track, buffer, estimateGrid(buffer));
+    if (!track.grid || track.grid.approx || !track.analysed) { const grid = estimateGrid(buffer); lib.saveAnalysis(track, buffer, grid, track.phrases?.length ? null : phrasesFor(buffer, grid)); }
+    else if (!track.phrases?.length && track.grid) { track.phrases = phrasesFor(buffer, track.grid); lib.persistAnalysis(track); }
     const d = decks[side];
     d.stop();
     d.load(track, buffer, null);
+    d.bands = bandPeaks(buffer.getChannelData(0), buffer.sampleRate, 150);
     if (side === 'right') state.alignLocked = false;
     state.target = null;
     if (side === 'left' && !decks.right.buffer && state.f.upNext) state.tab = 'suggested'; // what's next?
@@ -258,6 +270,11 @@ async function loadTo(side, track) {
   } finally {
     delete state.loading[side]; renderDeck(side); renderLibrary();
   }
+}
+
+/** Intro / build / chorus / breakdown / outro sections from the audio, when rekordbox didn't give us any. */
+function phrasesFor(buffer, grid) {
+  try { return phrasesFromEnergy(barEnergies(buffer.getChannelData(0), buffer.sampleRate, grid), grid); } catch { return []; }
 }
 
 async function loadDroppedFile(side, file) {
@@ -332,6 +349,7 @@ function analyse(tracks, token) {
   lib.analyseInBackground(todo, {
     decode: (ab) => ctx.decodeAudioData(ab),
     estimate: estimateGrid,
+    phrases: phrasesFor,
     shouldStop: () => token !== state.scanToken,
     onTrack: () => {
       done++;
@@ -505,6 +523,7 @@ function mixAgain() {
   const keep = { track: old.track, buffer: old.buffer, pos: old.position(), tempo: old.tempoPct, playing: old.playing };
   decks.left.stop();
   decks.left.load(keep.track, keep.buffer, null);
+  decks.left.bands = old.bands;
   decks.left.setTempo(keep.tempo); decks.left.offset = keep.pos;
   old.stop();
   if (keep.playing) decks.left.play();
@@ -531,64 +550,112 @@ function fitCanvas(cv) {
 }
 
 function drawLane(hint) {
-  const byEar = state.f.beatLaneCheck || (lesson().hidesLane && !state.lessonDone);
-  const visible = (state.f.beatLane && !byEar) || (byEar && performance.now() < state.checkUntil);
+  const L = lesson(), f = state.f;
+  const byEar = f.beatLaneCheck || (L.hidesLane && !state.lessonDone);
+  const visible = (f.beatLane && !byEar) || (byEar && performance.now() < state.checkUntil);
   $('#laneCover').classList.toggle('hidden', visible || !byEar);
-  $('#lanePanel').classList.toggle('hidden', !state.f.beatLane && !byEar);
+  $('#lanePanel').classList.toggle('hidden', !f.beatLane && !byEar);
+  $('#laneTitle').textContent = f.beatDots ? 'Beat lane' : 'Waveforms';
   if (!visible || lane.clientWidth === 0) return;
   const { g, w, h } = fitCanvas(lane);
   g.clearRect(0, 0, w, h);
-  const cx = w / 2, pps = w / 3.6; // pixels per second of real time
-  const rows = { left: h * 0.3, right: h * 0.72 };
-  if (hint?.tone === 'ok') { g.fillStyle = colors.ok; g.globalAlpha = 0.18; g.fillRect(cx - 12, 4, 24, h - 8); g.globalAlpha = 1; }
-  g.strokeStyle = colors['ink-3']; g.lineWidth = 1.2; g.setLineDash([3, 4]);
-  g.beginPath(); g.moveTo(cx, 4); g.lineTo(cx, h - 4); g.stroke(); g.setLineDash([]);
-  g.font = '650 11px system-ui, -apple-system, "Segoe UI", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  for (const side of SIDES) {
-    const d = decks[side], y = rows[side], col = colors[side];
-    g.strokeStyle = colors['line-2']; g.lineWidth = 1.5; g.beginPath(); g.moveTo(30, y); g.lineTo(w - 10, y); g.stroke();
-    g.fillStyle = col; g.textAlign = 'left'; g.fillText(LETTER[side], 12, y);
-    g.textAlign = 'center';
-    const grid = d.track?.grid;
-    if (!d.buffer || !grid) continue;
-    const pos = d.position(), rate = d.rate, bl = beatLen(grid);
-    const span = (w / 2 / pps) * rate;
-    const k0 = Math.ceil((pos - span - grid.firstDownbeat) / bl), k1 = Math.floor((pos + span - grid.firstDownbeat) / bl);
-    for (let k = k0; k <= k1; k++) {
-      const t = grid.firstDownbeat + k * bl, x = cx + ((t - pos) / rate) * pps;
-      if (x < 34) continue;
-      const down = ((k % 4) + 4) % 4 === 0;
-      g.globalAlpha = Math.max(0.15, 1 - Math.abs(x - cx) / (w / 2));
-      g.fillStyle = col; g.beginPath(); g.arc(x, y, down ? 9 : 5, 0, Math.PI * 2); g.fill();
-      if (down) { g.fillStyle = '#fff'; g.fillText('1', x, y + 0.5); }
+  const cx = w / 2, pps = w / 4, rowH = h / 2, left = 30;
+  if (hint?.tone === 'ok' && f.beatDots) { g.fillStyle = colors.ok; g.globalAlpha = 0.16; g.fillRect(cx - 12, 0, 24, h); g.globalAlpha = 1; }
+  g.font = '650 10px system-ui, -apple-system, "Segoe UI", sans-serif'; g.textBaseline = 'middle';
+  SIDES.forEach((side, r) => {
+    const d = decks[side], top = r * rowH, mid = top + rowH / 2, col = colors[side];
+    g.fillStyle = col; g.textAlign = 'left'; g.font = '750 11px system-ui, -apple-system, "Segoe UI", sans-serif'; g.fillText(LETTER[side], 10, mid);
+    g.font = '650 10px system-ui, -apple-system, "Segoe UI", sans-serif';
+    if (r === 0) { g.fillStyle = colors['line-2']; g.fillRect(left, rowH - 0.5, w - left, 1); }
+    if (!d.buffer) return;
+    const pos = d.position(), rate = d.rate, dur = d.buffer.duration;
+    const tAt = (x) => pos + ((x - cx) / pps) * rate, xAt = (t) => cx + ((t - pos) / rate) * pps;
+    // waveform: low end in the deck colour, mids lighter, highs white, like DJ software
+    const B = d.bands, amp = rowH / 2 - 3;
+    if (B) {
+      const layer = (arr, gain, scale, fill, alpha) => {
+        g.fillStyle = fill; g.globalAlpha = alpha;
+        for (let x = left; x < w; x++) {
+          const t = tAt(x); if (t < 0 || t >= dur) continue;
+          const i = Math.floor(t * B.rate), v = Math.min(1, Math.max(arr[i] || 0, arr[i + 1] || 0) * gain) * amp * scale;
+          if (v > 0.5) g.fillRect(x, mid - v, 1, v * 2);
+        }
+      };
+      layer(B.low, 1.25, 1, col, 0.9);
+      layer(B.mid, 1.7, 0.7, '#ffffff', 0.42);
+      layer(B.high, 2.2, 0.45, '#ffffff', 0.75);
+      g.globalAlpha = 1;
     }
-    g.globalAlpha = 1;
-  }
+    // beat grid: thin beats, heavier "1"s with bar numbers, a coloured line at each new phrase
+    const grid = d.track.grid;
+    if (grid) {
+      const bl = 60 / grid.bpm, span = (w / 2 / pps) * rate;
+      const k0 = Math.ceil((pos - span - grid.firstDownbeat) / bl), k1 = Math.floor((pos + span - grid.firstDownbeat) / bl);
+      for (let k = k0; k <= k1; k++) {
+        const x = xAt(grid.firstDownbeat + k * bl); if (x < left) continue;
+        const down = ((k % 4) + 4) % 4 === 0, bar = Math.floor(k / 4) + 1, phraseStart = down && ((bar - 1) % 16 + 16) % 16 === 0;
+        g.fillStyle = phraseStart ? colors.warn : colors.ink;
+        g.globalAlpha = phraseStart ? 0.85 : down ? 0.5 : 0.16;
+        g.fillRect(Math.round(x) - (down ? 1 : 0), top + 2, down ? 2 : 1, rowH - 4);
+        if (down && f.barCounter && bar >= 1) { g.globalAlpha = 0.75; g.fillStyle = colors.ink; g.textAlign = 'left'; g.fillText(String(bar), x + 4, top + 9); }
+        if (f.beatDots) {
+          g.globalAlpha = Math.max(0.25, 1 - Math.abs(x - cx) / (w / 2));
+          g.fillStyle = col; g.beginPath(); g.arc(x, mid, down ? 8 : 4, 0, Math.PI * 2); g.fill();
+          if (down) { g.fillStyle = '#fff'; g.textAlign = 'center'; g.fillText('1', x, mid + 0.5); }
+        }
+      }
+      g.globalAlpha = 1;
+    }
+    // cue markers
+    for (const c of allCues(d.track)) {
+      const x = xAt(c.time); if (x < left || x > w) continue;
+      g.fillStyle = c.color; g.beginPath(); g.moveTo(x - 6, top + 1); g.lineTo(x + 6, top + 1); g.lineTo(x, top + 9); g.fill();
+      g.fillRect(x - 0.5, top + 1, 1, rowH - 2);
+    }
+  });
+  // now line
+  g.fillStyle = colors.ink; g.globalAlpha = 0.9; g.fillRect(Math.round(cx) - 1, 0, 2, h); g.globalAlpha = 1;
+}
+
+/** Hot cues and rekordbox memory cues, for markers. */
+function allCues(t) {
+  const out = cuesFor(t).map((time, i) => (time == null ? null : { time, color: CUE_COLORS[i], label: String(i + 1) })).filter(Boolean);
+  for (const c of t.cues || []) if (c.num < 0 && !c.loop) out.push({ time: c.time, color: '#d9d9d9', label: '' });
+  return out;
 }
 
 function drawWave(side) {
   const d = decks[side], cv = $(`#deck-${side} [data-wave]`);
-  if (!cv || !d.peaks || cv.clientWidth === 0) return;
+  if (!cv || !d.buffer || cv.clientWidth === 0) return;
   const { g, w, h } = fitCanvas(cv);
-  if (!d._wave || d._wave.length !== Math.floor(w)) {
-    const n = Math.floor(w), src = d.peaks.data, cols = new Float32Array(n);
-    for (let i = 0; i < n; i++) { let m = 0; const a = Math.floor(i / n * src.length), b = Math.floor((i + 1) / n * src.length); for (let j = a; j < b; j++) if (src[j] > m) m = src[j]; cols[i] = m; }
+  const n = Math.floor(w), B = d.bands;
+  if (!d._wave || d._wave.n !== n) {
+    // per-pixel maxima of each band (or the plain peaks if bands aren't ready)
+    const cols = { n, low: new Float32Array(n), mid: new Float32Array(n), high: new Float32Array(n) };
+    const src = B || { low: d.peaks.data, mid: new Float32Array(d.peaks.data.length), high: new Float32Array(d.peaks.data.length) };
+    const len = src.low.length;
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor((i / n) * len), b = Math.max(a + 1, Math.floor(((i + 1) / n) * len));
+      for (const k of ['low', 'mid', 'high']) { let m = 0; for (let j = a; j < b; j++) if (src[k][j] > m) m = src[k][j]; cols[k][i] = m; }
+    }
     d._wave = cols;
   }
-  const dur = d.buffer.duration, pos = d.position(), px = (pos / dur) * w, col = colors[side];
+  const dur = d.buffer.duration, px = (d.position() / dur) * w, col = colors[side];
+  const strip = d.track.phrases?.length ? 6 : 0, mid = strip + (h - strip) / 2, amp = (h - strip) / 2 - 2;
   g.clearRect(0, 0, w, h);
-  g.fillStyle = col;
-  for (let i = 0; i < d._wave.length; i++) {
-    const v = Math.max(1, Math.min(1, d._wave[i] * 1.2) * (h / 2 - 3));
-    g.globalAlpha = i < px ? 0.3 : 0.85;
-    g.fillRect(i, h / 2 - v, 1, v * 2);
-  }
+  // phrase sections, like rekordbox's coloured phrase bar
+  for (const p of d.track.phrases || []) { g.fillStyle = phraseColor(p.label); g.globalAlpha = 0.9; g.fillRect((p.start / dur) * w, 0, Math.max(1, ((p.end - p.start) / dur) * w - 1), strip - 1); }
+  const layer = (arr, gain, scale, fill, alpha) => {
+    for (let i = 0; i < n; i++) {
+      const v = Math.min(1, arr[i] * gain) * amp * scale; if (v < 0.5) continue;
+      g.fillStyle = fill; g.globalAlpha = alpha * (i < px ? 0.4 : 1);
+      g.fillRect(i, mid - v, 1, v * 2);
+    }
+  };
+  layer(d._wave.low, 1.2, 1, col, 0.9);
+  if (B) { layer(d._wave.mid, 1.6, 0.7, '#ffffff', 0.4); layer(d._wave.high, 2, 0.45, '#ffffff', 0.7); }
   g.globalAlpha = 1;
-  if (state.f.phraseMarks && d.track.phrases?.length) {
-    g.fillStyle = colors.ink; g.globalAlpha = 0.3;
-    for (const p of d.track.phrases) g.fillRect((p.start / dur) * w, 0, 1, h);
-    g.globalAlpha = 1;
-  }
+  for (const c of allCues(d.track)) { const x = (c.time / dur) * w; g.fillStyle = c.color; g.beginPath(); g.moveTo(x - 4, h); g.lineTo(x + 4, h); g.lineTo(x, h - 6); g.fill(); }
   g.fillStyle = colors.ink; g.fillRect(px - 1, 0, 2, h);
 }
 
@@ -601,7 +668,7 @@ function frame(now) {
   const hel = $('#hint');
   const checking = performance.now() < state.checkUntil;
   if (hint && ((state.f.offsetHint && !(lesson().hidesLane && !state.lessonDone)) || checking)) { hel.className = `hint ${hint.tone}`; hel.textContent = hint.text; }
-  else if (hint) { hel.className = 'hint'; hel.textContent = 'Trust your ears'; }
+  else if (hint) { hel.className = state.f.beatLane && !state.f.offsetHint ? 'hidden' : 'hint'; hel.textContent = 'Trust your ears'; }
   else { hel.className = 'hint'; hel.textContent = 'Play both decks to compare beats'; }
   drawLane(hint);
   renderCoach(s);
@@ -668,6 +735,35 @@ function moveXfader(x) {
     state.blend = null;
   }
 }
+// ---------- hot cues ----------
+const cueStore = store.get('cues', {});
+/** Four pads: your own cues, falling back to rekordbox's hot cues A–D. */
+function cuesFor(t) {
+  const own = cueStore[t.id] || [];
+  return [0, 1, 2, 3].map((i) => (own[i] === false ? null : own[i] ?? (t.cues || []).find((c) => c.num === i && !c.loop)?.time ?? null));
+}
+function hotCue(side, i, clear) {
+  const d = decks[side], t = d.track, own = (cueStore[t.id] ||= []);
+  const cur = cuesFor(t)[i];
+  if (clear) own[i] = false;
+  else if (cur == null) {
+    const g = t.grid, p = d.position();
+    own[i] = g ? g.firstDownbeat + Math.round((p - g.firstDownbeat) * g.bpm / 60) * 60 / g.bpm : p; // snap to the nearest beat
+  } else { d.seek(cur); return; }
+  store.set('cues', cueStore); renderDeck(side);
+}
+
+// ---------- beat grid fine-tuning ----------
+function shiftGrid(side, how, big) {
+  const d = decks[side], g = d.track.grid; if (!g) return;
+  const beat = 60 / g.bpm;
+  if (how === 'one') g.firstDownbeat += beat; else g.firstDownbeat += (+how) * (big ? 0.02 : 0.005);
+  while (g.firstDownbeat >= 4 * beat) g.firstDownbeat -= 4 * beat;
+  while (g.firstDownbeat < 0) g.firstDownbeat += 4 * beat;
+  g.adjusted = true;
+  lib.persistAnalysis(d.track);
+}
+
 function check() {
   const byEar = state.f.beatLaneCheck || lesson().hidesLane;
   if (!byEar) return;
@@ -694,6 +790,11 @@ function deckEvents(side) {
     else if (a === 'slower' || a === 'faster') stepTempo(side, (a === 'faster' ? 1 : -1) * (e.shiftKey ? 1 : FINE));
   });
   el.addEventListener('input', (e) => { if (e.target.dataset.a === 'tempo') d().setTempo(+e.target.value); });
+  el.addEventListener('click', (e) => {
+    const pad = e.target.closest('[data-cue]'); if (pad && d().buffer) return hotCue(side, +pad.dataset.cue, e.altKey);
+    const gb = e.target.closest('[data-grid]'); if (gb && d().buffer) return shiftGrid(side, gb.dataset.grid, e.shiftKey);
+  });
+  el.addEventListener('contextmenu', (e) => { const pad = e.target.closest('[data-cue]'); if (pad) { e.preventDefault(); hotCue(side, +pad.dataset.cue, true); } });
   el.addEventListener('click', (e) => {
     const cv = e.target.closest('[data-wave]'); if (!cv || !d().buffer) return;
     const r = cv.getBoundingClientRect(), g = d().track.grid;
