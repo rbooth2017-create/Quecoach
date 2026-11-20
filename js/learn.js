@@ -18,6 +18,7 @@ const phraseColor = (label = '') => PHRASE_COLORS[label] || PHRASE_COLORS[Object
 const PHRASE_NAMES = { Up: 'Build', Down: 'Breakdown' };
 import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex, eqBands } from './levels.js';
 import { JogWheel, jogHTML, dialHTML, setDial, bindDials } from './controls.js';
+import { beatCount } from './deckmath.js';
 import { icon } from './icons.js';
 
 const THEMES = [
@@ -155,6 +156,12 @@ function renderDeck(side) {
     ${head(esc(t.title), `${keyBadge(t)}<span>${esc(t.artist || 'Unknown artist')}</span>`)}
       <div class="bpm"><b data-bpm>${fmtBpm(d.bpm, 2)}</b><span>BPM${t.grid?.estimated ? ' (est.)' : ''}</span></div></div>
     <canvas class="wave" data-wave title="Click to jump to a bar"></canvas>
+    <div class="counter" data-counter title="Beat in the bar, and which 4-bar block of the 16-bar phrase you're in">
+      <span class="cells beats">${[1, 2, 3, 4].map((n) => `<i>${n}</i>`).join('')}</span>
+      <span class="ph">Phrase <b data-phrase>–</b></span>
+      <span class="cells blocks">${[1, 2, 3, 4].map((n) => `<i>${n}</i>`).join('')}</span>
+      <span class="sec" data-sec></span>
+    </div>
     <div class="deckbody">
       <div class="transport">
         <button class="play" data-a="play" aria-label="Play or pause (${side === 'left' ? 'Q' : 'P'})" title="Play / pause">${icon(d.playing ? 'pause' : 'play', 22)}</button>
@@ -597,7 +604,17 @@ function drawLane(hint) {
         g.fillStyle = phraseStart ? colors.warn : colors.ink;
         g.globalAlpha = phraseStart ? 0.85 : down ? 0.5 : 0.16;
         g.fillRect(Math.round(x) - (down ? 1 : 0), top + 2, down ? 2 : 1, rowH - 4);
-        if (down && f.barCounter && bar >= 1) { g.globalAlpha = 0.75; g.fillStyle = colors.ink; g.textAlign = 'left'; g.fillText(String(bar), x + 4, top + 9); }
+        if (phraseStart && bar >= 1) {
+          // mark each phrase: "Phrase 3 · Chorus"
+          const t = grid.firstDownbeat + k * bl, ph = d.track.phrases?.find((p) => t >= p.start - 0.05 && t < p.end - 0.05);
+          const label = `Phrase ${Math.floor((bar - 1) / 16) + 1}${ph ? ` · ${PHRASE_NAMES[ph.label] || ph.label}` : ''}`;
+          g.globalAlpha = 1; g.font = '750 10px system-ui, -apple-system, "Segoe UI", sans-serif';
+          const tw = g.measureText(label).width;
+          g.fillStyle = colors.warn; g.fillRect(x, top + 2, tw + 10, 14);
+          g.fillStyle = '#fff'; g.textAlign = 'left'; g.fillText(label, x + 5, top + 9.5);
+          g.font = '650 10px system-ui, -apple-system, "Segoe UI", sans-serif';
+        } else if (down && f.barCounter && bar >= 1) { g.globalAlpha = 0.75; g.fillStyle = colors.ink; g.textAlign = 'left'; g.fillText(String(bar), x + 4, top + 9); }
+        if (f.beatDots && !down && k >= 0) { g.globalAlpha = 0.55; g.fillStyle = colors.ink; g.textAlign = 'center'; g.fillText(String(((k % 4) + 4) % 4 + 1), x, top + rowH - 8); }
         if (f.beatDots) {
           g.globalAlpha = Math.max(0.25, 1 - Math.abs(x - cx) / (w / 2));
           g.fillStyle = col; g.beginPath(); g.arc(x, mid, down ? 8 : 4, 0, Math.PI * 2); g.fill();
@@ -659,6 +676,25 @@ function drawWave(side) {
   g.fillStyle = colors.ink; g.fillRect(px - 1, 0, 2, h);
 }
 
+/** Light up beat 1–4, the phrase number, the 4-bar block within the phrase, and the section name. */
+function updateCounter(el, d) {
+  const box = $('[data-counter]', el); if (!box) return;
+  const c = beatCount(d.track.grid, d.position());
+  const key = c ? `${c.beat}|${c.bar}` : 'before';
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.classList.toggle('before', !c);
+  $$('.beats i', box).forEach((x, i) => x.classList.toggle('on', !!c && i + 1 === c.beat));
+  $$('.blocks i', box).forEach((x, i) => {
+    x.classList.toggle('done', !!c && i + 1 < c.block);
+    x.classList.toggle('on', !!c && i + 1 === c.block);
+    if (c && i + 1 === c.block) x.style.setProperty('--p', c.barInBlock / 4);
+  });
+  $('[data-phrase]', box).textContent = c ? c.phrase : '–';
+  const p = c && d.track.phrases?.find((ph) => d.position() >= ph.start && d.position() < ph.end);
+  $('[data-sec]', box).innerHTML = p ? `<i style="background:${phraseColor(p.label)}"></i>${esc(PHRASE_NAMES[p.label] || p.label)}` : '';
+}
+
 // ---------- every frame ----------
 let last = performance.now();
 function frame(now) {
@@ -685,6 +721,7 @@ function frame(now) {
     const play = $('[data-a="play"]', el);
     if (play && play.dataset.state !== String(d.playing)) { play.dataset.state = String(d.playing); play.innerHTML = icon(d.playing ? 'pause' : 'play', 22); }
     const slider = $('input[data-a="tempo"]', el); if (slider && document.activeElement !== slider) slider.value = d.tempoPct;
+    updateCounter(el, d);
     if (q('bar') && d.track.grid) {
       const bar = Math.max(1, Math.floor((d.position() - d.track.grid.firstDownbeat) / barLen(d.track.grid)) + 1);
       q('bar').textContent = `Bar ${bar} · phrase ${Math.ceil(bar / 16)} · −${fmtTime(Math.max(0, d.buffer.duration - d.position()))}`;

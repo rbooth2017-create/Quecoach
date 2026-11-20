@@ -68,3 +68,18 @@ test('dials: drag up to turn up, clamped; pointer sweeps 270°', () => {
   assert.ok(Math.abs(dialAngle(0.5)) < 1e-9);
   assert.ok(Math.abs(dialAngle(2) - 0.75 * Math.PI) < 1e-9);
 });
+
+import { beatCount } from '../js/deckmath.js';
+
+test('counting beats, bars and phrases', () => {
+  const g = { bpm: 120, firstDownbeat: 1 }; // 0.5 s per beat, 2 s per bar, 32 s per 16-bar phrase
+  assert.equal(beatCount(g, 0.9), null); // before the first "1"
+  assert.deepEqual(beatCount(g, 1), { beat: 1, bar: 1, barInPhrase: 1, block: 1, barInBlock: 1, phrase: 1 });
+  assert.deepEqual(beatCount(g, 1.5), { beat: 2, bar: 1, barInPhrase: 1, block: 1, barInBlock: 1, phrase: 1 });
+  assert.equal(beatCount(g, 2.99).beat, 4);
+  // bar 5 starts the second 4-bar block, bar 16 is the last bar of phrase 1, bar 17 starts phrase 2
+  assert.deepEqual(beatCount(g, 1 + 4 * 2), { beat: 1, bar: 5, barInPhrase: 5, block: 2, barInBlock: 1, phrase: 1 });
+  assert.deepEqual(beatCount(g, 1 + 15 * 2 + 1.5), { beat: 4, bar: 16, barInPhrase: 16, block: 4, barInBlock: 4, phrase: 1 });
+  assert.deepEqual(beatCount(g, 1 + 16 * 2), { beat: 1, bar: 17, barInPhrase: 1, block: 1, barInBlock: 1, phrase: 2 });
+  assert.equal(beatCount(null, 3), null);
+});

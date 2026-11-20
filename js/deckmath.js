@@ -74,3 +74,17 @@ export function dialValue(start, dy, min, max, px = 160) {
 
 /** Dial position 0..1 → pointer angle in radians, sweeping 270° from bottom-left (−135°) to bottom-right (+135°). */
 export const dialAngle = (t) => (-135 + 270 * Math.max(0, Math.min(1, t))) * Math.PI / 180;
+
+// ---------- counting ----------
+
+/**
+ * Where a deck is in the music: beat 1–4 of the bar, bar number, bar 1–16 within the phrase,
+ * which 4-bar block of the phrase (1–4), and the phrase number. null before the first downbeat.
+ */
+export function beatCount(grid, pos, phraseBars = 16) {
+  if (!grid?.bpm) return null;
+  const beats = Math.floor((pos - grid.firstDownbeat) * grid.bpm / 60 + 1e-6);
+  if (beats < 0) return null;
+  const bar = Math.floor(beats / 4) + 1, barInPhrase = ((bar - 1) % phraseBars) + 1;
+  return { beat: (beats % 4) + 1, bar, barInPhrase, block: Math.ceil(barInPhrase / 4), barInBlock: ((barInPhrase - 1) % 4) + 1, phrase: Math.floor((bar - 1) / phraseBars) + 1 };
+}
