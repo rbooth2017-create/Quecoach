@@ -51,7 +51,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.4; -webkit-font-smoothing: antialiased; }
 body { display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; user-select: none; -webkit-user-select: none; cursor: default; }
-.titlebar { grid-row: 1; } .coach { grid-row: 2; } .stage { grid-row: 3; } /* fixed rows, so hiding the coach doesn't shift the layout */
+.titlebar { grid-row: 1; } .coach { grid-row: 2; } .workspace { grid-row: 3; } /* fixed rows, so hiding the coach doesn't shift the layout */
 button, input, select { font: inherit; color: inherit; }
 input[type=search], input[type=text] { user-select: text; -webkit-user-select: text; }
 button { cursor: default; border: 1px solid var(--line-2); background: var(--card); border-radius: 8px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px; transition: background .12s, border-color .12s, transform .06s; }
@@ -87,6 +87,7 @@ html.win32 .titlebar, html.linux .titlebar { padding-right: 146px; }  /* room fo
 .tb-right { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
 .icon-btn { width: 32px; height: 30px; padding: 0; justify-content: center; border-color: transparent; background: transparent; color: var(--ink-2); }
 .icon-btn:hover { background: var(--card-2); color: var(--ink); }
+.icon-btn.on { background: var(--card-2); color: var(--left); }
 .pill-btn { border-color: transparent; background: var(--card-2); font-weight: 600; font-size: 12px; padding: 4px 10px; }
 
 /* ---------- coach strip ---------- */
@@ -98,8 +99,9 @@ html.win32 .titlebar, html.linux .titlebar { padding-right: 146px; }  /* room fo
 .coach.complete { background: var(--ok-soft); }
 .coach.complete .num { background: var(--ok); }
 
-/* ---------- stage ---------- */
-.stage { display: grid; grid-template-rows: auto auto minmax(150px, 1fr); gap: 10px; padding: 10px; min-height: 0; }
+/* ---------- workspace: stage + docked lessons pane ---------- */
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
+.stage { container-type: inline-size; overflow: hidden; display: grid; grid-template-rows: auto auto minmax(150px, 1fr); gap: 10px; padding: 10px; min-height: 0; }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; min-width: 0; min-height: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px 0; }
 .panel-title { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
@@ -244,6 +246,63 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .choice .tag { justify-self: start; font-size: 11px; padding: 1px 8px; border-radius: 99px; background: var(--ok-soft); color: var(--ok); font-weight: 650; }
 .choice[disabled] { opacity: .5; transform: none; }
 
+/* lessons pane */
+.tutor { width: 330px; border-left: 1px solid var(--line); background: var(--card); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.tutor-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); }
+.tutor-head b { font-size: 14px; }
+.tutor-head .grow { flex: 1; }
+.tutor-body { overflow: auto; padding: 14px 16px 24px; display: grid; align-content: start; gap: 16px; }
+.lesson-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 10px; background: var(--bg); }
+.lesson-card h3 { margin: 0; font-size: 15px; }
+.lesson-card .why { color: var(--ink-2); margin: 0; }
+.tier-tag { justify-self: start; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.steps li { display: grid; grid-template-columns: 22px 1fr; gap: 6px; padding: 6px 0; color: var(--ink-3); }
+.steps li .ic { margin-top: 1px; }
+.steps li.done { color: var(--ink-2); }
+.steps li.done .ic { color: var(--ok); }
+.steps li.now { color: var(--ink); }
+.steps li.now .ic { color: var(--left); }
+.steps li b { font-weight: 600; }
+.steps li p { margin: 2px 0 0; color: var(--ink-2); font-size: 12px; }
+.notice { display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--close-soft); color: var(--ink); font-size: 12px; }
+.card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.course h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); display: flex; justify-content: space-between; }
+.course button { width: 100%; justify-content: flex-start; border: none; background: transparent; padding: 7px 8px; border-radius: 8px; gap: 10px; text-align: left; }
+.course button:hover { background: var(--card-2); }
+.course button.active { background: var(--card-2); font-weight: 650; }
+.course button .ic { color: var(--ink-3); }
+.course button.done .ic { color: var(--ok); }
+.course button small { margin-left: auto; color: var(--ink-3); }
+.course + .course { margin-top: 4px; }
+.bar { height: 6px; border-radius: 99px; background: var(--card-2); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--ok); border-radius: 99px; }
+
+/* set builder */
+.set-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; }
+.set-form select, .set-form input[type=text] { padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--card-2); }
+.set-form input[type=text] { flex: 1; min-width: 160px; }
+.set-form label { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
+.set-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.set-head b { font-size: 14px; }
+.set-head p { margin: 2px 0 0; color: var(--ink-2); font-size: 12px; }
+.srow { display: grid; grid-template-columns: 26px 40px minmax(0, 1.6fr) 56px minmax(0, 2.4fr) 80px; gap: 10px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line); min-height: 40px; }
+.srow .num { color: var(--ink-3); font-variant-numeric: tabular-nums; text-align: right; }
+.srow.next { background: color-mix(in srgb, var(--ok) 9%, transparent); }
+.srow.played { opacity: .5; }
+.srow .tip { font-size: 12px; color: var(--ink-2); }
+.srow .tip b { color: var(--ink); font-weight: 600; }
+.ai-badge { font-size: 10px; font-weight: 750; padding: 1px 6px; border-radius: 5px; background: color-mix(in srgb, var(--left) 15%, transparent); color: var(--left); letter-spacing: .04em; }
+.ai-row { background: color-mix(in srgb, var(--left) 6%, transparent); }
+.ai-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--ink-2); }
+.field { display: grid; gap: 6px; margin: 10px 0; }
+.field input { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card-2); font: 13px ui-monospace, Menlo, monospace; }
+.ok-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 99px; background: var(--ok-soft); color: var(--ok); }
+.off-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 99px; background: var(--card-2); color: var(--ink-2); }
+.err { color: var(--warn); font-size: 12px; min-height: 16px; }
+dialog ul { margin: 0 0 6px; padding-left: 18px; color: var(--ink-2); }
+dialog a { color: var(--left); }
+
 /* toast + dialogs */
 #toast { position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, 16px); opacity: 0; background: var(--ink); color: var(--card); padding: 8px 16px; border-radius: 10px; transition: .22s; pointer-events: none; max-width: 80vw; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
@@ -267,16 +326,18 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 .swatch i { width: 14px; height: 14px; border-radius: 50%; display: block; }
 
 /* smaller windows: let the page scroll instead of squashing */
-@media (max-width: 1080px), (max-height: 700px) {
+@media (max-height: 700px) {
   body { overflow: auto; grid-template-rows: auto auto auto; }
-  .stage { grid-template-rows: auto auto 420px; }
+  .stage { grid-template-rows: auto auto 420px; overflow: visible; }
 }
-@media (max-width: 1080px) {
+/* the stage gets narrower when the lessons pane is open, so respond to its width, not the window's */
+@container (max-width: 900px) {
   .decks-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .mixer { grid-column: 1 / -1; grid-row: 2; }
   .trow { grid-template-columns: 40px minmax(0, 2fr) 60px 96px; }
   .trow .wide { display: none; }
 }
+@container (max-width: 1060px) { .trow .why { display: none; } }
 </style>
 </head>
 <body>
@@ -285,6 +346,8 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
   <div class="tb-center" id="progress"></div>
   <div class="tb-right">
     <button class="pill-btn" id="levelBtn" title="Your level"></button>
+    <button class="icon-btn" id="aiBtn" title="AI coach settings" aria-label="AI coach settings"></button>
+    <button class="icon-btn" id="lessonsBtn" title="Show or hide lessons (L)" aria-label="Lessons" aria-pressed="false"></button>
     <button class="icon-btn" id="themeBtn" title="Appearance" aria-label="Appearance"></button>
     <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"></button>
   </div>
@@ -292,6 +355,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 
 <div class="coach" id="coach"></div>
 
+<div class="workspace">
 <main class="stage">
   <section class="panel lane-panel" id="lanePanel">
     <div class="panel-head"><span class="panel-title">Beat lane</span><span class="hint" id="hint">Play both decks to compare beats</span></div>
@@ -308,7 +372,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 
   <section class="panel library" id="library">
     <div class="lib-head">
-      <div class="tabs" id="libTabs"><button data-tab="suggested">Suggested</button><button data-tab="all">All music</button></div>
+      <div class="tabs" id="libTabs"><button data-tab="suggested">Suggested</button><button data-tab="all">All music</button><button data-tab="set">Set</button></div>
       <label class="search"><span id="searchIcon"></span><input id="search" type="search" placeholder="Search title, artist, genre or key" autocomplete="off" spellcheck="false"></label>
       <div class="lib-source" id="source"></div>
     </div>
@@ -316,6 +380,8 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <div class="table" id="list"></div>
   </section>
 </main>
+<aside class="tutor hidden" id="tutor" aria-label="Lessons"></aside>
+</div>
 
 <div class="welcome hidden" id="welcomeView">
   <div class="welcome-card">
@@ -347,6 +413,24 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
   <form method="dialog" class="dlg-foot"><button>Done</button></form>
 </dialog>
 
+<dialog id="aiDlg">
+  <h2>AI coach</h2>
+  <p>Cue Coach can use Claude, Anthropic's AI, to build sets and pick your next track. You need your own Anthropic API key.</p>
+  <div id="aiState"></div>
+  <form id="aiForm" class="field">
+    <label for="aiKey" class="small muted">API key</label>
+    <input id="aiKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
+    <div class="err" id="aiErr"></div>
+    <div class="card-actions"><button class="primary" type="submit" id="aiSave">Save key</button><button type="button" id="aiRemove" class="ghost">Remove key</button></div>
+  </form>
+  <ul class="small">
+    <li>Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Use costs a few cents per set.</li>
+    <li>Only track details are sent (title, artist, BPM, key, energy, genre). Never your audio or file locations.</li>
+    <li id="aiWhere">In the desktop app your key is encrypted with your computer's secure storage.</li>
+  </ul>
+  <form method="dialog" class="dlg-foot"><button>Done</button></form>
+</dialog>
+
 <dialog id="help">
   <h2>Keyboard shortcuts</h2>
   <p>Everything also works with the mouse. A DJ controller is optional.</p>
@@ -358,6 +442,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Crossfader</td></tr>
     <tr><td><kbd>C</kbd></td><td>Check your beats (Confident level)</td></tr>
     <tr><td><kbd>/</kbd></td><td>Search your music</td></tr>
+    <tr><td><kbd>L</kbd></td><td>Show or hide lessons</td></tr>
   </table>
   <form method="dialog" class="dlg-foot"><button class="primary">Got it</button></form>
 </dialog>

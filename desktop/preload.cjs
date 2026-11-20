@@ -22,4 +22,11 @@ contextBridge.exposeInMainWorld('cueDesktop', {
   // Learn app: match the title bar to the theme, and receive menu commands.
   setChrome: (c) => ipcRenderer.invoke('chrome', { bg: String(c?.bg || ''), fg: String(c?.fg || '') }),
   onCommand: (cb) => ipcRenderer.on('command', (_e, c) => cb(String(c))),
+  // AI coach: the API key goes in but never comes back out.
+  ai: {
+    status: () => ipcRenderer.invoke('ai-status'),
+    setKey: (key) => ipcRenderer.invoke('ai-set-key', String(key || '')),
+    clearKey: () => ipcRenderer.invoke('ai-clear-key'),
+    request: (payload) => ipcRenderer.invoke('ai-request', payload),
+  },
 });

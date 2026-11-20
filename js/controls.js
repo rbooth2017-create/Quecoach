@@ -7,7 +7,7 @@ export const jogHTML = (side, tip) => `<div class="jog" data-jog="${side}" role=
 /**
  * Spin while playing = nudge (a short speed bend, like pushing a turntable's platter).
  * Turn while paused = move through the track. Scroll wheel works too.
- * getDeck() returns the audio.js Deck; onUse() lets the page react (e.g. hide the tip).
+ * getDeck() returns the audio.js Deck; onUse(kind) tells the page what happened: 'touch', 'jog' (nudge) or 'scrub'.
  */
 export class JogWheel {
   constructor(el, getDeck, onUse = () => {}) {
@@ -24,7 +24,7 @@ export class JogWheel {
     const d = this.getDeck(); if (!d.buffer) return;
     try { this.el.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
     this.touching = true; this.last = this.angle(e); this.lastT = performance.now(); this.omega = 0;
-    this.el.classList.add('touching'); this.onUse();
+    this.el.classList.add('touching'); this.onUse('touch');
   }
   move(e) {
     if (!this.touching) return;
@@ -33,8 +33,8 @@ export class JogWheel {
     this.last = a; this.lastT = now;
     if (d.playing) {
       this.omega = this.omega * 0.6 + (da / dt) * 0.4; // smooth out jittery pointer events
-      d.setBend(jogBendFromSpeed(this.omega)); this.lastMove = now;
-    } else d.seek(Math.max(0, Math.min(d.buffer.duration - 0.1, d.position() + scrubSeconds(da))));
+      d.setBend(jogBendFromSpeed(this.omega)); this.lastMove = now; this.onUse('jog');
+    } else { d.seek(Math.max(0, Math.min(d.buffer.duration - 0.1, d.position() + scrubSeconds(da)))); this.onUse('scrub'); }
   }
   up() {
     if (!this.touching) return;
@@ -43,10 +43,10 @@ export class JogWheel {
   }
   wheel(e) {
     const d = this.getDeck(); if (!d.buffer) return;
-    e.preventDefault(); this.onUse();
+    e.preventDefault();
     const dir = Math.sign(e.deltaY || e.deltaX);
-    if (d.playing) { d.setBend(dir * 0.04); this.wheelUntil = performance.now() + 120; }
-    else d.seek(Math.max(0, d.position() + dir * 0.05));
+    if (d.playing) { d.setBend(dir * 0.04); this.wheelUntil = performance.now() + 120; this.onUse('jog'); }
+    else { d.seek(Math.max(0, d.position() + dir * 0.05)); this.onUse('scrub'); }
   }
   /** Call every frame: lets go of the bend when the hand stops moving, and draws the platter. */
   draw(colors, side) {

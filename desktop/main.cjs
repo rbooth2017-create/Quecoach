@@ -4,6 +4,7 @@
 // - docks a 420 px window to the right edge of the screen, floating over rekordbox
 const { app, BrowserWindow, Menu, ipcMain, screen, session, shell, desktopCapturer, systemPreferences, nativeImage } = require('electron');
 const { spawn } = require('node:child_process');
+const ai = require('./ai.cjs');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
@@ -220,6 +221,8 @@ function buildMenu() {
         cmd('Use rekordbox Library', 'source-rekordbox'),
         { type: 'separator' },
         cmd('Find Music…', 'search', 'CmdOrCtrl+F'),
+        { type: 'separator' },
+        cmd('AI Coach Settings…', 'ai'),
         ...(isMac ? [{ type: 'separator' }, { role: 'close' }] : [{ type: 'separator' }, { role: 'quit' }]),
       ],
     },
@@ -230,6 +233,7 @@ function buildMenu() {
         cmd('Play / Pause Deck A', 'play-left'),
         cmd('Play / Pause Deck B', 'play-right'),
         { type: 'separator' },
+        cmd('Build a Set…', 'build-set', 'CmdOrCtrl+B'),
         cmd('Change Level…', 'level', 'CmdOrCtrl+L'),
         cmd('Start the Lesson Again', 'restart-lesson'),
       ],
@@ -237,6 +241,7 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
+        cmd('Show / Hide Lessons', 'toggle-lessons', 'CmdOrCtrl+T'),
         cmd('Appearance…', 'theme', 'CmdOrCtrl+Shift+A'),
         { type: 'separator' },
         { label: 'Cue Coach', accelerator: 'CmdOrCtrl+1', click: () => createLearnWindow() },
@@ -266,6 +271,12 @@ function buildMenu() {
 const fromUs = (e) => e.senderFrame?.url?.startsWith(ORIGIN);
 ipcMain.handle('pin', (e, v) => (fromUs(e) ? setPinned(v) : pinned));
 ipcMain.handle('get-pin', () => pinned);
+// AI coach (Claude): only the Learn window may use it. The key stays in this process, encrypted on disk.
+const fromLearn = (e) => fromUs(e) && learnWin && e.sender === learnWin.webContents;
+ipcMain.handle('ai-status', (e) => (fromLearn(e) ? ai.status() : null));
+ipcMain.handle('ai-set-key', (e, key) => (fromLearn(e) ? ai.setKey(key) : null));
+ipcMain.handle('ai-clear-key', (e) => (fromLearn(e) ? ai.clearKey() : null));
+ipcMain.handle('ai-request', (e, payload) => (fromLearn(e) ? ai.request(payload) : { error: 'Not allowed.' }));
 // The Learn page tells us its theme colours so the title bar and window background match.
 ipcMain.handle('chrome', (e, c) => {
   if (!fromUs(e) || !learnWin || e.sender !== learnWin.webContents) return;

@@ -4,7 +4,11 @@ import { ctx, Deck, beatmatch, synthDemoTrack, estimateGrid, setCrossfader } fro
 import { beatLen, barLen, fmtTime, timeOfBar } from './engine.js';
 import * as lib from './musiclib.js';
 import { readTags, TAG_BYTES } from './tags.js';
-import { STEPS, currentStep, beatHint, updateAligned, fill, HOLD_S } from './lesson.js';
+import { beatHint, updateAligned, fill, HOLD_S, ALIGN_MS, TEMPO_OK } from './lesson.js';
+import { LESSONS, TIERS, lessonById, advanceLesson, stepIndex, nextLesson, courseProgress } from './lessons.js';
+import { VIBES, quickSet, setMinutes } from './setbuilder.js';
+import { aiStatus, aiSetKey, aiClearKey, buildSetAI, suggestAI } from './coachai.js';
+import { keyRelation } from './library.js';
 import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex, eqBands } from './levels.js';
 import { JogWheel, jogHTML, dialHTML, setDial, bindDials } from './controls.js';
 import { icon } from './icons.js';
@@ -36,8 +40,13 @@ const state = {
   query: '', tab: 'all', target: null, menuOpen: false,
   analysing: null, scanToken: 0, loading: {},
   level: store.get('level', 'starter'), f: null,
-  skipped: new Set(), step: -1, aligned: 0, alignLocked: false, lessonDone: false,
-  cleanMixes: store.get('cleanMixes', 0), checkUntil: 0, xfader: 0, jogUsed: false,
+  aligned: 0, alignLocked: false, cleanMixes: store.get('cleanMixes', 0), checkUntil: 0, xfader: 0, jogUsed: false,
+  // lessons
+  lessonId: store.get('lesson', 'decks'), completed: store.get('completed', []), paneOpen: store.get('paneOpen', true),
+  ticked: new Set(), did: new Set(), skippedAny: false, lessonDone: false, played: { left: 0, right: 0 }, blend: null,
+  // set builder + AI
+  set: null, setMinutes: store.get('setMinutes', 60), setVibe: store.get('setVibe', 'journey'), setIdea: '', setBusy: false,
+  ai: { hasKey: false }, aiPicks: null, aiBusy: false,
 };
 state.f = featuresFor(state.level);
 
@@ -155,7 +164,10 @@ function renderDeck(side) {
     </div>
     <div class="deckfoot"><span class="role" data-live></span>${keys}<span class="grow"></span>${f.barCounter ? '<span class="barcount" data-bar></span>' : ''}
       <button class="ghost small" data-a="choose" title="Load a different track">${icon('eject', 14)} Change</button></div>`;
-  jogs[side] = new JogWheel($('[data-jog]', el), () => decks[side], () => { state.jogUsed = true; $('.jog', el)?.classList.add('used'); });
+  jogs[side] = new JogWheel($('[data-jog]', el), () => decks[side], (kind) => {
+    state.jogUsed = true; $('.jog', el)?.classList.add('used');
+    if (kind === 'jog' || kind === 'scrub') state.did.add(kind);
+  });
   d._wave = null; // rebuild waveform columns for the new canvas
 }
 
@@ -203,17 +215,23 @@ function drawMeters() {
 function mixState(dt) {
   const L = decks.left, R = decks.right;
   const bm = L.buffer && R.buffer ? beatmatch(L, R) : null;
+  for (const side of SIDES) { const d = decks[side]; if (d.playing && d.bpm) state.played[side] += (dt * d.bpm) / 240; }
+  const deckState = (d, side) => ({ loaded: !!d.buffer, playing: d.playing, bpm: d.bpm, title: d.track?.title, camelot: d.track?.camelot, eqLow: d.eq.low, playedBars: state.played[side] });
   const s = {
-    left: { loaded: !!L.buffer, playing: L.playing, bpm: L.bpm, title: L.track?.title },
-    right: { loaded: !!R.buffer, playing: R.playing, bpm: R.bpm, title: R.track?.title },
+    left: deckState(L, 'left'), right: deckState(R, 'right'),
     bpmDiff: bm ? bm.bpmDiff : null,
     offsetMs: bm && bm.both ? (bm.phase * 60000) / L.bpm : null,
     barOffset: bm && bm.both ? bm.barOffsetBeats : null,
     xfader: state.xfader, alignedFor: 0,
+    keyScore: L.track && R.track ? keyRelation(L.track.camelot, R.track.camelot).score : 0,
+    did: state.did,
   };
   state.aligned = updateAligned(state.aligned, s, dt);
-  if (state.aligned >= HOLD_S) state.alignLocked = true;
+  if (state.aligned >= HOLD_S) { state.alignLocked = true; state.did.add('wasLocked'); }
   if (!R.playing) state.alignLocked = false;
+  // "push it out on purpose": a clear drift after being lined up
+  if (state.did.has('wasLocked') && s.offsetMs != null && Math.abs(s.offsetMs) > 60) { state.did.add('driftOut'); state.alignLocked = false; }
+  if (s.offsetMs != null && Math.abs(s.offsetMs) > ALIGN_MS) state.alignLocked = false;
   s.alignedFor = state.alignLocked ? HOLD_S : state.aligned;
   return s;
 }
@@ -354,6 +372,7 @@ function renderLibrary() {
 const MAX_ROWS = 400;
 function renderList() {
   const el = $('#list'), ref = decks.left.track, f = state.f;
+  if (state.tab === 'set') return renderSet(el);
   if (!state.tracks.length) { el.innerHTML = `<div class="empty">${icon('music', 30)}<b>No music yet</b><span>Choose where your music comes from with the button above.</span></div>`; return; }
   let rows;
   if (state.tab === 'suggested') {
@@ -365,7 +384,18 @@ function renderList() {
   if (!rows.length) { el.innerHTML = `<div class="empty">${icon('search', 30)}<b>Nothing matches "${esc(state.query)}"</b></div>`; return; }
   const loaded = new Map(SIDES.map((s) => [decks[s].track?.id, s]));
   const head = `<div class="trow head"><span>Key</span><span>Track</span><span class="wide">Artist</span><span>BPM</span><span class="wide">Time</span><span class="wide">${ref ? 'With deck A' : ''}</span><span></span></div>`;
-  el.innerHTML = head + rows.slice(0, MAX_ROWS).map(({ track: t, match: m }) => {
+  let aiTop = '';
+  if (state.tab === 'suggested') {
+    const picks = state.aiPicks?.forId === ref.id ? state.aiPicks : null;
+    aiTop = `<div class="ai-bar">${icon('wand', 15)}${state.aiBusy ? '<span class="spinner"></span> The AI coach is thinking…' : picks ? `<span>${esc(picks.note)}</span>` : '<span>Want a second opinion? The AI coach picks 3 and tells you how to mix them in.</span>'}
+      <span style="flex:1"></span>${state.aiBusy ? '' : `<button data-a="ask-ai">${picks ? 'Ask again' : 'Ask the AI coach'}</button>`}</div>`
+      + (picks ? picks.picks.map((p) => `<div class="trow ai-row" data-id="${esc(p.track.id)}">${keyBadge(p.track)}<span class="t"><span class="ai-badge">AI</span> ${esc(p.track.title)}</span>
+        <span class="a wide">${esc(p.track.artist)}</span><span class="n">${fmtBpm(p.track.bpm)}</span><span class="wide"></span>
+        <span class="why wide" title="${esc(p.tip)}"><b>${esc(p.why)}</b> ${esc(p.tip)}</span>
+        <span class="acts" style="opacity:1"><button class="l" data-load="left">A</button><button class="r" data-load="right">B</button></span></div>`).join('') : '');
+    rows = rows.filter((r) => !picks?.picks.some((p) => p.track.id === r.track.id));
+  }
+  el.innerHTML = aiTop + head + rows.slice(0, MAX_ROWS).map(({ track: t, match: m }) => {
     const matchCell = !m ? '' : f.matchLabels
       ? `<span class="match ${m.level}">${m.label}</span>${f.matchReasons ? ` <span class="why">${esc(m.why.join(' · '))}</span>` : ''}`
       : `<span class="why">${m.pitch.pct != null ? `${m.pitch.pct >= 0 ? '+' : ''}${m.pitch.pct.toFixed(1)}%` : ''}</span>`;
@@ -378,39 +408,96 @@ function renderList() {
   }).join('') + (rows.length > MAX_ROWS ? `<div class="empty small">Showing ${MAX_ROWS} of ${rows.length}. Search to narrow it down.</div>` : '');
 }
 
-// ---------- coach ----------
-function renderCoach(s) {
-  const el = $('#coach'), f = state.f;
-  el.classList.toggle('hidden', !f.lesson);
-  if (!f.lesson) { $('#progress').innerHTML = ''; state.coachKey = null; return; }
-  const idx = state.lessonDone ? STEPS.length : currentStep(s, state.skipped);
-  if (idx === STEPS.length && !state.lessonDone) finishLesson();
-  const key = `${idx}|${fmtBpm(s.left.bpm, 2)}|${state.level}`;
-  if (key === state.coachKey) return;
-  state.coachKey = key; state.step = idx;
-  renderProgress(idx);
-  if (idx === STEPS.length) {
-    const up = suggestLevelUp(state.level, state.cleanMixes);
-    el.classList.add('complete');
-    el.innerHTML = `<div class="num">${icon('check', 16)}</div><div><h2>You did a mix!</h2><p>Deck B is playing to the room. ${up ? `That's ${state.cleanMixes} clean mixes: you're ready for ${esc(up.name)}.` : 'Do it again to make it feel natural.'}</p></div>
-      <div class="side">${up ? `<button class="primary" data-a="levelup" data-level="${up.id}">Try ${esc(up.name)}</button>` : ''}<button class="${up ? '' : 'primary'}" data-a="again">Mix another track</button></div>`;
-    return;
-  }
-  el.classList.remove('complete');
-  const st = STEPS[idx];
-  el.innerHTML = `<div class="num">${idx + 1}</div><div style="min-width:0"><h2>${esc(st.title)}</h2>${f.lessonDetail ? `<p title="${esc(fill(st.body, s))}">${esc(fill(st.body, s))}</p>` : ''}</div>
-    <div class="side">${st.key ? kbd(st.key) : ''}${st.action === 'music' ? `<button class="primary" data-a="music">${icon('search', 15)} Browse music</button>` : ''}<button class="ghost" data-a="skip">Skip</button></div>`;
-}
+// ---------- lessons ----------
+const lesson = () => lessonById(state.lessonId);
 
-function renderProgress(idx) {
-  $('#progress').innerHTML = !state.f.lesson ? '' : `<span>${idx >= STEPS.length ? 'Lesson complete' : `Your first mix · step ${idx + 1} of ${STEPS.length}`}</span><div class="dots">${STEPS.map((_, i) => `<span class="${i < idx ? 'done' : i === idx ? 'now' : ''}"></span>`).join('')}</div>`;
+function startLesson(id) {
+  state.lessonId = lessonById(id).id; store.set('lesson', state.lessonId);
+  state.ticked = new Set(); state.did = new Set(); state.skippedAny = false; state.lessonDone = false;
+  state.played = { left: 0, right: 0 }; state.alignLocked = false; state.coachKey = null; state.blend = null;
+  renderTutor();
 }
 
 function finishLesson() {
   state.lessonDone = true;
-  state.cleanMixes = state.skipped.size ? state.cleanMixes : state.cleanMixes + 1; // skipped steps don't count
-  store.set('cleanMixes', state.cleanMixes);
+  if (!state.completed.includes(state.lessonId)) { state.completed = [...state.completed, state.lessonId]; store.set('completed', state.completed); }
+  if (state.lessonId === 'first-mix' && !state.skippedAny) { state.cleanMixes += 1; store.set('cleanMixes', state.cleanMixes); }
+  toast(`Lesson complete: ${lesson().title}`);
 }
+
+function renderCoach(s) {
+  const el = $('#coach'), f = state.f, L = lesson();
+  const show = f.lesson || state.paneOpen;
+  el.classList.toggle('hidden', !show);
+  if (!show) { $('#progress').innerHTML = ''; state.coachKey = null; return; }
+  if (!state.lessonDone) {
+    state.ticked = advanceLesson(L, s, state.ticked);
+    if (stepIndex(L, state.ticked) >= L.steps.length) finishLesson();
+  }
+  const idx = state.lessonDone ? L.steps.length : stepIndex(L, state.ticked);
+  const key = `${L.id}|${idx}|${fmtBpm(s.left.bpm, 2)}|${state.level}|${state.f.lessonDetail}`;
+  if (key === state.coachKey) return;
+  state.coachKey = key;
+  renderProgress(L, idx);
+  renderTutor();
+  if (idx >= L.steps.length) {
+    const next = nextLesson(L.id, state.completed);
+    const up = L.id === 'first-mix' ? suggestLevelUp(state.level, state.cleanMixes) : null;
+    el.classList.add('complete');
+    el.innerHTML = `<div class="num">${icon('check', 16)}</div><div style="min-width:0"><h2>${esc(L.title)}: done!</h2><p>${up ? `That's ${state.cleanMixes} clean mixes: you're ready for ${esc(up.name)}.` : next ? `Up next: ${esc(next.title)}.` : 'You\'ve finished the course. Nice work.'}</p></div>
+      <div class="side">${up ? `<button data-a="levelup" data-level="${up.id}">Try ${esc(up.name)}</button>` : ''}${L.id === 'first-mix' ? '<button data-a="again">Mix another track</button>' : `<button data-a="repeat">Do it again</button>`}${next ? `<button class="primary" data-a="next" data-lesson="${next.id}">Next lesson ${icon('chevron', 14, 'style="transform:rotate(-90deg)"')}</button>` : ''}</div>`;
+    return;
+  }
+  el.classList.remove('complete');
+  const st = L.steps[idx];
+  const body = fill(st.body, s);
+  el.innerHTML = `<div class="num">${idx + 1}</div><div style="min-width:0"><h2>${esc(st.title)}</h2>${f.lessonDetail || state.paneOpen ? `<p title="${esc(body)}">${esc(body)}</p>` : ''}</div>
+    <div class="side">${st.key ? kbd(st.key) : ''}${st.action === 'music' ? `<button class="primary" data-a="music">${icon('search', 15)} Browse music</button>` : ''}<button class="ghost" data-a="skip">Skip step</button></div>`;
+}
+
+function renderProgress(L, idx) {
+  $('#progress').innerHTML = `<span>${esc(L.title)} · ${idx >= L.steps.length ? 'done' : `step ${idx + 1} of ${L.steps.length}`}</span><div class="dots">${L.steps.map((_, i) => `<span class="${i < idx ? 'done' : i === idx ? 'now' : ''}"></span>`).join('')}</div>`;
+}
+
+const NEEDS = { bassEQ: ['the Bass dial', 'improver'], barCounter: ['the bar counter', 'improver'] };
+function renderTutor() {
+  const el = $('#tutor');
+  el.classList.toggle('hidden', !state.paneOpen);
+  $('#lessonsBtn').setAttribute('aria-pressed', state.paneOpen); $('#lessonsBtn').classList.toggle('on', state.paneOpen);
+  if (!state.paneOpen) return;
+  const L = lesson(), idx = state.lessonDone ? L.steps.length : stepIndex(L, state.ticked), prog = courseProgress(state.completed);
+  const need = L.needs && !state.f[L.needs] && NEEDS[L.needs];
+  const next = nextLesson(L.id, state.completed);
+  const stepRow = (st, i) => {
+    const cls = i < idx ? 'done' : i === idx ? 'now' : '';
+    return `<li class="${cls}">${icon(i < idx ? 'check' : i === idx ? 'dot' : 'circle', 16)}<div><b>${esc(st.title)}</b>${i === idx ? `<p>${esc(st.body)}</p>` : ''}</div></li>`;
+  };
+  el.innerHTML = `
+    <div class="tutor-head">${icon('book', 17)}<b>Lessons</b><span class="grow"></span><span class="small muted">${prog.done} of ${prog.total} done</span>
+      <button class="icon-btn" data-a="close" title="Hide lessons (L)" aria-label="Hide lessons">${icon('x', 16)}</button></div>
+    <div class="tutor-body">
+      <div class="bar" title="${prog.done} of ${prog.total} lessons"><i style="width:${(prog.done / prog.total) * 100}%"></i></div>
+      <div class="lesson-card">
+        <span class="tier-tag">${esc(TIERS.find((t) => t.id === L.tier).name)} · ${L.minutes} min</span>
+        <h3>${esc(L.title)}</h3>
+        <p class="why">${esc(L.why)}</p>
+        ${need ? `<div class="notice">This lesson uses ${need[0]}, which appears at the Improver level.<button class="primary" data-a="need-level" data-level="${need[1]}">Switch to Improver</button></div>` : ''}
+        ${L.hidesLane ? '<div class="notice">The beat lane stays hidden during this lesson. Use your ears.</div>' : ''}
+        <ol class="steps">${L.steps.map(stepRow).join('')}</ol>
+        <div class="card-actions">
+          ${idx >= L.steps.length && next ? `<button class="primary" data-lesson="${next.id}">Next: ${esc(next.title)}</button>` : ''}
+          <button class="ghost" data-a="restart-lesson">${idx > 0 ? 'Start over' : 'Restart'}</button>
+        </div>
+      </div>
+      ${TIERS.map((t, ti) => `<div class="course"><h4><span>${esc(t.name)}</span><span>${prog.tiers[ti].done}/${prog.tiers[ti].total}</span></h4>
+        ${LESSONS.filter((l) => l.tier === t.id).map((l) => {
+          const done = state.completed.includes(l.id);
+          return `<button class="${l.id === L.id ? 'active' : ''} ${done ? 'done' : ''}" data-lesson="${l.id}">${icon(done ? 'check' : l.id === L.id ? 'dot' : 'circle', 15)}<span>${esc(l.title)}</span><small>${l.minutes} min</small></button>`;
+        }).join('')}</div>`).join('')}
+    </div>`;
+}
+
+function setPane(open) { state.paneOpen = open; store.set('paneOpen', open); state.coachKey = null; renderTutor(); for (const s of SIDES) decks[s]._wave = null; }
 
 function mixAgain() {
   // The track on B is now the one in the room; move it to A and start fresh on B.
@@ -423,8 +510,8 @@ function mixAgain() {
   if (keep.playing) decks.left.play();
   decks.right = makeDeck('right');
   state.xfader = 0; applyXfader();
-  state.lessonDone = false; state.skipped.clear(); state.alignLocked = false; state.coachKey = null;
   if (state.f.upNext) state.tab = 'suggested';
+  startLesson(state.lessonId);
   renderDecks(); renderMixer(); renderLibrary();
   toast('The track you mixed in moved to deck A. Pick the next one for deck B.');
 }
@@ -444,9 +531,10 @@ function fitCanvas(cv) {
 }
 
 function drawLane(hint) {
-  const visible = state.f.beatLane || (state.f.beatLaneCheck && performance.now() < state.checkUntil);
-  $('#laneCover').classList.toggle('hidden', visible || !state.f.beatLaneCheck);
-  $('#lanePanel').classList.toggle('hidden', !state.f.beatLane && !state.f.beatLaneCheck);
+  const byEar = state.f.beatLaneCheck || (lesson().hidesLane && !state.lessonDone);
+  const visible = (state.f.beatLane && !byEar) || (byEar && performance.now() < state.checkUntil);
+  $('#laneCover').classList.toggle('hidden', visible || !byEar);
+  $('#lanePanel').classList.toggle('hidden', !state.f.beatLane && !byEar);
   if (!visible || lane.clientWidth === 0) return;
   const { g, w, h } = fitCanvas(lane);
   g.clearRect(0, 0, w, h);
@@ -512,7 +600,7 @@ function frame(now) {
   const hint = beatHint(s);
   const hel = $('#hint');
   const checking = performance.now() < state.checkUntil;
-  if (hint && (state.f.offsetHint || checking)) { hel.className = `hint ${hint.tone}`; hel.textContent = hint.text; }
+  if (hint && ((state.f.offsetHint && !(lesson().hidesLane && !state.lessonDone)) || checking)) { hel.className = `hint ${hint.tone}`; hel.textContent = hint.text; }
   else if (hint) { hel.className = 'hint'; hel.textContent = 'Trust your ears'; }
   else { hel.className = 'hint'; hel.textContent = 'Play both decks to compare beats'; }
   drawLane(hint);
@@ -546,7 +634,18 @@ function stepTempo(side, delta) {
   d.setTempo(Math.max(-r, Math.min(r, Math.round((d.tempoPct + delta) * 100) / 100)));
 }
 function nudge(side, dir) { const d = decks[side]; if (d.buffer) d.setBend(dir * 0.04); }
-function togglePlay(side) { const d = decks[side]; if (!d.buffer) return focusLibrary(side); ctx.resume(); d.toggle(); }
+function togglePlay(side) {
+  const d = decks[side]; if (!d.buffer) return focusLibrary(side);
+  ctx.resume();
+  const starting = !d.playing;
+  d.toggle();
+  // Started deck B at the top of one of A's 16-bar phrases?
+  const A = decks.left, g = A.track?.grid;
+  if (starting && side === 'right' && A.playing && g) {
+    const bars = (A.position() - g.firstDownbeat) / barLen(g), inPhrase = ((bars % 16) + 16) % 16;
+    if (inPhrase < 0.25 || inPhrase > 15.85) state.did.add('phraseStart');
+  }
+}
 function setEQ(side, band, db, rerender = true) {
   const d = decks[side]; d.eq[band] = db; d.setEQ(band, db);
   if (rerender) { const dial = $(`[data-dial="${side}:${band}"]`); if (dial) setDial(dial, db); }
@@ -556,8 +655,30 @@ function setListen(side, on) {
   const d = decks[side]; d.listening = on; d.listenGain.gain.value = on ? 0.5 : 0;
   const b = $(`[data-listen="${side}"]`); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
 }
-function moveXfader(x) { state.xfader = Math.max(0, Math.min(1, x)); applyXfader(); }
-function check() { if (state.f.beatLaneCheck) state.checkUntil = performance.now() + 3000; }
+function moveXfader(x) {
+  state.xfader = Math.max(0, Math.min(1, x)); applyXfader();
+  // Time the blend from A to B, in deck A's bars.
+  const A = decks.left;
+  if (state.xfader <= 0.1) state.blend = null;
+  else if (!state.blend && A.playing && A.bpm) state.blend = { t: performance.now(), bpm: A.bpm };
+  if (state.blend && state.xfader >= 0.9) {
+    const bars = ((performance.now() - state.blend.t) / 1000) * state.blend.bpm / 240;
+    if (bars >= 8) { state.did.add('slowBlend'); toast(`Smooth: that blend took ${Math.round(bars)} bars.`); }
+    else if (lesson().id === 'smooth') toast(`That took ${Math.max(1, Math.round(bars))} bars. Go back to A and try 8 or more.`);
+    state.blend = null;
+  }
+}
+function check() {
+  const byEar = state.f.beatLaneCheck || lesson().hidesLane;
+  if (!byEar) return;
+  state.checkUntil = performance.now() + 3000;
+  const L = decks.left, R = decks.right;
+  if (!(L.playing && R.playing && L.track?.grid && R.track?.grid)) return toast('Play both decks first.');
+  const bm = beatmatch(L, R), off = (bm.phase * 60000) / L.bpm;
+  if (Math.abs(bm.bpmDiff) > TEMPO_OK) return toast(`Speeds don't match yet: B is ${Math.abs(bm.bpmDiff).toFixed(2)} BPM ${bm.bpmDiff > 0 ? 'faster' : 'slower'}.`);
+  if (Math.abs(off) <= ALIGN_MS) { state.did.add('checkOk'); toast('Spot on: your ears got it.'); }
+  else toast(`Close: B is ${Math.abs(off).toFixed(0)} ms ${off > 0 ? 'early' : 'late'}.`);
+}
 
 // ---------- events ----------
 function deckEvents(side) {
@@ -569,7 +690,7 @@ function deckEvents(side) {
     if (a === 'choose') return focusLibrary(side, side === 'right' && state.f.upNext && decks.left.buffer ? 'suggested' : 'all');
     if (!d().buffer) return;
     if (a === 'play') togglePlay(side);
-    else if (a === 'restart') d().seek(d().track.grid?.firstDownbeat || 0);
+    else if (a === 'restart') { d().seek(d().track.grid?.firstDownbeat || 0); state.did.add('restart'); }
     else if (a === 'slower' || a === 'faster') stepTempo(side, (a === 'faster' ? 1 : -1) * (e.shiftKey ? 1 : FINE));
   });
   el.addEventListener('input', (e) => { if (e.target.dataset.a === 'tempo') d().setTempo(+e.target.value); });
@@ -610,11 +731,32 @@ function bind() {
   $('#levelBtn').addEventListener('click', () => { renderLevels(); $('#levels').showModal(); });
   $('#levelList').addEventListener('click', (e) => { const b = e.target.closest('[data-level]'); if (b) { setLevel(b.dataset.level); $('#levels').close(); } });
   $('#checkBtn').addEventListener('click', check);
+  $('#lessonsBtn').innerHTML = icon('book', 18); $('#aiBtn').innerHTML = icon('wand', 18);
+  $('#lessonsBtn').addEventListener('click', () => setPane(!state.paneOpen));
+  $('#aiBtn').addEventListener('click', openAI);
+  $('#tutor').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.a === 'close') setPane(false);
+    else if (b.dataset.a === 'restart-lesson') startLesson(state.lessonId);
+    else if (b.dataset.a === 'need-level') setLevel(b.dataset.level);
+    else if (b.dataset.lesson) startLesson(b.dataset.lesson);
+  });
+  $('#aiForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('#aiErr').textContent = ''; $('#aiSave').disabled = true; $('#aiSave').textContent = 'Checking…';
+    const r = await aiSetKey($('#aiKey').value);
+    $('#aiSave').disabled = false; $('#aiSave').textContent = 'Save key';
+    if (r?.error) { $('#aiErr').textContent = r.error; return; }
+    $('#aiKey').value = ''; state.ai = r; renderAI(); toast('AI coach connected.');
+  });
+  $('#aiRemove').addEventListener('click', async () => { state.ai = await aiClearKey(); renderAI(); });
   $('#coach').addEventListener('click', (e) => {
     const b = e.target.closest('[data-a]'); if (!b) return;
-    if (b.dataset.a === 'music') { const side = state.step <= 1 ? 'left' : 'right'; focusLibrary(side, side === 'right' && state.f.upNext ? 'suggested' : 'all'); }
-    else if (b.dataset.a === 'skip') { state.skipped.add(STEPS[state.step].id); state.coachKey = null; }
+    if (b.dataset.a === 'music') { const side = decks.left.buffer ? 'right' : 'left'; focusLibrary(side, side === 'right' && state.f.upNext ? 'suggested' : 'all'); }
+    else if (b.dataset.a === 'skip') { const L = lesson(), st = L.steps[stepIndex(L, state.ticked)]; if (st) { state.ticked.add(st.id); state.skippedAny = true; state.coachKey = null; } }
     else if (b.dataset.a === 'again') mixAgain();
+    else if (b.dataset.a === 'repeat') startLesson(state.lessonId);
+    else if (b.dataset.a === 'next') startLesson(b.dataset.lesson);
     else if (b.dataset.a === 'levelup') { state.cleanMixes = 0; store.set('cleanMixes', 0); setLevel(b.dataset.level); mixAgain(); }
   });
   $('#welcomeView').addEventListener('click', async (e) => {
@@ -643,8 +785,20 @@ function bind() {
     $('#welcomeView').classList.add('hidden');
   });
   $('#search').addEventListener('input', (e) => { state.query = e.target.value; renderList(); });
+  $('#list').addEventListener('change', (e) => {
+    if (e.target.id === 'setMinutes') { state.setMinutes = +e.target.value; store.set('setMinutes', state.setMinutes); }
+    if (e.target.id === 'setVibe') { state.setVibe = e.target.value; store.set('setVibe', state.setVibe); }
+  });
+  $('#list').addEventListener('input', (e) => { if (e.target.id === 'setIdea') state.setIdea = e.target.value; });
   const rowTrack = (e) => { const row = e.target.closest('.trow[data-id]'); return row && state.tracks.find((x) => x.id === row.dataset.id); };
   $('#list').addEventListener('click', (e) => {
+    const a = e.target.closest('[data-a]')?.dataset.a;
+    if (a === 'ask-ai') return askAICoach();
+    if (a === 'build-ai') return buildSet(true);
+    if (a === 'build-quick') return buildSet(false);
+    if (a === 'load-next') return loadNextFromSet();
+    if (a === 'clear-set') { state.set = null; store.set('set', null); return renderList(); }
+    if (a === 'ai-settings') return openAI();
     const b = e.target.closest('[data-load]'); if (!b) return;
     const t = rowTrack(e); if (t) loadTo(b.dataset.load, t);
   });
@@ -670,7 +824,10 @@ function runCommand(cmd) {
     level: () => { renderLevels(); $('#levels').showModal(); },
     theme: () => { renderThemes(); $('#themes').showModal(); },
     help: () => $('#help').showModal(),
-    'restart-lesson': () => { state.lessonDone = false; state.skipped.clear(); state.coachKey = null; },
+    'restart-lesson': () => startLesson(state.lessonId),
+    'toggle-lessons': () => setPane(!state.paneOpen),
+    'build-set': () => focusLibrary(null, 'set'),
+    ai: openAI,
   }[cmd] || (() => {}))();
 }
 
@@ -684,8 +841,9 @@ function onKey(e) {
     p: () => togglePlay('right'),
     arrowup: () => stepTempo('right', e.shiftKey ? 1 : FINE),
     arrowdown: () => stepTempo('right', e.shiftKey ? -1 : -FINE),
-    arrowleft: () => !e.repeat && nudge('right', -1),
-    arrowright: () => !e.repeat && nudge('right', 1),
+    arrowleft: () => { if (!e.repeat) { nudge('right', -1); state.did.add('jog'); } },
+    arrowright: () => { if (!e.repeat) { nudge('right', 1); state.did.add('jog'); } },
+    l: () => setPane(!state.paneOpen),
     '[': () => moveXfader(state.xfader - 0.05),
     ']': () => moveXfader(state.xfader + 0.05),
     '/': () => focusLibrary(null),
@@ -697,6 +855,101 @@ function onKey(e) {
   e.preventDefault(); act();
 }
 
+// ---------- set builder ----------
+function setItems() {
+  if (!state.set) return [];
+  const byId = new Map(state.tracks.map((t) => [t.id, t]));
+  return state.set.items.map((i) => ({ ...i, track: byId.get(i.id) })).filter((i) => i.track);
+}
+function saveSet(set) {
+  state.set = set && { title: set.title, story: set.story, ai: !!set.ai, items: set.items.map((i) => ({ id: i.track.id, why: i.why, tip: i.tip || '' })), played: [] };
+  store.set('set', state.set);
+}
+
+async function buildSet(useAI) {
+  if (!state.tracks.length) return toast('Add some music first.');
+  const first = decks.left.track || null;
+  if (!useAI) {
+    const items = quickSet(state.tracks, { minutes: state.setMinutes, vibe: state.setVibe, first });
+    saveSet({ title: `${VIBES.find((v) => v.id === state.setVibe).name} set`, story: `Built from your library: neighbouring keys, small speed changes and an energy shape that fits the vibe.`, items });
+    return renderList();
+  }
+  if (!state.ai.hasKey) { toast('Connect the AI coach first.'); return openAI(); }
+  state.setBusy = true; renderList();
+  try {
+    const r = await buildSetAI({ library: state.tracks, minutes: state.setMinutes, vibe: VIBES.find((v) => v.id === state.setVibe).name, idea: state.setIdea, level: state.level, first });
+    saveSet({ ...r, ai: true });
+  } catch (err) { toast(err.message); if (err.noKey) openAI(); }
+  finally { state.setBusy = false; renderList(); }
+}
+
+function nextSetItem() {
+  const loaded = new Set(SIDES.map((s) => decks[s].track?.id));
+  const items = setItems(), played = new Set(state.set?.played || []);
+  return items.find((i) => !played.has(i.track.id) && !loaded.has(i.track.id)) || null;
+}
+function loadNextFromSet() {
+  const n = nextSetItem(); if (!n) return toast('That\'s the end of the set.');
+  // Load on whichever deck the room isn't hearing.
+  const side = !decks.left.buffer ? 'left' : !decks.right.buffer ? 'right' : state.xfader < 0.5 ? 'right' : 'left';
+  const old = decks[side].track?.id; if (old && !state.set.played.includes(old)) { state.set.played.push(old); store.set('set', state.set); }
+  loadTo(side, n.track);
+}
+
+function renderSet(el) {
+  const items = setItems(), next = nextSetItem(), played = new Set(state.set?.played || []);
+  const loaded = new Map(SIDES.map((s) => [decks[s].track?.id, s]));
+  const form = `<div class="set-form">
+    <label>Length <select id="setMinutes">${[30, 45, 60, 90, 120].map((m) => `<option value="${m}" ${m === state.setMinutes ? 'selected' : ''}>${m} min</option>`).join('')}</select></label>
+    <label>Vibe <select id="setVibe">${VIBES.map((v) => `<option value="${v.id}" ${v.id === state.setVibe ? 'selected' : ''} title="${esc(v.blurb)}">${esc(v.name)}</option>`).join('')}</select></label>
+    <input type="text" id="setIdea" placeholder="Describe the night (optional): sunset rooftop, deep and warm…" value="${esc(state.setIdea)}">
+    ${state.setBusy ? '<span class="status"><span class="spinner"></span> Building your set…</span>' : `<button class="primary" data-a="build-ai" title="${state.ai.hasKey ? 'Claude plans the set from your library' : 'Connect the AI coach first'}">${icon('wand', 15)} Build with AI</button>
+    <button data-a="build-quick" title="Instant, no internet needed">Quick build</button>`}
+    ${decks.left.track ? `<span class="small muted">Starts from deck A: ${esc(decks.left.track.title)}</span>` : ''}
+  </div>`;
+  if (!items.length) {
+    el.innerHTML = form + `<div class="empty">${icon('list', 30)}<b>Plan a set</b><span>Pick a length and a vibe. The AI coach orders your tracks into a set that flows, with a tip for every mix.${state.ai.hasKey ? '' : ' <button class="ghost" data-a="ai-settings">Connect the AI coach</button> or use Quick build.'}</span></div>`;
+    return;
+  }
+  el.innerHTML = form + `<div class="set-head">${state.set.ai ? '<span class="ai-badge">AI</span>' : icon('list', 16)}<div style="min-width:0;flex:1"><b>${esc(state.set.title)}</b><p>${esc(state.set.story)} · ${items.length} tracks · about ${setMinutes(items)} min</p></div>
+      ${next ? `<button class="primary" data-a="load-next">Load next: ${esc(next.track.title)}</button>` : ''}<button class="ghost" data-a="clear-set">Clear</button></div>`
+    + items.map((i, n) => {
+      const on = loaded.get(i.track.id);
+      return `<div class="srow ${i === next ? 'next' : ''} ${played.has(i.track.id) ? 'played' : ''}" data-id="${esc(i.track.id)}">
+        <span class="num">${n + 1}</span>${keyBadge(i.track)}
+        <span style="min-width:0"><span class="t" style="display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${on ? `<span style="color:var(--${on})">● </span>` : ''}${esc(i.track.title)}</span><span class="a" style="display:block;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(i.track.artist)}</span></span>
+        <span class="n" style="font-variant-numeric:tabular-nums">${fmtBpm(i.track.bpm)}</span>
+        <span class="tip"><b>${esc(i.why)}</b>${i.tip ? `<br>${esc(i.tip)}` : ''}</span>
+        <span class="acts" style="display:flex;gap:4px;justify-content:flex-end"><button class="l" data-load="left" style="padding:1px 8px;font-size:11px;font-weight:700;color:var(--left)">A</button><button class="r" data-load="right" style="padding:1px 8px;font-size:11px;font-weight:700;color:var(--right)">B</button></span></div>`;
+    }).join('');
+}
+
+// ---------- AI coach ----------
+function openAI() { renderAI(); $('#aiDlg').showModal(); }
+function renderAI() {
+  const a = state.ai;
+  $('#aiState').innerHTML = a.hasKey ? `<span class="ok-pill">${icon('check', 14)} Connected · ${esc(a.model || 'Claude')}</span>` : `<span class="off-pill">${icon('key', 14)} Not connected</span>`;
+  $('#aiRemove').classList.toggle('hidden', !a.hasKey);
+  $('#aiKey').placeholder = a.hasKey ? 'Paste a new key to replace it' : 'sk-ant-…';
+  $('#aiWhere').textContent = a.where === 'desktop'
+    ? `Your key is encrypted with your computer's secure storage${a.secure ? '' : ' (not available on this computer)'} and never leaves the app except to talk to Anthropic.`
+    : 'In this browser the key is stored on this computer only. The desktop app keeps it encrypted instead.';
+  $('#aiBtn').classList.toggle('on', !!a.hasKey);
+  if (state.tab === 'set' || state.tab === 'suggested') renderList();
+}
+
+async function askAICoach() {
+  const ref = decks.left.track; if (!ref) return toast('Load a track on deck A first.');
+  if (!state.ai.hasKey) { toast('Connect the AI coach first.'); return openAI(); }
+  state.aiBusy = true; renderList();
+  try {
+    const ranked = lib.rankNext(ref, state.tracks, { exclude: [decks.right.track?.id], limit: 25 });
+    const r = await suggestAI({ current: ref, ranked, played: [], level: state.level });
+    state.aiPicks = { forId: ref.id, ...r };
+  } catch (err) { toast(err.message); if (err.noKey) openAI(); }
+  finally { state.aiBusy = false; renderList(); }
+}
+
 // ---------- start ----------
 async function boot() {
   if (desktop?.platform) document.documentElement.classList.add(desktop.platform);
@@ -704,6 +957,8 @@ async function boot() {
   bind();
   setLevel(state.level, true);
   renderSource();
+  startLesson(state.lessonId);
+  aiStatus().then((st) => { state.ai = st; renderAI(); });
   lib.rekordboxAvailable().then((ok) => {
     state.rbAvailable = ok; renderSource();
     if (!ok) { $('#rbChoice').disabled = true; $('#rbChoiceNote').textContent = 'Not connected. Open Cue Coach on a computer with rekordbox.'; }
