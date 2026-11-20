@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cue Coach</title>
+<style>
+:root {
+  --bg: #f6f5f1; --card: #ffffff; --card-2: #f1efe9; --line: #e6e3db; --line-2: #d6d2c7;
+  --ink: #1d2230; --ink-2: #5c6272; --ink-3: #9096a3;
+  --left: #2f7df6; --left-soft: #e6f0ff; --right: #ff6b4a; --right-soft: #ffece7;
+  --ok: #17a364; --ok-soft: #e3f6ec; --close: #c98a00; --close-soft: #fff4d6; --warn: #e0533d; --warn-soft: #fde9e5;
+  --focus: 0 0 0 3px rgba(47, 125, 246, .35);
+  --r: 18px; --r-sm: 12px;
+  font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161b; --card: #1c1f26; --card-2: #23272f; --line: #2c313b; --line-2: #3a404c;
+    --ink: #eef0f4; --ink-2: #a9afbc; --ink-3: #737a88;
+    --left: #5b9bff; --left-soft: #1d2a42; --right: #ff8566; --right-soft: #3a2420;
+    --ok: #3fd18b; --ok-soft: #173326; --close: #f2b631; --close-soft: #3a3016; --warn: #ff7a64; --warn-soft: #3b211d;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.45; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; border: 1px solid var(--line-2); background: var(--card); border-radius: 999px; padding: 8px 16px; transition: transform .08s, background .15s, border-color .15s; }
+button:hover { border-color: var(--ink-3); }
+button:active { transform: scale(.97); }
+button:focus-visible, input:focus-visible { outline: none; box-shadow: var(--focus); }
+button.primary { background: var(--ink); color: var(--card); border-color: var(--ink); }
+button.ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
+button.ghost:hover { background: var(--card-2); }
+.hidden { display: none !important; }
+.muted { color: var(--ink-2); }
+.small { font-size: 13px; }
+
+/* header */
+header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; padding: 12px 24px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
+.logo i { width: 26px; height: 26px; border-radius: 50%; background: conic-gradient(var(--left) 0 50%, var(--right) 50% 100%); display: inline-block; }
+nav { display: flex; gap: 4px; background: var(--card-2); padding: 4px; border-radius: 999px; }
+nav button { border: none; background: transparent; padding: 6px 16px; color: var(--ink-2); }
+nav button.active { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.progress { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); }
+.dots { display: flex; gap: 5px; }
+.dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.dots span.done { background: var(--ok); }
+.dots span.now { background: var(--ink); transform: scale(1.25); }
+
+main { max-width: 1180px; margin: 0 auto; padding: 22px 24px 60px; display: grid; gap: 18px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 20px; min-width: 0; }
+
+/* welcome */
+.welcome { text-align: center; padding: 48px 20px 20px; }
+.welcome h1 { font-size: 34px; letter-spacing: -.02em; margin: 0 0 8px; }
+.welcome p.lead { color: var(--ink-2); font-size: 17px; margin: 0 auto 32px; max-width: 520px; }
+.choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; max-width: 900px; margin: 0 auto; text-align: left; }
+.choice { display: grid; gap: 8px; border-radius: var(--r); padding: 22px; text-align: left; background: var(--card); border: 1px solid var(--line); }
+.choice:hover { border-color: var(--ink-3); transform: translateY(-2px); }
+.choice b { font-size: 17px; }
+.choice .icon { font-size: 26px; }
+.choice .tag { justify-self: start; font-size: 12px; padding: 2px 10px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+.choice[disabled] { opacity: .55; cursor: default; transform: none; }
+
+/* coach */
+.coach { display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; border: 2px solid var(--ink); }
+.coach .num { width: 48px; height: 48px; border-radius: 50%; background: var(--ink); color: var(--card); display: grid; place-items: center; font-weight: 700; font-size: 18px; }
+.coach h2 { margin: 0 0 2px; font-size: 21px; letter-spacing: -.01em; }
+.coach p { margin: 0; color: var(--ink-2); }
+.coach .side { display: flex; gap: 8px; align-items: center; }
+kbd { font: 600 12px ui-monospace, monospace; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--line-2); border-bottom-width: 2px; background: var(--card-2); color: var(--ink-2); }
+.coach.complete { border-color: var(--ok); background: var(--ok-soft); }
+.coach.complete .num { background: var(--ok); }
+
+/* beat lane */
+.lane-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.lane-head h3 { margin: 0; font-size: 14px; color: var(--ink-2); font-weight: 600; }
+.hint { font-weight: 600; font-size: 14px; padding: 5px 14px; border-radius: 999px; background: var(--card-2); color: var(--ink-2); transition: background .2s, color .2s; }
+.hint.ok { background: var(--ok-soft); color: var(--ok); }
+.hint.close { background: var(--close-soft); color: var(--close); }
+.hint.warn { background: var(--warn-soft); color: var(--warn); }
+#lane { width: 100%; height: 132px; display: block; border-radius: var(--r-sm); background: var(--card-2); }
+
+/* decks */
+.decks { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+.deck { position: relative; display: grid; gap: 14px; }
+.deck[data-side="left"] { --c: var(--left); --soft: var(--left-soft); }
+.deck[data-side="right"] { --c: var(--right); --soft: var(--right-soft); }
+.deck .role { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--c); }
+.deck .role::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+.deck .role .live { margin-left: auto; font-weight: 500; color: var(--ink-3); }
+.track-row { display: flex; gap: 14px; align-items: center; min-height: 52px; }
+.track-row .meta { flex: 1; min-width: 0; }
+.track-row .title { font-weight: 700; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.01em; }
+.track-row .artist { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bpm { text-align: right; font-variant-numeric: tabular-nums; }
+.bpm b { display: block; font-size: 26px; line-height: 1; letter-spacing: -.02em; }
+.bpm span { font-size: 12px; color: var(--ink-3); }
+.wave { width: 100%; height: 56px; display: block; border-radius: 10px; background: var(--soft); cursor: pointer; }
+.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.play { width: 58px; height: 58px; padding: 0; border-radius: 50%; background: var(--c); border-color: var(--c); color: #fff; font-size: 22px; display: grid; place-items: center; }
+.play:hover { filter: brightness(1.06); border-color: var(--c); }
+.speed { flex: 1; min-width: 200px; display: grid; gap: 4px; }
+.speed .row { display: flex; align-items: center; gap: 8px; }
+.speed label { font-size: 12px; color: var(--ink-3); display: flex; justify-content: space-between; }
+.round { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; font-weight: 700; }
+input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 6px; border-radius: 99px; background: var(--card-2); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--card); border: 2px solid var(--c, var(--ink)); box-shadow: 0 1px 3px rgba(0,0,0,.15); cursor: grab; }
+.nudge { display: flex; gap: 8px; }
+.nudge button { flex: 1; }
+.toggle.on { background: var(--soft); border-color: var(--c); color: var(--c); font-weight: 600; }
+.empty-deck { display: grid; place-items: center; gap: 10px; text-align: center; padding: 26px 10px; border: 2px dashed var(--line-2); border-radius: var(--r-sm); color: var(--ink-2); }
+.empty-deck.dragover { border-color: var(--c); background: var(--soft); }
+.keybadge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: #fff; white-space: nowrap; }
+.keybadge.unknown { background: var(--card-2); color: var(--ink-3); }
+
+/* mixer */
+.mixer { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; }
+.mixer span { font-weight: 600; font-size: 13px; }
+#xfader { --c: var(--ink); height: 10px; background: linear-gradient(90deg, var(--left), var(--line-2) 50%, var(--right)); }
+#xfader::-webkit-slider-thumb { width: 34px; height: 26px; border-radius: 8px; }
+
+/* up next */
+.next h3 { margin: 0 0 12px; font-size: 14px; color: var(--ink-2); font-weight: 600; }
+.next-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.pick { display: grid; gap: 6px; padding: 14px; border-radius: var(--r-sm); background: var(--card-2); border: 1px solid transparent; }
+.pick .t { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick .why { font-size: 13px; color: var(--ink-2); }
+.pick button { justify-self: start; padding: 5px 14px; font-size: 13px; }
+.match { justify-self: start; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+.match.great { background: var(--ok-soft); color: var(--ok); }
+.match.good { background: var(--close-soft); color: var(--close); }
+.match.tricky { background: var(--warn-soft); color: var(--warn); }
+
+/* music */
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.search { flex: 1; min-width: 220px; position: relative; }
+.search input { width: 100%; padding: 12px 16px 12px 42px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--card); font-size: 16px; }
+.search::before { content: "⌕"; position: absolute; left: 16px; top: 50%; transform: translateY(-52%); font-size: 20px; color: var(--ink-3); }
+.chips { display: flex; gap: 6px; }
+.chip { padding: 7px 14px; font-size: 14px; }
+.chip.active { background: var(--ink); color: var(--card); border-color: var(--ink); }
+.source { display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.source b { font-size: 16px; }
+.status { font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+.spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--ink); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.list { display: grid; }
+.trow { display: grid; grid-template-columns: 54px minmax(0, 1fr) 90px 110px 170px; gap: 14px; align-items: center; padding: 10px 12px; border-radius: var(--r-sm); }
+.trow:hover { background: var(--card-2); }
+.trow.head { color: var(--ink-3); font-size: 12px; font-weight: 600; padding-top: 0; }
+.trow.head:hover { background: none; }
+.trow .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow .a { font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow .n { font-variant-numeric: tabular-nums; }
+.trow .acts { display: flex; gap: 6px; justify-content: flex-end; }
+.trow .acts button { padding: 5px 12px; font-size: 13px; }
+.trow .acts .l { color: var(--left); } .trow .acts .r { color: var(--right); }
+.trow.loaded { background: var(--card-2); }
+.empty { text-align: center; padding: 40px; color: var(--ink-2); }
+
+/* levels */
+.levelbtn { font-size: 13px; font-weight: 600; padding: 6px 14px; background: var(--card-2); border-color: transparent; }
+.levels { display: grid; gap: 10px; margin: 0 0 6px; }
+.level { display: grid; gap: 2px; text-align: left; border-radius: var(--r-sm); padding: 12px 16px; }
+.level.active { border: 2px solid var(--ink); }
+.level small { color: var(--ink-2); }
+dialog.wide { max-width: 520px; }
+.levelup { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 10px; }
+/* EQ */
+.eq { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.eq .band { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 150px; }
+.eq .band span { font-size: 12px; color: var(--ink-3); width: 34px; }
+.eq button { padding: 4px 10px; font-size: 12px; }
+.eq button.on { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.barcount { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.lane-wrap { position: relative; }
+.lane-cover { position: absolute; inset: 0; display: grid; place-items: center; gap: 8px; border-radius: var(--r-sm); background: var(--card-2); text-align: center; }
+
+/* toast + dialog */
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; background: var(--ink); color: var(--card); padding: 10px 18px; border-radius: 999px; transition: .25s; pointer-events: none; max-width: 90vw; z-index: 30; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+dialog { border: none; border-radius: var(--r); padding: 24px 28px; background: var(--card); color: var(--ink); box-shadow: 0 20px 60px rgba(0,0,0,.25); max-width: 440px; }
+dialog::backdrop { background: rgba(20, 22, 27, .35); }
+dialog h2 { margin: 0 0 14px; }
+dialog table { width: 100%; border-collapse: collapse; }
+dialog td { padding: 6px 0; } dialog td:first-child { width: 110px; }
+
+@media (max-width: 860px) {
+  .decks, .choices, .next-list { grid-template-columns: 1fr; }
+  .trow { grid-template-columns: 44px minmax(0, 1fr) 70px; }
+  .trow .hide-sm { display: none; }
+  .coach { grid-template-columns: auto 1fr; } .coach .side { grid-column: 1 / -1; }
+  header { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><i></i>Cue Coach</div>
+  <nav><button data-view="mix" class="active">Mix</button><button data-view="music">Music</button></nav>
+  <div class="progress" id="progress"></div>
+  <button class="levelbtn" id="levelBtn" title="Change your level"></button>
+  <button class="ghost round" id="helpBtn" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+</header>
+
+<main>
+  <section id="welcomeView" class="welcome hidden">
+    <h1>Let's get you mixing</h1>
+    <p class="lead">Learn to blend two tracks like a DJ. No controller needed. Start with some music.</p>
+    <div class="choices">
+      <button class="choice" data-source="practice"><span class="icon">🎧</span><b>Practice tracks</b><span class="muted small">Built-in tracks made for learning. Nothing to set up.</span><span class="tag">Best to start</span></button>
+      <button class="choice" data-source="folder"><span class="icon">📁</span><b>My music folder</b><span class="muted small">Pick a folder of MP3, WAV, AIFF or FLAC files. We'll read the BPM and key.</span></button>
+      <button class="choice" data-source="rekordbox" id="rbChoice"><span class="icon">💿</span><b>My rekordbox library</b><span class="muted small" id="rbChoiceNote">Use the tracks, beat grids and keys you already have in rekordbox.</span></button>
+    </div>
+  </section>
+
+  <section id="mixView" class="hidden" style="display:grid;gap:18px">
+    <div class="card coach" id="coach"></div>
+
+    <div class="card">
+      <div class="lane-head"><h3>Beat lane · line up the dots</h3><span class="hint" id="hint">Play both decks to compare beats</span></div>
+      <div class="lane-wrap"><canvas id="lane"></canvas><div class="lane-cover hidden" id="laneCover"><div><b>Beatmatch by ear</b><div class="muted small">Listen for the kick drums. When you think they're together, check.</div></div><button class="primary" id="checkBtn">Check my beats <kbd>C</kbd></button></div></div>
+    </div>
+
+    <div class="decks">
+      <div class="card deck" data-side="left" id="deck-left"></div>
+      <div class="card deck" data-side="right" id="deck-right"></div>
+    </div>
+
+    <div class="card mixer">
+      <span style="color:var(--left)">Left</span>
+      <input type="range" id="xfader" min="0" max="1" step="0.005" value="0" aria-label="Crossfader">
+      <span style="color:var(--right)">Right</span>
+    </div>
+
+    <div class="card next" id="next"></div>
+  </section>
+
+  <section id="musicView" class="hidden" style="display:grid;gap:18px">
+    <div class="card source" id="source"></div>
+    <div class="toolbar">
+      <div class="search"><input id="search" type="search" placeholder="Search title, artist, genre or key" autocomplete="off"></div>
+      <div class="chips" id="chips">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="match">Mixes well with left</button>
+      </div>
+    </div>
+    <div class="card list" id="list"></div>
+  </section>
+</main>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="dirInput" webkitdirectory multiple class="hidden">
+
+<dialog id="levels" class="wide">
+  <h2>Your level</h2>
+  <p class="muted" style="margin-top:-6px">The app grows with you. Higher levels take the help away and add pro tools. You can switch back any time.</p>
+  <div class="levels" id="levelList"></div>
+  <form method="dialog" style="text-align:right"><button>Close</button></form>
+</dialog>
+
+<dialog id="help">
+  <h2>Keyboard shortcuts</h2>
+  <table>
+    <tr><td><kbd>Q</kbd></td><td>Play / pause left</td></tr>
+    <tr><td><kbd>P</kbd></td><td>Play / pause right</td></tr>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Right deck speed (hold Shift for bigger steps)</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Nudge the right deck back / forward (hold)</td></tr>
+    <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Move the crossfader</td></tr>
+    <tr><td><kbd>C</kbd></td><td>Check your beats (Confident level)</td></tr>
+    <tr><td><kbd>/</kbd></td><td>Search music</td></tr>
+    <tr><td><kbd>M</kbd></td><td>Switch between Mix and Music</td></tr>
+  </table>
+  <form method="dialog" style="margin-top:18px;text-align:right"><button class="primary">Got it</button></form>
+</dialog>
+
+<script type="module" src="js/learn.js"></script>
+</body>
+</html>

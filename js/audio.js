@@ -15,7 +15,9 @@ export class Deck {
     this.tempoPct = 0; this.bend = 0;
     this.low = ctx.createBiquadFilter(); this.low.type = 'lowshelf'; this.low.frequency.value = 200;
     this.vol = ctx.createGain(); this.xf = ctx.createGain();
-    this.low.connect(this.vol); this.vol.connect(this.xf); this.xf.connect(master);
+    this.mid = ctx.createBiquadFilter(); this.mid.type = 'peaking'; this.mid.frequency.value = 1000; this.mid.Q.value = 0.7;
+    this.high = ctx.createBiquadFilter(); this.high.type = 'highshelf'; this.high.frequency.value = 3500;
+    this.low.connect(this.mid); this.mid.connect(this.high); this.high.connect(this.vol); this.vol.connect(this.xf); this.xf.connect(master);
   }
   get rate() { return (1 + this.tempoPct / 100) * (1 + this.bend); }
   get bpm() { return this.track?.grid ? this.track.grid.bpm * (1 + this.tempoPct / 100) : null; }
@@ -44,6 +46,8 @@ export class Deck {
   setTempo(pct) { this.reanchor(); this.tempoPct = pct; this.reanchor(); }
   setBend(b) { this.reanchor(); this.bend = b; this.reanchor(); }
   setLowEQ(db) { this.low.gain.value = db; }
+  /** band: 'low' | 'mid' | 'high', gain in dB (−30 = cut) */
+  setEQ(band, db) { this[band].gain.value = db; }
   setVolume(v) { this.vol.gain.value = v; }
   /** Position inside the current beat / bar, 0..1 */
   beatPhase() { const g = this.track?.grid; if (!g) return null; const x = (this.position() - g.firstDownbeat) / beatLen(g); return x - Math.floor(x); }

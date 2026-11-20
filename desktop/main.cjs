@@ -13,7 +13,9 @@ const PORT = 8642;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const HELPER = 'http://127.0.0.1:8765';
 const PANEL_W = 420;
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8' };
+// Files the page may load: the app, the audio spike, and the time-stretch library it uses.
+const SERVED = /^\/(index\.html|spike\.html|learn\.html|js\/[\w.-]+\.js|node_modules\/signalsmith-stretch\/SignalsmithStretch\.mjs)$/;
 
 let win = null;
 let server = null;
@@ -28,7 +30,7 @@ function startServer() {
     server = http.createServer((req, res) => {
       const url = new URL(req.url, ORIGIN);
       const p = url.pathname === '/' ? '/index.html' : url.pathname;
-      if (!/^\/(index\.html|js\/[\w.-]+\.js)$/.test(p)) { res.writeHead(404); return res.end(); }
+      if (!SERVED.test(p)) { res.writeHead(404); return res.end(); }
       fs.readFile(path.join(ROOT, p), (err, data) => {
         if (err) { res.writeHead(404); return res.end(); }
         res.writeHead(200, { 'Content-Type': MIME[path.extname(p)], 'Cache-Control': 'no-store' });
@@ -151,6 +153,20 @@ function createWindow() {
   win.on('closed', () => { win = null; });
 }
 
+// Full-size windows: the new Learn app and the audio spike (our own decks, no rekordbox needed).
+const pages = new Map();
+function openPage(file, title, width, height) {
+  if (pages.has(file)) return pages.get(file).focus();
+  const w = new BrowserWindow({
+    width, height, minWidth: 720, minHeight: 560, title,
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  w.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(ORIGIN)) e.preventDefault(); });
+  w.loadURL(`${ORIGIN}/${file}`);
+  w.on('closed', () => pages.delete(file));
+  pages.set(file, w);
+}
+
 function buildMenu() {
   const isMac = process.platform === 'darwin';
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -166,6 +182,8 @@ function buildMenu() {
         { label: 'Mini Beatmatch', type: 'radio', checked: mode === 'mini', accelerator: 'CmdOrCtrl+3', click: () => win?.webContents.send('set-mode', 'mini') },
         { label: 'Dock to Right Edge', accelerator: 'CmdOrCtrl+Shift+D', click: () => win?.setBounds(boundsFor(mode), true) },
         { type: 'separator' },
+        { label: 'Learn to DJ (new app)', accelerator: 'CmdOrCtrl+4', click: () => openPage('learn.html', 'Cue Coach', 1240, 900) },
+        { label: 'Audio Spike (test page)', click: () => openPage('spike.html', 'Audio spike', 1000, 900) },
         { role: 'reload' }, { role: 'toggleDevTools' },
       ],
     },
@@ -261,7 +279,8 @@ ipcMain.handle('open-screen-settings', (e) => {
 
 app.whenReady().then(async () => {
   // Web MIDI for the controller, and video-only capture (the rekordbox window) for the beat view.
-  const allowed = (perm, url, media) => perm === 'midi'
+  // fileSystem: read-only access to the music folder the user picks in the Learn app.
+  const allowed = (perm, url, media) => perm === 'midi' || (perm === 'fileSystem' && String(url).startsWith(ORIGIN))
     || ((perm === 'display-capture' || perm === 'media') && String(url).startsWith(ORIGIN) && (media || ['video']).every((t) => t === 'video'));
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb, details) => { if (process.env.CUECOACH_DEBUG) console.log('perm request', perm, JSON.stringify(details)); cb(allowed(perm, details.requestingUrl || wc.getURL(), details.mediaTypes)); });
   session.defaultSession.setPermissionCheckHandler((wc, perm, origin, details) => { if (process.env.CUECOACH_DEBUG) console.log('perm check', perm, origin, JSON.stringify(details)); return allowed(perm, origin || wc?.getURL(), null); });
