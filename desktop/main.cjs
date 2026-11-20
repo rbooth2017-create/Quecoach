@@ -386,7 +386,11 @@ ipcMain.handle('open-screen-settings', (e) => {
 // Only one copy of the app: opening it again brings the open window to the front.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
-app.on('second-instance', () => { if (learnWin) { if (learnWin.isMinimized()) learnWin.restore(); learnWin.show(); learnWin.focus(); } else if (app.isReady()) createLearnWindow(); });
+app.on('second-instance', () => {
+  // While developing, running `npm run desktop` again restarts this copy so it picks up the latest code.
+  if (!app.isPackaged) { writeWinState(); stopHelper(); app.relaunch(); app.exit(0); return; }
+  if (learnWin) { if (learnWin.isMinimized()) learnWin.restore(); learnWin.show(); learnWin.focus(); } else if (app.isReady()) createLearnWindow();
+});
 
 app.whenReady().then(async () => {
   if (!gotLock) return; // another copy is already open and has been brought to the front
