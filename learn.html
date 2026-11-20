@@ -98,6 +98,12 @@ html.win32 .titlebar, html.linux .titlebar { padding-right: 146px; }  /* room fo
 .midi-log .act { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); }
 .midi-log .act.unused { color: var(--ink-3); }
 .midi-log .empty { color: var(--ink-3); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+.win-only { display: none; }
+html.win32 .win-only, html.linux .win-only { display: inline-flex; }
+.settings-list { display: grid; gap: 4px; margin-bottom: 4px; }
+.settings-list button { justify-content: flex-start; gap: 12px; padding: 9px 12px; border-radius: 10px; text-align: left; }
+.settings-list button .ic { color: var(--ink-2); }
+.settings-list small { display: block; color: var(--ink-2); font-size: 12px; }
 .pill-btn { border-color: transparent; background: var(--card-2); font-weight: 600; font-size: 12px; padding: 4px 10px; }
 
 /* ---------- coach strip ---------- */
@@ -394,7 +400,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 </head>
 <body>
 <header class="titlebar">
-  <div class="brand"><span class="logo"></span>Cue Coach</div>
+  <div class="brand"><button class="icon-btn win-only" id="menuBtn" title="Menu" aria-label="Menu"></button><span class="logo"></span>Cue Coach</div>
   <div class="tb-center" id="progress"></div>
   <div class="tb-right">
     <button class="ctl-chip" id="ctlBtn" title="Controller and sound output"></button>
@@ -402,6 +408,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <button class="icon-btn" id="aiBtn" title="AI coach settings" aria-label="AI coach settings"></button>
     <button class="icon-btn" id="lessonsBtn" title="Show or hide lessons (L)" aria-label="Lessons" aria-pressed="false"></button>
     <button class="icon-btn" id="themeBtn" title="Appearance" aria-label="Appearance"></button>
+    <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings"></button>
     <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"></button>
   </div>
 </header>
@@ -502,6 +509,12 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <li>Play, cue (back to the start), jog wheels, tempo, EQ, channel faders, crossfader and the headphone buttons (Listen) all work.</li>
     <li>There's no sync on purpose: matching the speed yourself is the skill you're learning.</li>
   </ul>
+  <form method="dialog" class="dlg-foot"><button>Done</button></form>
+</dialog>
+
+<dialog id="settingsDlg">
+  <h2>Settings</h2>
+  <div class="settings-list" id="settingsList"></div>
   <form method="dialog" class="dlg-foot"><button>Done</button></form>
 </dialog>
 

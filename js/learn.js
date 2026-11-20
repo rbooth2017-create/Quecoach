@@ -349,13 +349,16 @@ async function useSource(kind, { fromGesture = true } = {}) {
     if (kind === 'practice') {
       setTracks(lib.practiceLibrary(), 'Practice tracks', kind);
     } else if (kind === 'rekordbox') {
-      if (!(await lib.rekordboxAvailable())) { toast('rekordbox isn\'t connected. It works in the desktop app on a computer with rekordbox.'); renderSource(); return false; }
+      if (!(await lib.rekordboxAvailable())) { toast(`rekordbox isn't connected${state.rbNote ? `: ${state.rbNote}` : ''}.`); renderSource(); return false; }
       state.analysing = { text: 'Reading your rekordbox library…' }; renderSource();
       setTracks(await lib.loadRekordbox(), 'rekordbox', kind);
     } else if (kind === 'folder') {
       if (!lib.canPickFolder()) { $('#dirInput').click(); return false; }
       let handle;
-      if (fromGesture) handle = await lib.pickFolder();
+      if (fromGesture) {
+        try { handle = await lib.pickFolder(); }
+        catch (err) { if (err.name === 'AbortError') throw err; console.warn('folder picker refused, using the plain chooser', err); $('#dirInput').click(); return false; }
+      }
       else {
         const saved = await lib.savedFolder();
         if (!saved) return false;
@@ -417,7 +420,7 @@ function renderSource() {
     ${state.menuOpen ? `<div class="menu" role="menu">
       ${choice('practice', 'sparkle', 'Practice tracks', 'Built in, made for learning')}
       ${choice('folder', 'folder', 'Music folder…', 'MP3, WAV, AIFF, FLAC')}
-      ${choice('rekordbox', 'disc', 'rekordbox library', state.rbAvailable ? 'Your tracks, grids and keys' : 'Not connected', !state.rbAvailable)}
+      ${choice('rekordbox', 'disc', 'rekordbox library', state.rbAvailable ? 'Your tracks, grids and keys' : (state.rbNote || 'Not connected'), !state.rbAvailable)}
     </div>` : ''}`;
 }
 
@@ -1048,6 +1051,10 @@ function bind() {
   $('#themeBtn').innerHTML = icon('palette', 18); $('#helpBtn').innerHTML = icon('help', 18); $('#searchIcon').innerHTML = icon('search', 15);
   $$('[data-icon]').forEach((x) => { x.outerHTML = icon(x.dataset.icon, 26); });
   $('#helpBtn').addEventListener('click', () => $('#help').showModal());
+  $('#settingsBtn').innerHTML = icon('gear', 18); $('#menuBtn').innerHTML = icon('menu', 18);
+  $('#settingsBtn').addEventListener('click', openSettings);
+  $('#settingsList').addEventListener('click', (e) => { const b = e.target.closest('[data-set]'); if (b) runSetting(b.dataset.set); });
+  $('#menuBtn').addEventListener('click', (e) => { const r = e.currentTarget.getBoundingClientRect(); desktop?.showMenu?.(r.left, r.bottom); });
   $('#themeBtn').addEventListener('click', () => { renderThemes(); $('#themes').showModal(); });
   $('#themeList').addEventListener('click', (e) => { const b = e.target.closest('[data-theme-id]'); if (b) applyTheme(b.dataset.themeId); });
   $('#levelBtn').addEventListener('click', () => { renderLevels(); $('#levels').showModal(); });
@@ -1468,6 +1475,54 @@ async function useSink(id) {
 }
 function openCtl() { renderCtl(); renderMidiLog(); listSinks(); $('#ctlDlg').showModal(); }
 
+// ---------- rekordbox helper ----------
+/**
+ * The rekordbox helper can take a while to start, especially the first time on Windows. Keep checking for up
+ * to 3 minutes instead of deciding "not connected" at launch. Resolves true once rekordbox answers.
+ */
+async function watchRekordbox() {
+  const started = performance.now();
+  const note = (t) => { state.rbNote = t; $('#rbChoiceNote').textContent = t; renderSource(); };
+  while (performance.now() - started < 180000) {
+    if (await lib.rekordboxAvailable()) {
+      const waited = state.rbWaited;
+      state.rbAvailable = true; state.rbNote = ''; $('#rbChoice').disabled = false;
+      $('#rbChoiceNote').textContent = 'Use the tracks, beat grids and keys you already have.'; renderSource();
+      if (waited && state.source !== 'rekordbox') toast('rekordbox is connected. Choose it from the music menu in the library.');
+      return true;
+    }
+    state.rbWaited = true; state.rbAvailable = false; $('#rbChoice').disabled = true;
+    const st = desktop?.helperStatus ? await desktop.helperStatus().catch(() => null) : null;
+    if (!st) { note('Not connected. rekordbox works in the desktop app.'); return false; }
+    if (['unavailable', 'failed', 'stopped'].includes(st.state)) { note(st.message || 'The rekordbox helper stopped.'); return false; }
+    note('Connecting to rekordbox…');
+    await new Promise((r) => setTimeout(r, 2500));
+  }
+  note('rekordbox didn\'t answer. Is it installed on this computer?');
+  return false;
+}
+
+// ---------- settings ----------
+const SETTINGS = [
+  ['music', 'folder', 'Music library', 'Practice tracks, a music folder or your rekordbox library'],
+  ['controller', 'keyboard', 'Controller and sound', 'Your DJ controller, and where the sound comes out'],
+  ['ai', 'wand', 'AI coach', 'Connect Claude for set building and track picks'],
+  ['theme', 'palette', 'Appearance', 'Light, dark and colour themes'],
+  ['level', 'level', 'Your level', 'How much help and how many controls you see'],
+  ['lessons', 'book', 'Lessons', 'Show or hide the lessons pane'],
+  ['help', 'help', 'Keyboard shortcuts', 'Every key Cue Coach listens to'],
+];
+function openSettings() {
+  $('#settingsList').innerHTML = SETTINGS.map(([id, ic, name, note]) => `<button data-set="${id}">${icon(ic, 18)}<span><b>${name}</b><small>${note}</small></span></button>`).join('');
+  $('#settingsDlg').showModal();
+}
+function runSetting(id) {
+  $('#settingsDlg').close();
+  if (id === 'music') { state.menuOpen = true; renderSource(); $('#library').scrollIntoView({ block: 'nearest' }); return; }
+  if (id === 'lessons') return setPane(!state.paneOpen);
+  runCommand({ controller: 'controller', ai: 'ai', theme: 'theme', level: 'level', help: 'help' }[id]);
+}
+
 // ---------- start ----------
 async function boot() {
   if (desktop?.platform) document.documentElement.classList.add(desktop.platform);
@@ -1479,11 +1534,17 @@ async function boot() {
   aiStatus().then((st) => { state.ai = st; renderAI(); });
   initController();
   const sink = store.get('sink', ''); if (sink && ctx.setSinkId) ctx.setSinkId(sink).catch(() => store.set('sink', ''));
-  lib.rekordboxAvailable().then((ok) => {
-    state.rbAvailable = ok; renderSource();
-    if (!ok) { $('#rbChoice').disabled = true; $('#rbChoiceNote').textContent = 'Not connected. Open Cue Coach on a computer with rekordbox.'; }
-  });
+  const rb = watchRekordbox();
   if (!state.source) { $('#welcomeView').classList.remove('hidden'); return; }
+  if (state.source === 'rekordbox') {
+    // the helper may still be starting: wait for it rather than switching your library to practice tracks
+    state.analysing = { text: 'Connecting to rekordbox…', spin: true }; renderSource();
+    if (await rb) return useSource('rekordbox', { fromGesture: false });
+    state.analysing = null; renderSource();
+    toast(`Couldn't reach rekordbox${state.rbNote ? `: ${state.rbNote}` : ''}. Showing practice tracks for now.`);
+    setTracks(lib.practiceLibrary(), 'Practice tracks', 'practice'); // not saved: rekordbox stays your choice
+    return;
+  }
   const ok = await useSource(state.source, { fromGesture: false });
   if (!ok && state.source !== 'folder') await useSource('practice');
 }

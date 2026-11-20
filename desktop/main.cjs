@@ -290,6 +290,7 @@ ipcMain.handle('get-pin', () => pinned);
 // AI coach (Claude): only the Learn window may use it. The key stays in this process, encrypted on disk.
 const fromLearn = (e) => fromUs(e) && learnWin && e.sender === learnWin.webContents;
 ipcMain.handle('ai-status', (e) => (fromLearn(e) ? ai.status() : null));
+ipcMain.handle('show-menu', (e, pos) => { if (fromLearn(e)) Menu.getApplicationMenu()?.popup({ window: learnWin, x: Math.round(pos?.x || 0), y: Math.round(pos?.y || 0) }); });
 ipcMain.handle('ai-set-key', (e, key) => (fromLearn(e) ? ai.setKey(key) : null));
 ipcMain.handle('ai-clear-key', (e) => (fromLearn(e) ? ai.clearKey() : null));
 ipcMain.handle('ai-request', (e, payload) => (fromLearn(e) ? ai.request(payload) : { error: 'Not allowed.' }));

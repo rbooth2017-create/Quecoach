@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('cueDesktop', {
   // Learn app: match the title bar to the theme, and receive menu commands.
   setChrome: (c) => ipcRenderer.invoke('chrome', { bg: String(c?.bg || ''), fg: String(c?.fg || '') }),
   onCommand: (cb) => ipcRenderer.on('command', (_e, c) => cb(String(c))),
+  // Windows/Linux: the app menu, opened from the ☰ button (the custom title bar hides the menu bar)
+  showMenu: (x, y) => ipcRenderer.invoke('show-menu', { x: Number(x) || 0, y: Number(y) || 0 }),
   // AI coach: the API key goes in but never comes back out.
   ai: {
     status: () => ipcRenderer.invoke('ai-status'),
