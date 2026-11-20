@@ -569,6 +569,8 @@ function drawLane(hint) {
   const cx = w / 2, pps = w / 4, rowH = h / 2, left = 30;
   if (hint?.tone === 'ok' && f.beatDots) { g.fillStyle = colors.ok; g.globalAlpha = 0.16; g.fillRect(cx - 12, 0, 24, h); g.globalAlpha = 1; }
   g.font = '650 10px system-ui, -apple-system, "Segoe UI", sans-serif'; g.textBaseline = 'middle';
+  const dots = { left: [], right: [] }; // beat dots, drawn last so they sit on top
+  const waveAlpha = f.beatDots ? 0.38 : 1; // quieter waveform while learning, so the dots stand out
   SIDES.forEach((side, r) => {
     const d = decks[side], top = r * rowH, mid = top + rowH / 2, col = colors[side];
     g.fillStyle = col; g.textAlign = 'left'; g.font = '750 11px system-ui, -apple-system, "Segoe UI", sans-serif'; g.fillText(LETTER[side], 10, mid);
@@ -588,9 +590,9 @@ function drawLane(hint) {
           if (v > 0.5) g.fillRect(x, mid - v, 1, v * 2);
         }
       };
-      layer(B.low, 1.25, 1, col, 0.9);
-      layer(B.mid, 1.7, 0.7, '#ffffff', 0.42);
-      layer(B.high, 2.2, 0.45, '#ffffff', 0.75);
+      layer(B.low, 1.25, 1, col, 0.9 * waveAlpha);
+      layer(B.mid, 1.7, 0.7, '#ffffff', 0.42 * waveAlpha);
+      layer(B.high, 2.2, 0.45, '#ffffff', 0.75 * waveAlpha);
       g.globalAlpha = 1;
     }
     // beat grid: thin beats, heavier "1"s with bar numbers, a coloured line at each new phrase
@@ -614,12 +616,7 @@ function drawLane(hint) {
           g.fillStyle = '#fff'; g.textAlign = 'left'; g.fillText(label, x + 5, top + 9.5);
           g.font = '650 10px system-ui, -apple-system, "Segoe UI", sans-serif';
         } else if (down && f.barCounter && bar >= 1) { g.globalAlpha = 0.75; g.fillStyle = colors.ink; g.textAlign = 'left'; g.fillText(String(bar), x + 4, top + 9); }
-        if (f.beatDots && !down && k >= 0) { g.globalAlpha = 0.55; g.fillStyle = colors.ink; g.textAlign = 'center'; g.fillText(String(((k % 4) + 4) % 4 + 1), x, top + rowH - 8); }
-        if (f.beatDots) {
-          g.globalAlpha = Math.max(0.25, 1 - Math.abs(x - cx) / (w / 2));
-          g.fillStyle = col; g.beginPath(); g.arc(x, mid, down ? 8 : 4, 0, Math.PI * 2); g.fill();
-          if (down) { g.fillStyle = '#fff'; g.textAlign = 'center'; g.fillText('1', x, mid + 0.5); }
-        }
+        if (f.beatDots) dots[side].push({ x, n: ((k % 4) + 4) % 4 + 1 });
       }
       g.globalAlpha = 1;
     }
@@ -632,6 +629,45 @@ function drawLane(hint) {
   });
   // now line
   g.fillStyle = colors.ink; g.globalAlpha = 0.9; g.fillRect(Math.round(cx) - 1, 0, 2, h); g.globalAlpha = 1;
+  if (f.beatDots) drawBeatDots(g, dots, { w, cx, pps, rowH, left });
+}
+
+/**
+ * The learning dots: deck A's along the bottom of its row and deck B's along the top of its row, so each
+ * pair of beats sits close together. A line joins each pair: straight and green when they're lined up,
+ * slanted amber or red when they're not (the slant shows which way to nudge).
+ */
+function drawBeatDots(g, dots, { w, cx, pps, rowH, left }) {
+  const yA = rowH - 22, yB = rowH + 22; // far enough apart that the joining line shows between the dots
+  const fade = (x) => Math.max(0.3, 1 - Math.abs(x - cx) / (w * 0.55));
+  // connectors first, so the dots sit on top of them
+  const A = dots.left, B = dots.right;
+  if (A.length && B.length) {
+    const spacing = A.length > 1 ? Math.abs(A[1].x - A[0].x) : w;
+    for (const a of A) {
+      if (Math.abs(a.x - cx) > w * 0.42) continue;
+      let b = null; for (const c of B) if (!b || Math.abs(c.x - a.x) < Math.abs(b.x - a.x)) b = c;
+      if (!b || Math.abs(b.x - a.x) > spacing / 2) continue;
+      const ms = Math.abs(b.x - a.x) / pps * 1000;
+      g.strokeStyle = ms <= ALIGN_MS ? colors.ok : ms <= 50 ? colors.close : colors.warn;
+      g.lineWidth = ms <= ALIGN_MS ? 3 : 2; g.globalAlpha = fade(a.x);
+      g.beginPath(); g.moveTo(a.x, yA); g.lineTo(b.x, yB); g.stroke();
+    }
+  }
+  g.font = '800 11px system-ui, -apple-system, "Segoe UI", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (const [side, y] of [['left', yA], ['right', yB]]) {
+    for (const { x, n } of dots[side]) {
+      if (x < left + 8) continue;
+      const r = n === 1 ? 11 : 8;
+      g.globalAlpha = fade(x);
+      g.fillStyle = colors[side]; g.strokeStyle = colors.card; g.lineWidth = 2.5;
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); g.stroke();
+      if (Math.abs(x - cx) < 5) { g.strokeStyle = colors.ink; g.lineWidth = 2; g.beginPath(); g.arc(x, y, r + 4, 0, Math.PI * 2); g.stroke(); } // the beat that's playing now
+      g.fillStyle = '#fff'; g.font = n === 1 ? '800 12px system-ui, -apple-system, "Segoe UI", sans-serif' : '750 10px system-ui, -apple-system, "Segoe UI", sans-serif';
+      g.fillText(String(n), x, y + 0.5);
+    }
+  }
+  g.globalAlpha = 1;
 }
 
 /** Hot cues and rekordbox memory cues, for markers. */
