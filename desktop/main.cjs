@@ -238,6 +238,7 @@ function buildMenu() {
         cmd('Find Music…', 'search', 'CmdOrCtrl+F'),
         { type: 'separator' },
         cmd('AI Coach Settings…', 'ai'),
+        cmd('Controller and Sound…', 'controller'),
         ...(isMac ? [{ type: 'separator' }, { role: 'close' }] : [{ type: 'separator' }, { role: 'quit' }]),
       ],
     },
@@ -396,7 +397,9 @@ app.whenReady().then(async () => {
   if (!gotLock) return; // another copy is already open and has been brought to the front
   // Web MIDI for the controller, and video-only capture (the rekordbox window) for the beat view.
   // fileSystem: read-only access to the music folder the user picks in the Learn app.
-  const allowed = (perm, url, media) => perm === 'midi' || (perm === 'fileSystem' && String(url).startsWith(ORIGIN))
+  // Electron asks for 'midiSysex' even when the page only wants plain MIDI, so allow both for our own pages.
+  const allowed = (perm, url, media) => ((perm === 'midi' || perm === 'midiSysex') && String(url).startsWith(ORIGIN))
+    || (perm === 'fileSystem' && String(url).startsWith(ORIGIN))
     || ((perm === 'display-capture' || perm === 'media') && String(url).startsWith(ORIGIN) && (media || ['video']).every((t) => t === 'video'));
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb, details) => { if (process.env.CUECOACH_DEBUG) console.log('perm request', perm, JSON.stringify(details)); cb(allowed(perm, details.requestingUrl || wc.getURL(), details.mediaTypes)); });
   session.defaultSession.setPermissionCheckHandler((wc, perm, origin, details) => { if (process.env.CUECOACH_DEBUG) console.log('perm check', perm, origin, JSON.stringify(details)); return allowed(perm, origin || wc?.getURL(), null); });

@@ -83,3 +83,27 @@ test('counting beats, bars and phrases', () => {
   assert.deepEqual(beatCount(g, 1 + 16 * 2), { beat: 1, bar: 17, barInPhrase: 1, block: 1, barInBlock: 1, phrase: 2 });
   assert.equal(beatCount(null, 3), null);
 });
+
+import { LOOP_SIZES, JUMP_SIZES, loopAt, wrapInLoop, jumpBy, scaleLoop } from '../js/deckmath.js';
+
+test('beat loops snap to the grid and playback wraps inside them', () => {
+  const g = { bpm: 120, firstDownbeat: 1 }; // 0.5 s per beat
+  assert.deepEqual(LOOP_SIZES, [0.25, 0.5, 1, 2, 4, 8, 16, 32]);
+  assert.deepEqual(loopAt(g, 3.3, 4), { start: 3, end: 5, beats: 4 }); // starts on the beat at or before 3.3 s
+  assert.deepEqual(loopAt(g, 3.3, 0.5), { start: 3.25, end: 3.5, beats: 0.5 }); // half-beat steps for short loops
+  const l = loopAt(g, 3.0, 1);
+  assert.equal(wrapInLoop(3.2, l), 3.2);
+  assert.ok(Math.abs(wrapInLoop(3.6, l) - 3.1) < 1e-9);
+  assert.ok(Math.abs(wrapInLoop(4.6, l) - 3.1) < 1e-9);
+  assert.equal(wrapInLoop(9, null), 9);
+  assert.deepEqual(scaleLoop({ start: 3, end: 5, beats: 4 }, 0.5, g), { start: 3, end: 4, beats: 2 });
+  assert.equal(scaleLoop({ start: 3, end: 3.0625, beats: 0.125 }, 0.5, g).beats, 0.125); // never shorter than ⅛ beat
+});
+
+test('beat jump moves whole beats and stops at the start of the track', () => {
+  const g = { bpm: 120, firstDownbeat: 1 };
+  assert.deepEqual(JUMP_SIZES, [-1, 1, -2, 2, -4, 4, -8, 8]);
+  assert.equal(jumpBy(g, 10, 4), 12);
+  assert.equal(jumpBy(g, 10, -8), 6);
+  assert.equal(jumpBy(g, 1, -8), 0);
+});

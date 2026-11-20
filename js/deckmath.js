@@ -88,3 +88,42 @@ export function beatCount(grid, pos, phraseBars = 16) {
   const bar = Math.floor(beats / 4) + 1, barInPhrase = ((bar - 1) % phraseBars) + 1;
   return { beat: (beats % 4) + 1, bar, barInPhrase, block: Math.ceil(barInPhrase / 4), barInBlock: ((barInPhrase - 1) % 4) + 1, phrase: Math.floor((bar - 1) / phraseBars) + 1 };
 }
+
+// ---------- loops and beat jump ----------
+
+/** Beat loop sizes on the pads (beats): ¼, ½, 1, 2, 4, 8, 16, 32. */
+export const LOOP_SIZES = [0.25, 0.5, 1, 2, 4, 8, 16, 32];
+/** Beat jump pads: back/forward 1, 2, 4 and 8 beats. */
+export const JUMP_SIZES = [-1, 1, -2, 2, -4, 4, -8, 8];
+
+/**
+ * A loop of `beats` starting on the grid line at or just before `pos` (for loops shorter than a beat, the
+ * nearest fraction of a beat before `pos`). Without a grid, the loop starts right at `pos` at 120 BPM.
+ */
+export function loopAt(grid, pos, beats) {
+  const beat = grid?.bpm ? 60 / grid.bpm : 0.5;
+  const unit = beat * Math.min(1, beats);
+  const origin = grid?.firstDownbeat ?? pos;
+  const start = origin + Math.floor((pos - origin) / unit + 1e-9) * unit;
+  return { start, end: start + beats * beat, beats };
+}
+
+/** Where playback really is once it has wrapped around a loop. */
+export function wrapInLoop(p, loop) {
+  if (!loop || p < loop.end) return p;
+  const len = loop.end - loop.start;
+  return loop.start + ((p - loop.start) % len);
+}
+
+/** Jump `beats` (± ) from pos, keeping the same place in the beat. */
+export function jumpBy(grid, pos, beats) {
+  const beat = grid?.bpm ? 60 / grid.bpm : 0.5;
+  return Math.max(0, pos + beats * beat);
+}
+
+/** Halve or double a loop from its start, never shorter than ⅛ beat or longer than 64 beats. */
+export function scaleLoop(loop, factor, grid) {
+  const beat = grid?.bpm ? 60 / grid.bpm : 0.5;
+  const beats = Math.max(0.125, Math.min(64, loop.beats * factor));
+  return { start: loop.start, end: loop.start + beats * beat, beats };
+}

@@ -2,10 +2,13 @@
 import { DEMO_STRUCTURE, camelotRoot } from './library.js';
 import { barLen, beatLen } from './engine.js';
 import { analyseGrid } from './beatgrid.js';
+import { wrapInLoop } from './deckmath.js';
 
 export const ctx = new (window.AudioContext || window.webkitAudioContext)();
 const master = ctx.createGain();
 master.connect(ctx.destination);
+/** The main mix, after the crossfader (the sampler plays in here too). */
+export const masterBus = master;
 
 export class Deck {
   constructor(name) {
@@ -14,6 +17,7 @@ export class Deck {
     this.source = null; this.playing = false;
     this.offset = 0; this.anchor = 0;   // position = offset + (now - anchor) * rate
     this.tempoPct = 0; this.bend = 0;
+    this.loop = null; // { start, end, beats } in track seconds, while a loop is on
     this.low = ctx.createBiquadFilter(); this.low.type = 'lowshelf'; this.low.frequency.value = 200;
     this.vol = ctx.createGain(); this.xf = ctx.createGain();
     this.mid = ctx.createBiquadFilter(); this.mid.type = 'peaking'; this.mid.frequency.value = 1000; this.mid.Q.value = 0.7;
@@ -22,9 +26,9 @@ export class Deck {
   }
   get rate() { return (1 + this.tempoPct / 100) * (1 + this.bend); }
   get bpm() { return this.track?.grid ? this.track.grid.bpm * (1 + this.tempoPct / 100) : null; }
-  position() { return this.playing ? this.offset + (ctx.currentTime - this.anchor) * this.rate : this.offset; }
+  position() { return this.playing ? wrapInLoop(this.offset + (ctx.currentTime - this.anchor) * this.rate, this.loop) : this.offset; }
   load(track, buffer, analysis) {
-    this.stop(); this.track = track; this.buffer = buffer; this.analysis = analysis;
+    this.stop(); this.loop = null; this.track = track; this.buffer = buffer; this.analysis = analysis;
     this.peaks = buffer ? computePeaks(buffer) : null;
     this.offset = track.grid?.firstDownbeat || 0;
   }
@@ -33,6 +37,7 @@ export class Deck {
     ctx.resume();
     const src = ctx.createBufferSource();
     src.buffer = this.buffer; src.playbackRate.value = this.rate; src.connect(this.low);
+    if (this.loop) { src.loop = true; src.loopStart = this.loop.start; src.loopEnd = this.loop.end; }
     src.start(0, Math.max(0, this.offset));
     src.onended = () => { if (this.source === src) { this.playing = false; this.source = null; } };
     this.source = src; this.anchor = ctx.currentTime; this.playing = true;
@@ -42,7 +47,26 @@ export class Deck {
     this.playing = false;
   }
   toggle() { this.playing ? this.stop() : this.play(); }
-  seek(t) { const was = this.playing; this.stop(); this.offset = Math.max(0, t); if (was) this.play(); }
+  seek(t) {
+    const was = this.playing; this.stop(); this.offset = Math.max(0, t);
+    if (this.loop && (this.offset < this.loop.start || this.offset >= this.loop.end)) this.loop = null; // jumped out of the loop
+    if (was) this.play();
+  }
+  /** Loop between two points (track seconds). Playback carries on from where it is if that's inside. */
+  setLoop(loop) {
+    this.reanchor();
+    this.loop = loop;
+    const src = this.source;
+    if (this.position() < loop.start || this.position() >= loop.end) return this.seek(loop.start);
+    if (src) { src.loopStart = loop.start; src.loopEnd = loop.end; src.loop = true; }
+  }
+  /** Leave the loop and play on from where it is. */
+  clearLoop() {
+    if (!this.loop) return;
+    this.offset = this.position(); this.anchor = ctx.currentTime;
+    this.loop = null;
+    if (this.source) this.source.loop = false;
+  }
   reanchor() { this.offset = this.position(); this.anchor = ctx.currentTime; if (this.source) this.source.playbackRate.value = this.rate; }
   setTempo(pct) { this.reanchor(); this.tempoPct = pct; this.reanchor(); }
   setBend(b) { this.reanchor(); this.bend = b; this.reanchor(); }

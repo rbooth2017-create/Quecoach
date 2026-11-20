@@ -27,7 +27,9 @@ const ON = {
   bassEQ:        ['improver', 'confident', 'pro'],     // the bass swap is the next skill after beatmatching
   highEQ:        ['confident', 'pro'],                 // treble, for cleaner blends
   fullEQ:        ['pro'],                              // adds the mid band
-  hotCues:       ['improver', 'confident', 'pro'],     // 4 cue pads per deck
+  hotCues:       ['improver', 'confident', 'pro'],     // hot cues
+  perfPads:      ['improver', 'confident', 'pro'],     // 8 performance pads: cues, loops, beat jump, pad FX, sampler
+  beatFx:        ['confident', 'pro'],                 // Beat FX section in the mixer
   gridEdit:      ['improver', 'confident', 'pro'],     // fine-tune a beat grid Cue Coach worked out itself
   barCounter:    ['improver', 'confident', 'pro'],     // "Bar 17 · phrase 2"
   phraseMarks:   ['improver', 'confident', 'pro'],     // phrase lines on the waveform

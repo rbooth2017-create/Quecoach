@@ -18,7 +18,15 @@ const phraseColor = (label = '') => PHRASE_COLORS[label] || PHRASE_COLORS[Object
 const PHRASE_NAMES = { Up: 'Build', Down: 'Breakdown' };
 import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex, eqBands } from './levels.js';
 import { JogWheel, jogHTML, dialHTML, setDial, bindDials } from './controls.js';
-import { beatCount } from './deckmath.js';
+import { beatCount, LOOP_SIZES, JUMP_SIZES, loopAt, jumpBy, scaleLoop } from './deckmath.js';
+import { FxRack, FX, PAD_FX, padFxLabel } from './fx.js';
+import { SAMPLES, playSample, stopSample, samplePlaying } from './sampler.js';
+
+const PAD_MODE_LIST = [['hotcue', 'Cues'], ['loop', 'Loop'], ['jump', 'Jump'], ['fx1', 'FX 1'], ['fx2', 'FX 2'], ['sampler', 'Sampler']];
+const BFX_BEATS = [0.25, 0.5, 1, 2, 4, 8];
+const beatsLabel = (b) => (b < 1 ? `1/${Math.round(1 / b)}` : String(b));
+import { midiToAction, KEEPALIVE, describeAction, hexBytes, flx4Lights, flx4Meters, JOG_STEPS_PER_TURN } from './learnmidi.js';
+import { detectController, emptyController } from './controller.js';
 import { icon } from './icons.js';
 
 const THEMES = [
@@ -55,6 +63,8 @@ const state = {
   // set builder + AI
   set: null, setMinutes: store.get('setMinutes', 60), setVibe: store.get('setVibe', 'journey'), setIdea: '', setBusy: false,
   ai: { hasKey: false }, aiPicks: null, aiBusy: false,
+  // Beat FX: effect index, beat size index, channel, level, on
+  bfx: { i: 0, b: 2, ch: 'both', depth: 0.6, on: false }, bfxRunning: [], bfxKey: null,
 };
 state.f = featuresFor(state.level);
 
@@ -69,6 +79,20 @@ function makeDeck(side) {
   d.meter = ctx.createAnalyser(); d.meter.fftSize = 512; d.vol.connect(d.meter);
   d.meterBuf = new Float32Array(d.meter.fftSize); d.peak = 0;
   d.listening = false; d.eq = { low: 0, mid: 0, high: 0 };
+  // Trim (gain) and a filter knob, between the EQ and the channel fader, like a DJ mixer.
+  d.trimNode = ctx.createGain(); d.filterNode = ctx.createBiquadFilter();
+  d.filterNode.type = 'lowpass'; d.filterNode.frequency.value = 22000; d.filterNode.Q.value = 0.9;
+  d.high.disconnect(); d.high.connect(d.trimNode); d.trimNode.connect(d.filterNode);
+  d.fx = new FxRack(d, d.filterNode, d.vol); // pad FX and Beat FX
+  d.padMode = 'hotcue';
+  d.setTrim = (db) => { d.trimNode.gain.value = Math.pow(10, db / 20); };
+  /** 0..1: left of centre sweeps a low-pass down, right of centre sweeps a high-pass up, centre is off. */
+  d.setFilter = (v) => {
+    const f = d.filterNode;
+    if (v < 0.47) { f.type = 'lowpass'; f.frequency.value = 22000 * Math.pow(2, -((0.47 - v) / 0.47) * 10); }
+    else if (v > 0.53) { f.type = 'highpass'; f.frequency.value = 20 * Math.pow(2, ((v - 0.53) / 0.47) * 10); }
+    else { f.type = 'lowpass'; f.frequency.value = 22000; }
+  };
   return d;
 }
 for (const s of SIDES) decks[s] = makeDeck(s);
@@ -160,6 +184,7 @@ function renderDeck(side) {
       <span class="cells beats">${[1, 2, 3, 4].map((n) => `<i>${n}</i>`).join('')}</span>
       <span class="ph">Phrase <b data-phrase>–</b></span>
       <span class="cells blocks">${[1, 2, 3, 4].map((n) => `<i>${n}</i>`).join('')}</span>
+      <span class="loopb" data-loopb></span>
       <span class="sec" data-sec></span>
     </div>
     <div class="deckbody">
@@ -167,7 +192,7 @@ function renderDeck(side) {
         <button class="play" data-a="play" aria-label="Play or pause (${side === 'left' ? 'Q' : 'P'})" title="Play / pause">${icon(d.playing ? 'pause' : 'play', 22)}</button>
         <button class="round" data-a="restart" aria-label="Back to the first beat" title="Back to the first beat">${icon('restart', 15)}</button>
         <div class="tlabel">Start</div>
-        ${f.hotCues ? `<div class="pads">${cuesFor(t).map((c, i) => `<button class="pad ${c != null ? 'set' : ''}" data-cue="${i}" style="--pc:${CUE_COLORS[i]}" title="${c != null ? `Hot cue ${i + 1}: jump here. Alt-click to clear.` : `Set hot cue ${i + 1} here`}">${i + 1}</button>`).join('')}</div><div class="tlabel" style="margin-top:0">Cues</div>` : ''}
+
       </div>
       ${jogHTML(side, f.keyHints && !state.jogUsed ? 'Spin me to nudge' : '')}
       <div class="pitch" title="Speed: up is faster">
@@ -177,6 +202,10 @@ function renderDeck(side) {
         <div class="val" data-pct></div>
       </div>
     </div>
+    ${f.perfPads ? `<div class="perf">
+      <div class="pmodes" role="tablist">${PAD_MODE_LIST.map(([m, name]) => `<button data-pmode="${m}" class="${d.padMode === m ? 'on' : ''}" role="tab">${name}</button>`).join('')}</div>
+      <div class="ppads" data-ppads>${[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `<button class="ppad" data-ppad="${i}"></button>`).join('')}</div>
+    </div>` : ''}
     <div class="deckfoot"><span class="role" data-live></span>${keys}<span class="grow"></span>
       ${f.gridEdit && t.grid?.estimated ? `<span class="gridtools" title="Cue Coach worked out this beat grid. If the beats sound off, nudge it.">Grid <button data-grid="-1" aria-label="Move grid earlier">‹</button><button data-grid="1" aria-label="Move grid later">›</button><button data-grid="one" title="Move the &quot;1&quot; to the next beat">1 ›</button></span>` : ''}
       ${f.barCounter ? '<span class="barcount" data-bar></span>' : ''}
@@ -205,7 +234,14 @@ function renderMixer() {
     </div>`;
   };
   $('#mixer').innerHTML = `<div class="label">Mixer</div><div class="strips">${strip('left')}${strip('right')}</div>
-    <div class="xf"><span style="color:var(--left)">A</span><input type="range" id="xfader" min="0" max="1" step="0.005" value="${state.xfader}" aria-label="Crossfader" title="Crossfader ([ and ])"><span style="color:var(--right)">B</span></div>`;
+    <div class="xf"><span style="color:var(--left)">A</span><input type="range" id="xfader" min="0" max="1" step="0.005" value="${state.xfader}" aria-label="Crossfader" title="Crossfader ([ and ])"><span style="color:var(--right)">B</span></div>
+    ${f.beatFx ? `<div class="bfx">
+      <div class="label">Beat FX</div>
+      <div class="bfx-row"><button data-bfx="prev" aria-label="Previous effect">‹</button><b data-bfxname></b><button data-bfx="next" aria-label="Next effect">›</button></div>
+      <div class="bfx-row"><button data-bfx="bdown" aria-label="Shorter">−</button><span data-bfxbeats></span><button data-bfx="bup" aria-label="Longer">+</button></div>
+      <div class="bfx-row seg">${['A', 'both', 'B'].map((c) => `<button data-bfxch="${c}">${c === 'both' ? 'A+B' : c}</button>`).join('')}</div>
+      <div class="bfx-row">${dialHTML({ id: 'fx:depth', label: 'Level', value: state.bfx.depth, min: 0, max: 1, def: 0.6 })}<button class="bfx-on" data-bfx="on">FX on</button></div>
+    </div>` : ''}`;
   $$('#mixer [data-dial]').forEach((x) => setDial(x, +x.dataset.value));
 }
 
@@ -397,7 +433,7 @@ function renderLibrary() {
 const MAX_ROWS = 400;
 function renderList() {
   const el = $('#list'), ref = decks.left.track, f = state.f;
-  if (state.tab === 'set') return renderSet(el);
+  if (state.tab === 'set') { renderSet(el); return markLibSel(); }
   if (!state.tracks.length) { el.innerHTML = `<div class="empty">${icon('music', 30)}<b>No music yet</b><span>Choose where your music comes from with the button above.</span></div>`; return; }
   let rows;
   if (state.tab === 'suggested') {
@@ -431,6 +467,7 @@ function renderList() {
       <span class="n">${bpm}</span><span class="n wide muted">${duration(t)}</span><span class="wide" style="display:flex;gap:6px;min-width:0;align-items:center">${matchCell}</span>
       <span class="acts"><button class="l" data-load="left" title="Load on deck A">A</button><button class="r" data-load="right" title="Load on deck B">B</button></span></div>`;
   }).join('') + (rows.length > MAX_ROWS ? `<div class="empty small">Showing ${MAX_ROWS} of ${rows.length}. Search to narrow it down.</div>` : '');
+  markLibSel();
 }
 
 // ---------- lessons ----------
@@ -621,6 +658,10 @@ function drawLane(hint) {
       g.globalAlpha = 1;
     }
     // cue markers
+    if (d.loop) {
+      const x0 = Math.max(left, xAt(d.loop.start)), x1 = Math.min(w, xAt(d.loop.end));
+      if (x1 > x0) { g.fillStyle = colors.ok; g.globalAlpha = 0.16; g.fillRect(x0, top, x1 - x0, rowH); g.globalAlpha = 0.9; g.fillRect(x0, top, 2, rowH); g.fillRect(x1 - 2, top, 2, rowH); g.globalAlpha = 1; }
+    }
     for (const c of allCues(d.track)) {
       const x = xAt(c.time); if (x < left || x > w) continue;
       g.fillStyle = c.color; g.beginPath(); g.moveTo(x - 6, top + 1); g.lineTo(x + 6, top + 1); g.lineTo(x, top + 9); g.fill();
@@ -709,6 +750,7 @@ function drawWave(side) {
   if (B) { layer(d._wave.mid, 1.6, 0.7, '#ffffff', 0.4); layer(d._wave.high, 2, 0.45, '#ffffff', 0.7); }
   g.globalAlpha = 1;
   for (const c of allCues(d.track)) { const x = (c.time / dur) * w; g.fillStyle = c.color; g.beginPath(); g.moveTo(x - 4, h); g.lineTo(x + 4, h); g.lineTo(x, h - 6); g.fill(); }
+  if (d.loop) { g.fillStyle = colors.ok; g.globalAlpha = 0.5; g.fillRect((d.loop.start / dur) * w, 0, Math.max(2, ((d.loop.end - d.loop.start) / dur) * w), h); g.globalAlpha = 1; }
   g.fillStyle = colors.ink; g.fillRect(px - 1, 0, 2, h);
 }
 
@@ -758,12 +800,16 @@ function frame(now) {
     if (play && play.dataset.state !== String(d.playing)) { play.dataset.state = String(d.playing); play.innerHTML = icon(d.playing ? 'pause' : 'play', 22); }
     const slider = $('input[data-a="tempo"]', el); if (slider && document.activeElement !== slider) slider.value = d.tempoPct;
     updateCounter(el, d);
+    updatePads(side);
+    const lb = q('loopb'); if (lb) { const t = d.loop ? `Loop ${beatsLabel(d.loop.beats)}` : ''; if (lb.textContent !== t) lb.textContent = t; }
     if (q('bar') && d.track.grid) {
       const bar = Math.max(1, Math.floor((d.position() - d.track.grid.firstDownbeat) / barLen(d.track.grid)) + 1);
       q('bar').textContent = `Bar ${bar} · phrase ${Math.ceil(bar / 16)} · −${fmtTime(Math.max(0, d.buffer.duration - d.position()))}`;
     }
   }
   const xf = $('#xfader'); if (xf && document.activeElement !== xf) xf.value = state.xfader;
+  syncLights();
+  updateBfx();
   requestAnimationFrame(frame);
 }
 
@@ -808,12 +854,93 @@ function moveXfader(x) {
     state.blend = null;
   }
 }
+// ---------- performance pads: cues, loops, beat jump, pad FX, sampler ----------
+function setPadMode(side, mode) {
+  const d = decks[side];
+  if (d.padMode === mode) return;
+  d.fx.stopAll(); d.padMode = mode; d._padKey = null;
+  $$(`#deck-${side} [data-pmode]`).forEach((b) => b.classList.toggle('on', b.dataset.pmode === mode));
+}
+function padPress(side, i, down, shift = false, mode = decks[side].padMode) {
+  const d = decks[side];
+  if (mode === 'sampler') { if (down) (shift ? stopSample(i) : playSample(i)); d._padKey = null; return; }
+  if (!d.buffer) return;
+  if (mode === 'fx1' || mode === 'fx2') {
+    const [id, beats] = PAD_FX[mode][i];
+    if (down) { d.fx.start(id, beats, 0.85); d._fxPad = i; } else if (d._fxPad === i) { d.fx.stop(id); d._fxPad = null; }
+    d._padKey = null; return;
+  }
+  if (!down) return;
+  if (mode === 'hotcue') return hotCue(side, i, shift);
+  if (mode === 'loop') return toggleLoop(side, LOOP_SIZES[i]);
+  if (mode === 'jump') return d.seek(jumpBy(d.track.grid, d.position(), JUMP_SIZES[i]));
+}
+/** Pad labels and lights for the deck's current mode (only redrawn when something changes). */
+function updatePads(side) {
+  const d = decks[side], box = $(`#deck-${side} [data-ppads]`); if (!box) return;
+  const cues = d.track ? cuesFor(d.track) : [];
+  const key = [d.padMode, d.loop?.beats, cues.join(), d._fxPad, SAMPLES.map((_, i) => samplePlaying(i)).join()].join('|');
+  if (d._padKey === key) return;
+  d._padKey = key;
+  $$('[data-ppad]', box).forEach((b, i) => {
+    let label = '', on = false, color = '';
+    if (d.padMode === 'hotcue') { label = String(i + 1); on = cues[i] != null; color = CUE_COLORS[i % 4]; b.title = on ? `Hot cue ${i + 1}: jump here. Alt-click to clear.` : `Set hot cue ${i + 1}`; }
+    else if (d.padMode === 'loop') { label = `${beatsLabel(LOOP_SIZES[i])}`; on = d.loop?.beats === LOOP_SIZES[i]; b.title = `Loop ${label} beat${LOOP_SIZES[i] === 1 ? '' : 's'} (press again to exit)`; }
+    else if (d.padMode === 'jump') { const j = JUMP_SIZES[i]; label = j < 0 ? `‹ ${-j}` : `${j} ›`; b.title = `Jump ${Math.abs(j)} beat${Math.abs(j) === 1 ? '' : 's'} ${j < 0 ? 'back' : 'forward'}`; }
+    else if (d.padMode === 'fx1' || d.padMode === 'fx2') { label = padFxLabel(PAD_FX[d.padMode][i]); on = d._fxPad === i; b.title = 'Hold for the effect, let go to stop'; }
+    else if (d.padMode === 'sampler') { label = SAMPLES[i]; on = samplePlaying(i); b.title = `Play ${SAMPLES[i]} (Alt-click stops it)`; }
+    b.textContent = label; b.classList.toggle('on', on); b.style.setProperty('--pc', color || `var(--${side})`);
+  });
+}
+
+// ---------- loops ----------
+function snapToBeat(d, t) { const g = d.track?.grid; if (!g) return t; const b = 60 / g.bpm; return g.firstDownbeat + Math.round((t - g.firstDownbeat) / b) * b; }
+function toggleLoop(side, beats) {
+  const d = decks[side]; if (!d.buffer) return;
+  if (d.loop && Math.abs(d.loop.beats - beats) < 1e-6) { d.lastLoop = d.loop; d.clearLoop(); return; }
+  d.setLoop(loopAt(d.track.grid, d.position(), beats)); d.lastLoop = d.loop;
+}
+function loopIn(side) { const d = decks[side]; if (d.buffer) { d._loopIn = snapToBeat(d, d.position()); toast(`Loop in set on deck ${LETTER[side]}. Press Loop out where it should end.`); } }
+function loopOut(side) {
+  const d = decks[side]; if (!d.buffer) return;
+  if (d._loopIn == null) return loopIn(side);
+  const beat = 60 / (d.track.grid?.bpm || 120);
+  let end = snapToBeat(d, d.position()); if (end <= d._loopIn) end = d._loopIn + beat;
+  d.setLoop({ start: d._loopIn, end, beats: Math.round(((end - d._loopIn) / beat) * 100) / 100 }); d.lastLoop = d.loop; d._loopIn = null;
+}
+function reloop(side) {
+  const d = decks[side]; if (!d.buffer) return;
+  if (d.loop) { d.lastLoop = d.loop; d.clearLoop(); } else if (d.lastLoop) d.setLoop(d.lastLoop);
+}
+function scaleDeckLoop(side, factor) { const d = decks[side]; if (d.loop) { d.setLoop(scaleLoop(d.loop, factor, d.track.grid)); d.lastLoop = d.loop; } }
+
+// ---------- Beat FX (mixer) ----------
+function applyBfx() {
+  for (const r of state.bfxRunning) decks[r.side].fx.stop(r.id);
+  state.bfxRunning = [];
+  const { on, ch, depth } = state.bfx, id = FX[state.bfx.i].id, beats = BFX_BEATS[state.bfx.b];
+  if (on) for (const side of SIDES) {
+    if (ch !== 'both' && LETTER[side] !== ch) continue;
+    if (!decks[side].buffer) continue;
+    decks[side].fx.start(id, beats, depth); state.bfxRunning.push({ side, id });
+  }
+  state.bfxKey = null;
+}
+function updateBfx() {
+  const box = $('#mixer .bfx'); if (!box) return;
+  const key = JSON.stringify(state.bfx); if (state.bfxKey === key) return; state.bfxKey = key;
+  $('[data-bfxname]', box).textContent = FX[state.bfx.i].name;
+  $('[data-bfxbeats]', box).textContent = `${beatsLabel(BFX_BEATS[state.bfx.b])} beat${BFX_BEATS[state.bfx.b] === 1 ? '' : 's'}`;
+  $$('[data-bfxch]', box).forEach((b) => b.classList.toggle('on', b.dataset.bfxch === state.bfx.ch));
+  $('[data-bfx="on"]', box).classList.toggle('on', state.bfx.on);
+}
+
 // ---------- hot cues ----------
 const cueStore = store.get('cues', {});
 /** Four pads: your own cues, falling back to rekordbox's hot cues A–D. */
 function cuesFor(t) {
   const own = cueStore[t.id] || [];
-  return [0, 1, 2, 3].map((i) => (own[i] === false ? null : own[i] ?? (t.cues || []).find((c) => c.num === i && !c.loop)?.time ?? null));
+  return [0, 1, 2, 3, 4, 5, 6, 7].map((i) => (own[i] === false ? null : own[i] ?? (t.cues || []).find((c) => c.num === i && !c.loop)?.time ?? null));
 }
 function hotCue(side, i, clear) {
   const d = decks[side], t = d.track, own = (cueStore[t.id] ||= []);
@@ -867,7 +994,15 @@ function deckEvents(side) {
     const pad = e.target.closest('[data-cue]'); if (pad && d().buffer) return hotCue(side, +pad.dataset.cue, e.altKey);
     const gb = e.target.closest('[data-grid]'); if (gb && d().buffer) return shiftGrid(side, gb.dataset.grid, e.shiftKey);
   });
-  el.addEventListener('contextmenu', (e) => { const pad = e.target.closest('[data-cue]'); if (pad) { e.preventDefault(); hotCue(side, +pad.dataset.cue, true); } });
+  el.addEventListener('contextmenu', (e) => { const pad = e.target.closest('[data-ppad]'); if (pad) { e.preventDefault(); padPress(side, +pad.dataset.ppad, true, true); } });
+  el.addEventListener('click', (e) => { const m = e.target.closest('[data-pmode]'); if (m) setPadMode(side, m.dataset.pmode); });
+  // pads: pressed and released (Pad FX are held)
+  el.addEventListener('pointerdown', (e) => {
+    const pad = e.target.closest('[data-ppad]'); if (!pad || e.button !== 0) return;
+    const i = +pad.dataset.ppad; padPress(side, i, true, e.altKey || e.shiftKey);
+    const up = () => { padPress(side, i, false); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); };
+    window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+  });
   el.addEventListener('click', (e) => {
     const cv = e.target.closest('[data-wave]'); if (!cv || !d().buffer) return;
     const r = cv.getBoundingClientRect(), g = d().track.grid;
@@ -882,7 +1017,20 @@ function deckEvents(side) {
 
 function mixerEvents() {
   const m = $('#mixer');
-  bindDials(m, (id, v) => { const [side, band] = id.split(':'); setEQ(side, band, v, false); });
+  bindDials(m, (id, v) => {
+    if (id === 'fx:depth') { state.bfx.depth = v; for (const r of state.bfxRunning) decks[r.side].fx.setDepth(r.id, v); return; }
+    const [side, band] = id.split(':'); setEQ(side, band, v, false);
+  });
+  m.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-bfx]'); const c = e.target.closest('[data-bfxch]');
+    if (c) { state.bfx.ch = c.dataset.bfxch; applyBfx(); }
+    if (!b) return;
+    const k = b.dataset.bfx;
+    if (k === 'on') state.bfx.on = !state.bfx.on;
+    else if (k === 'next' || k === 'prev') state.bfx.i = (state.bfx.i + (k === 'next' ? 1 : -1) + FX.length) % FX.length;
+    else if (k === 'bup' || k === 'bdown') state.bfx.b = Math.max(0, Math.min(BFX_BEATS.length - 1, state.bfx.b + (k === 'bup' ? 1 : -1)));
+    applyBfx();
+  });
   m.addEventListener('click', (e) => {
     const cut = e.target.closest('[data-cut]');
     if (cut) { const [side, band] = cut.dataset.cut.split(':'); return setEQ(side, band, decks[side].eq[band] <= -25 ? 0 : -30); }
@@ -908,6 +1056,9 @@ function bind() {
   $('#lessonsBtn').innerHTML = icon('book', 18); $('#aiBtn').innerHTML = icon('wand', 18);
   $('#lessonsBtn').addEventListener('click', () => setPane(!state.paneOpen));
   $('#aiBtn').addEventListener('click', openAI);
+  $('#ctlBtn').addEventListener('click', openCtl);
+  $('#sinkSel').addEventListener('change', (e) => useSink(e.target.value));
+  navigator.mediaDevices?.addEventListener?.('devicechange', () => { if ($('#ctlDlg').open) listSinks(); });
   $('#tutor').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.a === 'close') setPane(false);
@@ -1002,6 +1153,7 @@ function runCommand(cmd) {
     'toggle-lessons': () => setPane(!state.paneOpen),
     'build-set': () => focusLibrary(null, 'set'),
     ai: openAI,
+    controller: openCtl,
   }[cmd] || (() => {}))();
 }
 
@@ -1124,6 +1276,198 @@ async function askAICoach() {
   finally { state.aiBusy = false; renderList(); }
 }
 
+// ---------- DJ controller ----------
+const ctlState = { connected: [], unknown: [], sinks: [], log: [], timers: [] };
+async function initController() {
+  if (!navigator.requestMIDIAccess) return renderCtl();
+  try {
+    // SysEx lets us say hello to controllers that wait for DJ software (the FLX4 does); plain MIDI if not allowed.
+    const access = await navigator.requestMIDIAccess({ sysex: true }).catch(() => navigator.requestMIDIAccess());
+    const bind = () => {
+      const before = ctlState.connected.map((c) => c.name).join();
+      ctlState.connected = []; ctlState.unknown = [];
+      ctlState.timers.forEach(clearInterval); ctlState.timers = [];
+      for (const input of access.inputs.values()) {
+        if (input.state === 'disconnected') continue;
+        const profile = detectController(input.name);
+        if (!profile) { ctlState.unknown.push(input.name); input.onmidimessage = null; continue; }
+        const ctl = emptyController();
+        input.onmidimessage = (e) => onControllerMessage(profile, ctl, e.data);
+        ctlState.connected.push({ name: profile.name, profile });
+        // keep-alive: the same hello Mixxx sends, at start and on a timer
+        const k = KEEPALIVE[profile.id];
+        const out = k && access.sysexEnabled && [...access.outputs.values()].find((o) => o.state !== 'disconnected' && o.name === input.name);
+        if (out) {
+          const hello = () => { try { out.send(k.bytes); } catch { /* port went away */ } };
+          hello(); ctlState.timers.push(setInterval(hello, k.everyMs));
+        }
+        const lightsOut = profile.id === 'ddj-flx4' && [...access.outputs.values()].find((o) => o.state !== 'disconnected' && o.name === input.name);
+        if (lightsOut) { ctlState.lightsOut = lightsOut; ctlState.lightCache = new Map(); }
+      }
+      const now = ctlState.connected.map((c) => c.name).join();
+      if (now && now !== before) toast(`${ctlState.connected[0].name} connected. Your decks and mixer follow it now.`);
+      renderCtl();
+    };
+    access.onstatechange = bind; bind();
+  } catch (err) { console.warn('MIDI unavailable', err); ctlState.error = 'Cue Coach wasn\'t allowed to use MIDI, so it can\'t read controllers. Restart the app and try again.'; renderCtl(); }
+}
+
+let syncTold = -Infinity; // when we last explained there's no sync (shown at most every 8 s)
+function onControllerMessage(profile, ctl, data) {
+  if (data[0] === 0xF0) return; // SysEx replies to our keep-alive
+  const a = midiToAction(profile, ctl, data, { tempoRange: tempoRange(state.level) });
+  logMidi(data, a);
+  if (!a) return;
+  const d = a.side ? decks[a.side] : null;
+  switch (a.type) {
+    case 'play': return togglePlay(a.side);
+    case 'restart': if (d.buffer) { d.seek(d.track.grid?.firstDownbeat || 0); state.did.add('restart'); } return;
+    case 'sync': if (performance.now() - syncTold > 8000) { syncTold = performance.now(); toast('No sync in Cue Coach: match the speed with the tempo fader. That\'s the skill you\'re learning.'); } return;
+    case 'jog': return jogFromController(a.side, a.ticks);
+    case 'search': return jogFromController(a.side, a.ticks, true);
+    case 'pad': {
+      // pads we have codes for say their mode; Pad FX pads (no known codes) follow the deck's current mode
+      let mode = a.mode;
+      if (!mode) { if (d.padMode !== 'fx1' && d.padMode !== 'fx2') return; mode = d.padMode; }
+      if (mode !== d.padMode) setPadMode(a.side, mode);
+      return padPress(a.side, a.pad, a.down, a.shift, mode);
+    }
+    case 'padMode': return setPadMode(a.side, a.mode);
+    case 'loopIn': return loopIn(a.side);
+    case 'loopOut': return loopOut(a.side);
+    case 'reloop': return reloop(a.side);
+    case 'loopHalf': return scaleDeckLoop(a.side, 0.5);
+    case 'loopDouble': return scaleDeckLoop(a.side, 2);
+    case 'jump': if (d.buffer) d.seek(jumpBy(d.track.grid, d.position(), a.beats)); return;
+    case 'fxOn': state.bfx.on = !state.bfx.on; return applyBfx();
+    case 'fxSelect': state.bfx.i = (state.bfx.i + a.step + FX.length) % FX.length; return applyBfx();
+    case 'fxBeats': state.bfx.b = Math.max(0, Math.min(BFX_BEATS.length - 1, state.bfx.b + a.step)); return applyBfx();
+    case 'fxChannel': state.bfx.ch = a.ch; return applyBfx();
+    case 'fxLevel': { state.bfx.depth = a.value; for (const r of state.bfxRunning) decks[r.side].fx.setDepth(r.id, a.value); const dl = $('[data-dial="fx:depth"]'); if (dl) setDial(dl, a.value); return; }
+    case 'trim': return d.setTrim(a.db);
+    case 'filter': return d.setFilter(a.value);
+    case 'browse': return moveLibSel(a.steps);
+    case 'browsePress': { const tabs = ['suggested', 'all', 'set'].filter((t) => t !== 'suggested' || state.f.upNext); state.tab = tabs[(tabs.indexOf(state.tab) + 1) % tabs.length]; return renderLibrary(); }
+    case 'load': return loadSelected(a.side);
+    case 'tempo': if (d.buffer) d.setTempo(a.pct); return;
+    case 'eq': return setEQ(a.side, a.band, a.db);
+    case 'volume': { d.setVolume(a.value); const f = $(`[data-vol="${a.side}"]`); if (f && document.activeElement !== f) f.value = a.value; return; }
+    case 'listen': return setListen(a.side, a.on);
+    case 'xfader': return moveXfader(a.value);
+  }
+}
+
+/**
+ * Jog wheel. While playing, the nudge follows how fast you turn: a quarter turn in half a second speeds
+ * the track up about 12%, and it eases off as soon as you stop. While paused, it moves through the track
+ * like a record: one full turn is 1.8 seconds of music (33⅓ rpm). Shift + jog searches quickly.
+ */
+const JOG_GAIN = 0.00033; // speed bend per jog step per second
+function jogFromController(side, ticks, search = false) {
+  const d = decks[side]; if (!d.buffer || !ticks) return;
+  const clampPos = (t) => Math.max(0, Math.min(d.buffer.duration - 0.1, t));
+  if (search) { d.seek(clampPos(d.position() + ticks * 0.06)); state.did.add('scrub'); return; }
+  if (!d.playing) { d.seek(clampPos(d.position() + ticks * (1.8 / JOG_STEPS_PER_TURN))); state.did.add('scrub'); return; }
+  state.did.add('jog');
+  d._jogAcc = (d._jogAcc || 0) + ticks;
+  if (!d._jogLoop) { d._jogLast = performance.now(); d._jogSpeed = 0; d._jogLoop = setInterval(() => jogTick(d), 16); }
+}
+function jogTick(d) {
+  const now = performance.now(), dt = Math.max(0.004, (now - d._jogLast) / 1000);
+  d._jogLast = now;
+  d._jogSpeed = d._jogSpeed * 0.6 + (d._jogAcc / dt) * 0.4; d._jogAcc = 0; // steps per second, smoothed
+  if (Math.abs(d._jogSpeed) < 4 || !d.playing) { d.setBend(0); clearInterval(d._jogLoop); d._jogLoop = null; return; }
+  d.setBend(Math.max(-0.3, Math.min(0.3, d._jogSpeed * JOG_GAIN)));
+}
+
+/** The last few controller messages and what Cue Coach did with them (shown in the Controller window). */
+function logMidi(data, action) {
+  ctlState.log.unshift({ hex: hexBytes(data), text: describeAction(action), used: !!action });
+  ctlState.log.length = Math.min(ctlState.log.length, 40);
+  if ($('#ctlDlg').open && !logMidi.queued) { logMidi.queued = true; requestAnimationFrame(() => { logMidi.queued = false; renderMidiLog(); }); }
+}
+function renderMidiLog() {
+  $('#midiLog').innerHTML = ctlState.log.length
+    ? ctlState.log.map((m) => `<div><span>${m.hex}</span><span class="act ${m.used ? '' : 'unused'}">${esc(m.text)}</span></div>`).join('')
+    : '<span class="empty">Nothing yet. Press a button or move a fader on your controller.</span>';
+}
+
+/** Light the controller's buttons to match the app (only sending what changed). */
+function syncLights() {
+  const out = ctlState.lightsOut; if (!out) return;
+  const deckLights = (side) => { const d = decks[side]; return { playing: d.playing, loaded: !!d.buffer, listening: d.listening, cues: d.track ? cuesFor(d.track) : [], padMode: d.padMode, loopBeats: d.loop ? d.loop.beats : null }; };
+  for (const [st, d1, v] of flx4Lights({ left: deckLights('left'), right: deckLights('right'), fxOn: state.bfx.on })) {
+    const key = st * 256 + d1;
+    if (ctlState.lightCache.get(key) === v) continue;
+    ctlState.lightCache.set(key, v);
+    try { out.send([st, d1, v]); } catch { ctlState.lightsOut = null; return; }
+  }
+  // channel level meters, about 25 times a second, only when the level changes
+  const now = performance.now();
+  if (now - (ctlState.meterAt || 0) < 40) return;
+  ctlState.meterAt = now;
+  const level = (side) => (decks[side].buffer ? Math.min(1, decks[side].peak * 0.85) : 0); // normal tracks peak just under the red
+  for (const [st, d1, v] of flx4Meters({ left: level('left'), right: level('right') })) {
+    const key = st * 256 + d1;
+    if (ctlState.lightCache.get(key) === v) continue;
+    ctlState.lightCache.set(key, v);
+    try { out.send([st, d1, v]); } catch { ctlState.lightsOut = null; return; }
+  }
+}
+
+/** Switch every light and meter off (when the app closes), so the controller isn't left lit. */
+function lightsOff() {
+  const out = ctlState.lightsOut; if (!out) return;
+  const off = { playing: false, loaded: false, listening: false, cues: [], padMode: null, loopBeats: null };
+  try {
+    for (const [st, d1] of flx4Lights({ left: off, right: off })) out.send([st, d1, 0]);
+    for (const [st, d1] of flx4Meters({})) out.send([st, d1, 0]);
+  } catch { /* controller already gone */ }
+}
+window.addEventListener('beforeunload', lightsOff);
+
+// ---------- library selection from the controller's browse knob ----------
+const LIB_ROWS = '#list .trow[data-id], #list .srow[data-id]';
+function moveLibSel(steps) {
+  const rows = $$(LIB_ROWS); if (!rows.length || !steps) return;
+  const cur = rows.findIndex((r) => r.dataset.id === state.libSelId);
+  const i = Math.max(0, Math.min(rows.length - 1, (cur < 0 ? -1 : cur) + Math.sign(steps) * Math.min(Math.abs(steps), 5)));
+  state.libSelId = rows[i].dataset.id; markLibSel();
+  rows[i].scrollIntoView({ block: 'nearest' });
+}
+function markLibSel() { $$(LIB_ROWS).forEach((r) => r.classList.toggle('sel', r.dataset.id === state.libSelId)); }
+function loadSelected(side) {
+  const row = $$(LIB_ROWS).find((r) => r.dataset.id === state.libSelId) || $(LIB_ROWS);
+  const t = row && state.tracks.find((x) => x.id === row.dataset.id);
+  if (t) loadTo(side, t); else toast('Turn the browse knob to pick a track first.');
+}
+
+function renderCtl() {
+  const c = ctlState.connected[0];
+  const b = $('#ctlBtn');
+  b.classList.toggle('on', !!c);
+  b.innerHTML = `<span class="led"></span>${c ? esc(c.name.replace(/^(Pioneer|Hercules|Numark) /, '')) : 'No controller'}`;
+  $('#ctlState').innerHTML = c
+    ? `<span class="ok-pill">${icon('check', 14)} ${esc(c.name)} connected</span>`
+    : `<span class="off-pill">No controller connected</span>${ctlState.error ? `<span class="err">${esc(ctlState.error)}</span>` : ''}${ctlState.unknown.length ? `<span class="small muted">Found ${esc(ctlState.unknown.join(', '))}, which Cue Coach doesn't support yet.</span>` : ''}`;
+}
+
+// ---------- sound output ----------
+async function listSinks() {
+  const sel = $('#sinkSel');
+  let outs = [];
+  try { outs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput' && d.deviceId !== 'default'); } catch { /* no device list */ }
+  const cur = store.get('sink', '');
+  sel.innerHTML = `<option value="">Computer default</option>${outs.map((d, i) => `<option value="${esc(d.deviceId)}" ${d.deviceId === cur ? 'selected' : ''}>${esc(d.label || `Output ${i + 1}`)}</option>`).join('')}`;
+  sel.disabled = !ctx.setSinkId;
+}
+async function useSink(id) {
+  if (!ctx.setSinkId) return;
+  try { await ctx.setSinkId(id); store.set('sink', id); }
+  catch (err) { toast(`Couldn't switch the sound output: ${err.message}`); listSinks(); }
+}
+function openCtl() { renderCtl(); renderMidiLog(); listSinks(); $('#ctlDlg').showModal(); }
+
 // ---------- start ----------
 async function boot() {
   if (desktop?.platform) document.documentElement.classList.add(desktop.platform);
@@ -1133,6 +1477,8 @@ async function boot() {
   renderSource();
   startLesson(state.lessonId);
   aiStatus().then((st) => { state.ai = st; renderAI(); });
+  initController();
+  const sink = store.get('sink', ''); if (sink && ctx.setSinkId) ctx.setSinkId(sink).catch(() => store.set('sink', ''));
   lib.rekordboxAvailable().then((ok) => {
     state.rbAvailable = ok; renderSource();
     if (!ok) { $('#rbChoice').disabled = true; $('#rbChoiceNote').textContent = 'Not connected. Open Cue Coach on a computer with rekordbox.'; }

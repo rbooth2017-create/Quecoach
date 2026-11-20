@@ -88,6 +88,16 @@ html.win32 .titlebar, html.linux .titlebar { padding-right: 146px; }  /* room fo
 .icon-btn { width: 32px; height: 30px; padding: 0; justify-content: center; border-color: transparent; background: transparent; color: var(--ink-2); }
 .icon-btn:hover { background: var(--card-2); color: var(--ink); }
 .icon-btn.on { background: var(--card-2); color: var(--left); }
+.ctl-chip { border-color: transparent; background: transparent; color: var(--ink-3); font-size: 12px; font-weight: 600; padding: 4px 10px; }
+.ctl-chip:hover { background: var(--card-2); color: var(--ink); }
+.ctl-chip .led { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
+.ctl-chip.on { color: var(--ink); }
+.ctl-chip.on .led { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.midi-log { font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--card-2); border-radius: 8px; padding: 6px 8px; min-height: 96px; max-height: 150px; overflow: auto; display: grid; align-content: start; gap: 2px; }
+.midi-log div { display: grid; grid-template-columns: 80px 1fr; gap: 8px; }
+.midi-log .act { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); }
+.midi-log .act.unused { color: var(--ink-3); }
+.midi-log .empty { color: var(--ink-3); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 .pill-btn { border-color: transparent; background: var(--card-2); font-weight: 600; font-size: 12px; padding: 4px 10px; }
 
 /* ---------- coach strip ---------- */
@@ -119,7 +129,7 @@ html.win32 .titlebar, html.linux .titlebar { padding-right: 146px; }  /* room fo
 
 /* decks row */
 .decks-row { display: grid; grid-template-columns: minmax(0, 1fr) 236px minmax(0, 1fr); gap: 10px; }
-.deck { display: grid; grid-template-rows: auto auto auto 1fr auto; gap: 10px; padding: 12px; position: relative; }
+.deck { display: grid; grid-template-rows: auto auto auto 1fr auto auto; gap: 10px; padding: 12px; position: relative; }
 .deck[data-side="left"] { --c: var(--left); --soft: var(--left-soft); }
 .deck[data-side="right"] { --c: var(--right); --soft: var(--right-soft); }
 .deck-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
@@ -146,6 +156,26 @@ html.win32 .titlebar, html.linux .titlebar { padding-right: 146px; }  /* room fo
 .counter .sec { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); white-space: nowrap; }
 .counter .sec i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .counter.before { opacity: .55; }
+.counter .loopb { font-size: 11px; font-weight: 750; color: var(--ok); }
+/* performance pads */
+.perf { display: grid; gap: 6px; }
+.pmodes { display: flex; gap: 2px; background: var(--card-2); padding: 2px; border-radius: 7px; }
+.pmodes button { flex: 1; border: none; background: transparent; padding: 2px 4px; font-size: 11px; font-weight: 650; color: var(--ink-3); border-radius: 5px; justify-content: center; }
+.pmodes button.on { background: var(--card); color: var(--c); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.ppads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+.ppad { height: 30px; padding: 0 4px; justify-content: center; font-size: 11px; font-weight: 700; border-radius: 6px; color: var(--ink-2); background: var(--card-2); border-color: var(--line-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ppad.on { background: var(--pc); border-color: var(--pc); color: #fff; }
+.ppad:active { transform: scale(.95); }
+/* Beat FX */
+.bfx { display: grid; gap: 5px; padding: 8px 6px 2px; border-top: 1px solid var(--line); }
+.bfx-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
+.bfx-row b { font-size: 12px; text-align: center; flex: 1; }
+.bfx-row span { flex: 1; text-align: center; color: var(--ink-2); }
+.bfx-row button { padding: 1px 8px; font-size: 12px; }
+.bfx-row.seg { gap: 3px; }
+.bfx-row.seg button { flex: 1; justify-content: center; font-weight: 700; }
+.bfx-row.seg button.on, .bfx-on.on { background: var(--ink); color: var(--card); border-color: var(--ink); }
+.bfx-on { font-weight: 700; }
 .deckbody { display: grid; grid-template-columns: 56px minmax(0, 1fr) 56px; gap: 10px; align-items: center; min-height: 0; }
 .transport { display: grid; gap: 10px; justify-items: center; }
 .play { width: 52px; height: 52px; padding: 0; border-radius: 50%; justify-content: center; background: var(--c); border-color: transparent; color: #fff; box-shadow: 0 2px 8px color-mix(in srgb, var(--c) 35%, transparent); }
@@ -238,6 +268,7 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .trow.head { position: sticky; top: 0; z-index: 1; height: 28px; background: var(--card); color: var(--ink-3); font-size: 11px; font-weight: 650; }
 .trow.head:hover { background: var(--card); }
 .trow.loaded { background: color-mix(in srgb, var(--left) 8%, transparent); }
+.trow.sel, .srow.sel { box-shadow: inset 3px 0 0 var(--left); background: color-mix(in srgb, var(--left) 14%, transparent); }
 .trow .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trow .a, .trow .why { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trow .n { font-variant-numeric: tabular-nums; }
@@ -366,6 +397,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
   <div class="brand"><span class="logo"></span>Cue Coach</div>
   <div class="tb-center" id="progress"></div>
   <div class="tb-right">
+    <button class="ctl-chip" id="ctlBtn" title="Controller and sound output"></button>
     <button class="pill-btn" id="levelBtn" title="Your level"></button>
     <button class="icon-btn" id="aiBtn" title="AI coach settings" aria-label="AI coach settings"></button>
     <button class="icon-btn" id="lessonsBtn" title="Show or hide lessons (L)" aria-label="Lessons" aria-pressed="false"></button>
@@ -448,6 +480,27 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <li>Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Use costs a few cents per set.</li>
     <li>Only track details are sent (title, artist, BPM, key, energy, genre). Never your audio or file locations.</li>
     <li id="aiWhere">In the desktop app your key is encrypted with your computer's secure storage.</li>
+  </ul>
+  <form method="dialog" class="dlg-foot"><button>Done</button></form>
+</dialog>
+
+<dialog id="ctlDlg">
+  <h2>Controller and sound</h2>
+  <p>Cue Coach works with the mouse and keyboard. Plug in a DJ controller and it takes over the decks and mixer.</p>
+  <div id="ctlState" class="field"></div>
+  <div class="field">
+    <span class="small muted">Live monitor: touch any control and it shows up here</span>
+    <div id="midiLog" class="midi-log"></div>
+  </div>
+  <div class="field">
+    <label for="sinkSel" class="small muted">Sound comes out of</label>
+    <select id="sinkSel" style="padding:6px 8px;border-radius:8px;border:1px solid var(--line-2);background:var(--card-2)"></select>
+    <span class="small muted">Controllers like the DDJ-FLX4 have their own sound card: choose it here and plug your speakers and headphones into the controller.</span>
+  </div>
+  <ul class="small">
+    <li>Supported: Pioneer DDJ-FLX4, DDJ-400, DDJ-200, DDJ-SB3; Hercules Inpulse 200, 300, 500; Numark Mixtrack 3.</li>
+    <li>Play, cue (back to the start), jog wheels, tempo, EQ, channel faders, crossfader and the headphone buttons (Listen) all work.</li>
+    <li>There's no sync on purpose: matching the speed yourself is the skill you're learning.</li>
   </ul>
   <form method="dialog" class="dlg-foot"><button>Done</button></form>
 </dialog>
