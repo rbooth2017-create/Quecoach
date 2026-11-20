@@ -3,9 +3,9 @@
 
 export const LEVELS = [
   { id: 'starter', name: 'Starter', blurb: 'Step-by-step coaching, beat lane and plain-word tips.' },
-  { id: 'improver', name: 'Improver', blurb: 'Shorter tips. Adds the bass control and bar counter for smoother blends.' },
-  { id: 'confident', name: 'Confident', blurb: 'Beatmatch by ear: the beat lane hides until you ask to check.' },
-  { id: 'pro', name: 'Pro', blurb: 'No coaching. Just decks, EQ, keys and numbers.' },
+  { id: 'improver', name: 'Improver', blurb: 'Shorter tips. Adds the bass dial, volume and a bar counter for smoother blends.' },
+  { id: 'confident', name: 'Confident', blurb: 'Beatmatch by ear: the beat lane hides until you ask to check. Adds the treble dial.' },
+  { id: 'pro', name: 'Pro', blurb: 'No coaching. Full three-band EQ, ±16% tempo, keys and numbers.' },
 ];
 
 // Feature → levels where it is on. Coaching fades out left to right; tools fade in.
@@ -22,8 +22,10 @@ const ON = {
   friendlyRoles: ['starter', 'improver'],              // "In the room" / "Listening" instead of A / B
   upNext:        ['starter', 'improver', 'confident', 'pro'],
   // tools
+  volume:        ['improver', 'confident', 'pro'],     // channel volume dial (Starter mixes with the crossfader only)
   bassEQ:        ['improver', 'confident', 'pro'],     // the bass swap is the next skill after beatmatching
-  fullEQ:        ['pro'],                              // high, mid and low
+  highEQ:        ['confident', 'pro'],                 // treble, for cleaner blends
+  fullEQ:        ['pro'],                              // adds the mid band
   barCounter:    ['improver', 'confident', 'pro'],     // "Bar 17 · phrase 2"
   phraseMarks:   ['improver', 'confident', 'pro'],     // phrase lines on the waveform
   pitchPercent:  ['confident', 'pro'],                 // speed shown as ±% rather than BPM only
@@ -38,6 +40,12 @@ export function levelIndex(id) { const i = LEVELS.findIndex((l) => l.id === id);
 export function featuresFor(level) {
   const id = LEVELS[levelIndex(level)].id;
   return Object.fromEntries(FEATURES.map((f) => [f, ON[f].includes(id)]));
+}
+
+/** EQ dials shown on each deck, top to bottom like a mixer. */
+export function eqBands(level) {
+  const f = featuresFor(level);
+  return [f.highEQ && 'high', f.fullEQ && 'mid', f.bassEQ && 'low'].filter(Boolean);
 }
 
 /** Tempo fader range in ± %. */

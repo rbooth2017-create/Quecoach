@@ -112,7 +112,7 @@ test('beat hints and the alignment timer', () => {
 });
 
 // ---------- levels ----------
-import { LEVELS, featuresFor, tempoRange, suggestLevelUp, FEATURES } from '../js/levels.js';
+import { LEVELS, featuresFor, tempoRange, suggestLevelUp, FEATURES, eqBands } from '../js/levels.js';
 
 test('coaching fades out and tools fade in as the level goes up', () => {
   const starter = featuresFor('starter'), pro = featuresFor('pro');
@@ -128,6 +128,13 @@ test('coaching fades out and tools fade in as the level goes up', () => {
     assert.ok(on.every((v, i) => i === 0 || !v || on[i - 1]), `${f} comes back after switching off`);
   }
   assert.equal(tempoRange('starter'), 8); assert.equal(tempoRange('pro'), 16);
+  // deck controls only grow as the level goes up
+  assert.deepEqual(LEVELS.map((l) => eqBands(l.id)), [[], ['low'], ['high', 'low'], ['high', 'mid', 'low']]);
+  assert.equal(featuresFor('starter').volume, false); assert.equal(featuresFor('improver').volume, true);
+  for (const f of ['volume', 'bassEQ', 'highEQ', 'fullEQ', 'barCounter', 'phraseMarks', 'pitchPercent', 'wideTempo']) {
+    const on = LEVELS.map((l) => featuresFor(l.id)[f]);
+    assert.ok(on.every((v, i) => i === 0 || v || !on[i - 1]), `${f} disappears at a higher level`);
+  }
 });
 
 test('level up is suggested after enough clean mixes', () => {

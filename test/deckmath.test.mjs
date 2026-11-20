@@ -42,3 +42,29 @@ test('spike verdict needs all three go criteria', () => {
   assert.equal(spikeVerdict({ separateCue: true, totalLatency: NaN, keyLockClean: true }).go, false);
   assert.equal(spikeVerdict({ separateCue: true, totalLatency: 0.01, keyLockClean: null }).go, false);
 });
+
+import { angleDelta, jogBendFromSpeed, scrubSeconds, dialValue, dialAngle, SECONDS_PER_TURN } from '../js/deckmath.js';
+
+test('wheel angles wrap the short way round', () => {
+  assert.ok(Math.abs(angleDelta(3.0, -3.0) - (2 * Math.PI - 6)) < 1e-9); // crossing ±π is a small step forward
+  assert.ok(Math.abs(angleDelta(-3.0, 3.0) + (2 * Math.PI - 6)) < 1e-9);
+  assert.equal(angleDelta(1, 1.5), 0.5);
+});
+
+test('spinning the wheel bends the speed; turning it paused scrubs', () => {
+  assert.equal(jogBendFromSpeed(0), 0);
+  assert.ok(Math.abs(jogBendFromSpeed(5) - 0.06) < 1e-9);
+  assert.equal(jogBendFromSpeed(100), 0.12);
+  assert.equal(jogBendFromSpeed(-100), -0.12);
+  assert.equal(scrubSeconds(2 * Math.PI), SECONDS_PER_TURN);
+  assert.equal(scrubSeconds(-Math.PI), -SECONDS_PER_TURN / 2);
+});
+
+test('dials: drag up to turn up, clamped; pointer sweeps 270°', () => {
+  assert.equal(dialValue(0, -80, -30, 6), 6); // half the travel up from 0 would be +18: clamped to the +6 top
+  assert.equal(dialValue(0, 80, -30, 6), -18);
+  assert.equal(dialValue(0.5, -16, 0, 1), 0.6);
+  assert.ok(Math.abs(dialAngle(0) + 0.75 * Math.PI) < 1e-9);
+  assert.ok(Math.abs(dialAngle(0.5)) < 1e-9);
+  assert.ok(Math.abs(dialAngle(2) - 0.75 * Math.PI) < 1e-9);
+});

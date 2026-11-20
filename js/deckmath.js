@@ -43,3 +43,34 @@ export function spikeVerdict({ separateCue, totalLatency, keyLockClean }) {
   };
   return { ...checks, go: checks.separateCue && checks.latency && checks.keyLock };
 }
+
+// ---------- on-screen jog wheel and dials ----------
+
+/** Smallest signed angle from a to b, in radians (−π..π). */
+export function angleDelta(a, b) {
+  let d = b - a;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+/** One turn of the on-screen wheel = this many seconds of music when scrubbing a paused track. */
+export const SECONDS_PER_TURN = 1.8;
+/** How far the platter turns per second of music (33⅓ rpm, like a turntable). */
+export const TURNS_PER_SECOND = 100 / 3 / 60;
+
+/** Spinning the wheel while the track plays: angular speed (rad/s) → temporary speed bend, clamped. */
+export function jogBendFromSpeed(radPerSec, { gain = 0.012, maxBend = 0.12 } = {}) {
+  return Math.max(-maxBend, Math.min(maxBend, radPerSec * gain));
+}
+
+/** Turning the wheel while paused moves through the track. */
+export const scrubSeconds = (dAngle) => (dAngle / (2 * Math.PI)) * SECONDS_PER_TURN;
+
+/** A dial dragged up/down: `dy` pixels (up = negative) from `start`, `px` pixels for the full range. */
+export function dialValue(start, dy, min, max, px = 160) {
+  return Math.max(min, Math.min(max, start - (dy / px) * (max - min)));
+}
+
+/** Dial position 0..1 → pointer angle in radians, sweeping 270° from bottom-left (−135°) to bottom-right (+135°). */
+export const dialAngle = (t) => (-135 + 270 * Math.max(0, Math.min(1, t))) * Math.PI / 180;

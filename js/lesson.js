@@ -32,7 +32,7 @@ export const STEPS = [
   },
   {
     id: 'match-speed', title: 'Match the speed',
-    body: 'Make the right deck\'s BPM the same as the left\'s ({LBPM}). Use the speed buttons or the slider.',
+    body: 'Make the right deck\'s BPM the same as the left\'s ({LBPM}). Slide its speed fader, or tap + and −.',
     key: '↑ ↓', done: (s) => s.bpmDiff != null && Math.abs(s.bpmDiff) <= TEMPO_OK,
   },
   {
@@ -42,7 +42,7 @@ export const STEPS = [
   },
   {
     id: 'line-up', title: 'Line up the beats',
-    body: 'Watch the beat lane. Nudge the right deck until its dots sit right under the left\'s, and hold them there.',
+    body: 'Watch the beat lane. Give the right deck\'s wheel a gentle spin forward or back until its dots sit right under the left\'s, and hold them there.',
     key: '← →', done: (s) => s.alignedFor >= HOLD_S,
   },
   {

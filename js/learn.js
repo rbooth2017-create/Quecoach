@@ -5,7 +5,18 @@ import { beatLen, barLen, fmtTime, timeOfBar } from './engine.js';
 import * as lib from './musiclib.js';
 import { readTags, TAG_BYTES } from './tags.js';
 import { STEPS, currentStep, beatHint, updateAligned, fill, HOLD_S } from './lesson.js';
-import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex } from './levels.js';
+import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex, eqBands } from './levels.js';
+import { JogWheel, jogHTML, dialHTML, setDial, bindDials } from './controls.js';
+
+const THEMES = [
+  { id: 'auto', name: 'Match my computer', bg: '#f6f5f1', bg2: '#14161b', left: '#2f7df6', right: '#ff6b4a' },
+  { id: 'fresh', name: 'Fresh', bg: '#f6f5f1', left: '#2f7df6', right: '#ff6b4a' },
+  { id: 'night', name: 'Night', bg: '#14161b', left: '#5b9bff', right: '#ff8566' },
+  { id: 'neon', name: 'Neon', bg: '#0e0a1c', left: '#22d3ee', right: '#f472b6' },
+  { id: 'sunset', name: 'Sunset', bg: '#fcf1e4', left: '#0e9384', right: '#e8572f' },
+  { id: 'studio', name: 'Studio', bg: '#0c0d0e', left: '#2aa6ff', right: '#ffb020' },
+];
+const jogs = {};
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -85,6 +96,20 @@ function clampTempo(side) {
   if (Math.abs(d.tempoPct) > r) d.setTempo(Math.sign(d.tempoPct) * r);
 }
 
+// ---------- themes ----------
+function applyTheme(id) {
+  const t = THEMES.find((x) => x.id === id) || THEMES[0];
+  document.documentElement.dataset.theme = t.id; store.set('theme', t.id);
+  readColors(); for (const s of SIDES) decks[s]._wave = null;
+  renderThemes();
+}
+function renderThemes() {
+  const cur = document.documentElement.dataset.theme;
+  $('#themeList').innerHTML = THEMES.map((t) => `<button class="theme ${t.id === cur ? 'active' : ''}" data-theme-id="${t.id}">
+    <span class="swatch" style="background:${t.bg2 ? `linear-gradient(135deg, ${t.bg} 50%, ${t.bg2} 50%)` : t.bg}"><i style="background:${t.left}"></i><i style="background:${t.right}"></i></span>
+    <b>${esc(t.name)}</b></button>`).join('');
+}
+
 // ---------- decks ----------
 function deckRole(side) {
   const d = decks[side];
@@ -111,32 +136,35 @@ function renderDeck(side) {
       <button class="primary" data-a="choose">Choose a track</button></div>`;
     return;
   }
-  const r = tempoRange(state.level);
-  const eqBand = (band, label) => `<div class="band"><span>${label}</span><input type="range" min="-30" max="6" step="0.5" value="${d.eq[band]}" data-a="eq" data-band="${band}" aria-label="${label}"><button data-a="kill" data-band="${band}" class="${d.eq[band] <= -25 ? 'on' : ''}">Cut</button></div>`;
+  const r = tempoRange(state.level), BAND = { high: 'Treble', mid: 'Mid', low: 'Bass' };
+  const strip = [
+    ...eqBands(state.level).map((b) => dialHTML({ id: b, label: BAND[b], value: d.eq[b], min: -30, max: 6, def: 0, cut: true })),
+    f.volume ? dialHTML({ id: 'vol', label: 'Volume', value: d.vol.gain.value, min: 0, max: 1, def: 1 }) : '',
+  ].join('');
+  const keys = f.keyHints ? `<span>Keys: ${side === 'left' ? `${kbd('Q')} play` : `${kbd('P')} play · ${kbd('↑ ↓')} speed · ${kbd('← →')} nudge`}</span>` : '';
   el.innerHTML = `
     <div class="role">${LABEL[side]} deck <span class="live" data-live>${esc(deckRole(side))}</span></div>
     <div class="track-row">${keyBadge(t)}<div class="meta"><div class="title">${esc(t.title)}</div><div class="artist">${esc(t.artist || ' ')}</div></div>
       <div class="bpm"><b data-bpm>${fmtBpm(d.bpm, 2)}</b><span>BPM${t.grid?.estimated ? ' · estimated' : ''}</span></div></div>
-    <canvas class="wave" data-wave></canvas>
-    <div class="controls">
-      <button class="play" data-a="play" aria-label="Play or pause">${d.playing ? '❚❚' : '▶'}</button>
-      <div class="speed">
-        <label><span>Speed</span><span data-pct></span></label>
-        <div class="row"><button class="round" data-a="slower" aria-label="Slower">−</button>
-          <input type="range" data-a="tempo" min="-${r}" max="${r}" step="0.05" value="${d.tempoPct}" aria-label="Speed">
-          <button class="round" data-a="faster" aria-label="Faster">+</button></div>
+    <canvas class="wave" data-wave title="Click to jump to a bar"></canvas>
+    <div class="deckbody">
+      <div class="transport">
+        <button class="play" data-a="play" aria-label="Play or pause">${d.playing ? '❚❚' : '▶'}</button>
+        <button class="listen ${d.listening ? 'on' : ''}" data-a="listen" aria-pressed="${d.listening}" aria-label="Listen" title="Listen: hear this deck yourself, even when the crossfader is away from it">🎧</button>
+        <div class="tlabel">Listen</div>
+      </div>
+      ${jogHTML(side, f.keyHints && !state.jogUsed ? 'Spin me to nudge' : '')}
+      <div class="pitch" title="Speed: up is faster">
+        <button class="round" data-a="faster" aria-label="Faster">+</button>
+        <input type="range" class="vfader" data-a="tempo" min="-${r}" max="${r}" step="0.05" value="${d.tempoPct}" aria-label="Speed">
+        <button class="round" data-a="slower" aria-label="Slower">−</button>
+        <div class="val" data-pct></div>
       </div>
     </div>
-    <div class="nudge">
-      <button data-a="nudge" data-dir="-1">‹ Nudge back</button>
-      <button class="toggle ${d.listening ? 'on' : ''}" data-a="listen" title="Hear this deck even when the crossfader is away from it">🎧 Listen</button>
-      <button data-a="nudge" data-dir="1">Nudge forward ›</button>
-    </div>
-    ${f.keyHints ? `<div class="small muted">Keys: ${side === 'left' ? `${kbd('Q')} play` : `${kbd('P')} play · ${kbd('↑ ↓')} speed · ${kbd('← →')} nudge`}</div>` : ''}
-    ${f.fullEQ ? `<div class="eq">${eqBand('high', 'High')}${eqBand('mid', 'Mid')}${eqBand('low', 'Bass')}</div>` : f.bassEQ ? `<div class="eq">${eqBand('low', 'Bass')}</div>` : ''}
-    <div class="controls small"><span class="muted">Volume</span><input type="range" data-a="vol" min="0" max="1" step="0.01" value="${d.vol.gain.value}" aria-label="Volume" style="max-width:180px">
-      ${f.barCounter ? '<span class="barcount" data-bar></span>' : ''}
-      <span style="margin-left:auto"></span><button class="ghost small" data-a="choose">Change track</button></div>`;
+    ${strip ? `<div class="strip">${strip}</div>` : ''}
+    <div class="deckfoot">${keys}${f.barCounter ? '<span class="barcount" data-bar></span>' : ''}<span style="margin-left:auto"></span><button class="ghost small" data-a="choose">Change track</button></div>`;
+  el.querySelectorAll('[data-dial]').forEach((x) => setDial(x, +x.dataset.value));
+  jogs[side] = new JogWheel($('[data-jog]', el), () => decks[side], () => { state.jogUsed = true; $('.jog', el)?.classList.add('used'); });
   d._wave = null; // rebuild waveform columns for the new canvas
 }
 
@@ -367,7 +395,7 @@ function mixAgain() {
 // ---------- beat lane ----------
 const lane = $('#lane');
 let colors = {};
-function readColors() { const cs = getComputedStyle(document.documentElement); for (const k of ['left', 'right', 'ok', 'ink', 'ink-3', 'line-2', 'card']) colors[k] = cs.getPropertyValue(`--${k}`).trim(); }
+function readColors() { const cs = getComputedStyle(document.documentElement); for (const k of ['left', 'right', 'ok', 'ink', 'ink-3', 'line-2', 'card', 'card-2']) colors[k] = cs.getPropertyValue(`--${k}`).trim(); }
 readColors();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readColors(); for (const s of SIDES) decks[s]._wave = null; });
 
@@ -457,9 +485,10 @@ function frame(now) {
       const d = decks[side], el = $(`#deck-${side}`);
       if (!d.buffer) continue;
       drawWave(side);
+      jogs[side]?.draw(colors, side);
       const q = (k) => $(`[data-${k}]`, el);
       if (q('bpm')) q('bpm').textContent = fmtBpm(d.bpm, 2);
-      if (q('pct')) q('pct').textContent = state.f.pitchPercent ? `${d.tempoPct >= 0 ? '+' : ''}${d.tempoPct.toFixed(2)}%` : `${fmtBpm(d.bpm, 2)} BPM`;
+      if (q('pct')) q('pct').textContent = state.f.pitchPercent ? `${d.tempoPct >= 0 ? '+' : ''}${d.tempoPct.toFixed(2)}%` : (d.tempoPct ? `${d.tempoPct > 0 ? 'faster' : 'slower'}` : 'normal');
       if (q('live')) q('live').textContent = deckRole(side);
       const play = $('[data-a="play"]', el); if (play) play.textContent = d.playing ? '❚❚' : '▶';
       const slider = $('input[data-a="tempo"]', el); if (slider && document.activeElement !== slider) slider.value = d.tempoPct;
@@ -483,21 +512,16 @@ function deckEvents(side) {
     if (!d().buffer) return;
     if (a === 'play') { ctx.resume(); d().toggle(); }
     else if (a === 'slower' || a === 'faster') stepTempo(side, (a === 'faster' ? 1 : -1) * (e.shiftKey ? 1 : FINE));
-    else if (a === 'listen') { d().listening = !d().listening; d().listenGain.gain.value = d().listening ? 0.5 : 0; b.classList.toggle('on', d().listening); }
-    else if (a === 'kill') { const band = b.dataset.band; setEQ(side, band, d().eq[band] <= -25 ? 0 : -30); }
+    else if (a === 'listen') { d().listening = !d().listening; d().listenGain.gain.value = d().listening ? 0.5 : 0; b.classList.toggle('on', d().listening); b.setAttribute('aria-pressed', d().listening); }
   });
+  el.addEventListener('click', (e) => {
+    const c = e.target.closest('[data-cut]'); if (!c || !d().buffer) return;
+    const band = c.dataset.cut; setEQ(side, band, d().eq[band] <= -25 ? 0 : -30);
+  });
+  bindDials(el, (id, v) => { if (id === 'vol') d().setVolume(v); else setEQ(side, id, v, false); });
   el.addEventListener('input', (e) => {
     const a = e.target.dataset.a;
     if (a === 'tempo') d().setTempo(+e.target.value);
-    else if (a === 'vol') d().setVolume(+e.target.value);
-    else if (a === 'eq') setEQ(side, e.target.dataset.band, +e.target.value, false);
-  });
-  // Press and hold to nudge, like pushing a jog wheel.
-  el.addEventListener('pointerdown', (e) => {
-    const b = e.target.closest('[data-a="nudge"]'); if (!b || !d().buffer) return;
-    nudge(side, +b.dataset.dir);
-    const stop = () => { nudge(side, 0); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); };
-    window.addEventListener('pointerup', stop); window.addEventListener('pointercancel', stop);
   });
   el.addEventListener('click', (e) => {
     const cv = e.target.closest('[data-wave]'); if (!cv || !d().buffer) return;
@@ -519,11 +543,9 @@ function stepTempo(side, delta) {
 function nudge(side, dir) { const d = decks[side]; if (d.buffer) d.setBend(dir * 0.04); }
 function setEQ(side, band, db, rerender = true) {
   const d = decks[side]; d.eq[band] = db; d.setEQ(band, db);
-  if (rerender) {
-    const el = $(`#deck-${side}`);
-    const slider = $(`input[data-a="eq"][data-band="${band}"]`, el); if (slider) slider.value = db;
-    $(`[data-a="kill"][data-band="${band}"]`, el)?.classList.toggle('on', db <= -25);
-  }
+  const el = $(`#deck-${side}`);
+  if (rerender) { const dial = $(`[data-dial="${band}"]`, el); if (dial) setDial(dial, db); }
+  $(`[data-cut="${band}"]`, el)?.classList.toggle('on', db <= -25);
 }
 
 function check() {
@@ -536,6 +558,8 @@ function bind() {
   $$('nav button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
   $('#xfader').addEventListener('input', (e) => { state.xfader = +e.target.value; applyXfader(); });
   $('#helpBtn').addEventListener('click', () => $('#help').showModal());
+  $('#themeBtn').addEventListener('click', () => { renderThemes(); $('#themes').showModal(); });
+  $('#themeList').addEventListener('click', (e) => { const b = e.target.closest('[data-theme-id]'); if (b) applyTheme(b.dataset.themeId); });
   $('#levelBtn').addEventListener('click', () => { renderLevels(); $('#levels').showModal(); });
   $('#levelList').addEventListener('click', (e) => { const b = e.target.closest('[data-level]'); if (b) { setLevel(b.dataset.level); $('#levels').close(); } });
   $('#checkBtn').addEventListener('click', check);
@@ -614,6 +638,7 @@ function onKey(e) {
 
 // ---------- start ----------
 async function boot() {
+  applyTheme(store.get('theme', 'auto'));
   bind();
   setLevel(state.level, true);
   lib.rekordboxAvailable().then((ok) => {
