@@ -9,22 +9,24 @@ const Anthropic = SDK.default || SDK;
 const MODEL = 'claude-opus-5-5';
 const keyFile = () => path.join(app.getPath('userData'), 'anthropic-key.bin');
 
-function readKey() {
-  try {
-    if (!safeStorage.isEncryptionAvailable()) return null;
-    return safeStorage.decryptString(fs.readFileSync(keyFile()));
-  } catch { return null; }
+/** Is the OS secure storage usable? (Newer Electron has an async check; older only the sync one.) */
+async function secureAvailable() {
+  try { return safeStorage.isAsyncEncryptionAvailable ? await safeStorage.isAsyncEncryptionAvailable() : safeStorage.isEncryptionAvailable(); } catch { return false; }
 }
 
-function status() {
-  return { hasKey: !!readKey(), secure: safeStorage.isEncryptionAvailable(), model: MODEL };
+function readKey() {
+  try { return safeStorage.decryptString(fs.readFileSync(keyFile())); } catch { return null; }
+}
+
+async function status() {
+  return { hasKey: !!readKey(), secure: await secureAvailable(), model: MODEL };
 }
 
 /** Check the key with a free call (no tokens used), then store it encrypted. */
 async function setKey(key) {
   key = String(key || '').trim();
   if (!/^sk-ant-[\w-]{20,}$/.test(key)) return { error: 'That doesn\'t look like an Anthropic API key. It starts with "sk-ant-".' };
-  if (!safeStorage.isEncryptionAvailable()) return { error: 'This computer has no secure storage available, so the key can\'t be saved safely.' };
+  if (!(await secureAvailable())) return { error: 'This computer has no secure storage available, so the key can\'t be saved safely.' };
   try {
     await new Anthropic({ apiKey: key, maxRetries: 1, timeout: 20_000 }).models.retrieve(MODEL);
   } catch (err) { return { error: friendlyError(err) }; }
@@ -32,7 +34,7 @@ async function setKey(key) {
   return status();
 }
 
-function clearKey() {
+async function clearKey() {
   try { fs.unlinkSync(keyFile()); } catch { /* already gone */ }
   return status();
 }

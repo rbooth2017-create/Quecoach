@@ -2,7 +2,7 @@
 // - serves the web app on 127.0.0.1:8642 (only index.html and js/)
 // - starts the rekordbox helper (helper/rekordbox_helper.py) and stops it on quit
 // - docks a 420 px window to the right edge of the screen, floating over rekordbox
-const { app, BrowserWindow, Menu, ipcMain, screen, session, shell, desktopCapturer, systemPreferences, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, screen, session, shell, desktopCapturer, systemPreferences, nativeImage, dialog } = require('electron');
 const { spawn } = require('node:child_process');
 const ai = require('./ai.cjs');
 const fs = require('node:fs');
@@ -41,8 +41,12 @@ function startServer() {
     });
     server.once('error', async (err) => {
       server = null;
-      // Port taken — fine if it's Cue Coach already served by `npm start`.
-      if (err.code === 'EADDRINUSE' && (await ping(`${ORIGIN}/js/main.js`))) return resolve();
+      // Port taken. Fine if it serves this version's pages (e.g. `npm start`). If it's an older copy of
+      // Cue Coach still running, its server doesn't know our pages, so say so instead of showing a blank window.
+      if (err.code === 'EADDRINUSE') {
+        if (await ping(`${ORIGIN}/learn.html`)) return resolve();
+        const e = new Error('An older copy of Cue Coach is still running.'); e.code = 'STALE_COPY'; return reject(e);
+      }
       reject(err);
     });
     server.listen(PORT, '127.0.0.1', resolve);
@@ -190,7 +194,18 @@ function createLearnWindow() {
   for (const ev of ['resize', 'move', 'maximize', 'unmaximize']) learnWin.on(ev, save);
   learnWin.on('close', () => writeWinState());
   learnWin.on('closed', () => { learnWin = null; });
+  // Never leave a silent white window: if the page can't load, say what happened.
+  const showLoadError = (why) => learnWin?.loadURL(errorPage('Cue Coach couldn\'t open', why));
+  learnWin.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => { if (isMainFrame && code !== -3) showLoadError(`The app's page didn't load (${desc}). Quit Cue Coach and open it again.`); });
+  learnWin.webContents.on('did-navigate', (_e, url, status) => { if (url.startsWith(ORIGIN) && status >= 400) showLoadError(`The app's page wasn't found (error ${status}). If another copy of Cue Coach is open, quit every copy and open it again.`); });
   learnWin.loadURL(`${ORIGIN}/learn.html`);
+}
+/** A simple, readable page for when something goes wrong (instead of a blank window). */
+function errorPage(title, text) {
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const html = `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><body style="margin:0;height:100vh;display:grid;place-items:center;font:14px system-ui,-apple-system,'Segoe UI',sans-serif;background:#f6f5f1;color:#1d2230;-webkit-app-region:drag">
+    <div style="max-width:440px;text-align:center;padding:24px"><h1 style="font-size:20px;margin:0 0 8px">${esc(title)}</h1><p style="color:#5c6272;line-height:1.5;margin:0">${esc(text)}</p></div></body>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 const sendCommand = (cmd) => { if (!learnWin) createLearnWindow(); learnWin.webContents.send('command', cmd); };
 
@@ -368,14 +383,27 @@ ipcMain.handle('open-screen-settings', (e) => {
   if (fromUs(e) && IS_MAC) shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
 });
 
+// Only one copy of the app: opening it again brings the open window to the front.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.quit();
+app.on('second-instance', () => { if (learnWin) { if (learnWin.isMinimized()) learnWin.restore(); learnWin.show(); learnWin.focus(); } else if (app.isReady()) createLearnWindow(); });
+
 app.whenReady().then(async () => {
+  if (!gotLock) return; // another copy is already open and has been brought to the front
   // Web MIDI for the controller, and video-only capture (the rekordbox window) for the beat view.
   // fileSystem: read-only access to the music folder the user picks in the Learn app.
   const allowed = (perm, url, media) => perm === 'midi' || (perm === 'fileSystem' && String(url).startsWith(ORIGIN))
     || ((perm === 'display-capture' || perm === 'media') && String(url).startsWith(ORIGIN) && (media || ['video']).every((t) => t === 'video'));
   session.defaultSession.setPermissionRequestHandler((wc, perm, cb, details) => { if (process.env.CUECOACH_DEBUG) console.log('perm request', perm, JSON.stringify(details)); cb(allowed(perm, details.requestingUrl || wc.getURL(), details.mediaTypes)); });
   session.defaultSession.setPermissionCheckHandler((wc, perm, origin, details) => { if (process.env.CUECOACH_DEBUG) console.log('perm check', perm, origin, JSON.stringify(details)); return allowed(perm, origin || wc?.getURL(), null); });
-  try { await startServer(); } catch (err) { console.error('Cannot serve Cue Coach:', err.message); app.quit(); return; }
+  try { await startServer(); } catch (err) {
+    console.error('Cannot serve Cue Coach:', err.message);
+    dialog.showErrorBox(err.code === 'STALE_COPY' ? 'Another copy of Cue Coach is open' : 'Cue Coach couldn\'t start',
+      err.code === 'STALE_COPY'
+        ? 'An older copy of Cue Coach is still running in the background. Quit it (Cue Coach › Quit, or ⌘Q in its window), then open Cue Coach again.'
+        : `Something stopped the app from starting: ${err.message}`);
+    app.quit(); return;
+  }
   startHelper();
   buildMenu();
   if (IS_MAC && app.dock && fs.existsSync(ICON) && !app.isPackaged) app.dock.setIcon(ICON);
