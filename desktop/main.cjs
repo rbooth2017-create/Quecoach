@@ -9,6 +9,7 @@ const http = require('node:http');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
+app.setName('Cue Coach');
 const PORT = 8642;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const HELPER = 'http://127.0.0.1:8765';
@@ -153,7 +154,46 @@ function createWindow() {
   win.on('closed', () => { win = null; });
 }
 
-// Full-size windows: the new Learn app and the audio spike (our own decks, no rekordbox needed).
+// ---------- main window: the Learn app ----------
+// A native-feeling window: the page draws its own title bar (traffic lights on macOS, window buttons on
+// Windows/Linux), follows the chosen theme, and remembers its size and position.
+const ICON = path.join(ROOT, 'assets', 'icon.png');
+let learnWin = null;
+const winStatePath = () => path.join(app.getPath('userData'), 'window.json');
+function readWinState() { try { return JSON.parse(fs.readFileSync(winStatePath(), 'utf8')); } catch { return {}; } }
+function writeWinState(extra = {}) {
+  const st = { ...readWinState(), ...extra };
+  if (learnWin && !learnWin.isDestroyed()) Object.assign(st, { bounds: learnWin.getNormalBounds(), maximized: learnWin.isMaximized() });
+  try { fs.writeFileSync(winStatePath(), JSON.stringify(st)); } catch { /* read-only profile: not fatal */ }
+}
+const onScreen = (b) => b && screen.getAllDisplays().some(({ workArea: w }) => b.x < w.x + w.width - 80 && b.x + b.width > w.x + 80 && b.y >= w.y - 10 && b.y < w.y + w.height - 80);
+
+function createLearnWindow() {
+  if (learnWin) { learnWin.show(); return learnWin.focus(); }
+  const st = readWinState(), wa = screen.getPrimaryDisplay().workArea;
+  const width = Math.min(1440, wa.width), height = Math.min(920, wa.height);
+  const bounds = onScreen(st.bounds) ? st.bounds : { width, height, x: wa.x + Math.round((wa.width - width) / 2), y: wa.y + Math.round((wa.height - height) / 2) };
+  const bg = st.chrome?.bg || '#f6f5f1', fg = st.chrome?.fg || '#1d2230';
+  learnWin = new BrowserWindow({
+    ...bounds, minWidth: 1100, minHeight: 700, title: 'Cue Coach', show: false, backgroundColor: bg,
+    icon: fs.existsSync(ICON) ? ICON : undefined,
+    ...(IS_MAC ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 15 } }
+      : { titleBarStyle: 'hidden', titleBarOverlay: { color: bg, symbolColor: fg, height: 46 } }),
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  if (st.maximized) learnWin.maximize();
+  learnWin.once('ready-to-show', () => learnWin.show());
+  learnWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  learnWin.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(ORIGIN)) e.preventDefault(); });
+  let t; const save = () => { clearTimeout(t); t = setTimeout(() => writeWinState(), 400); };
+  for (const ev of ['resize', 'move', 'maximize', 'unmaximize']) learnWin.on(ev, save);
+  learnWin.on('close', () => writeWinState());
+  learnWin.on('closed', () => { learnWin = null; });
+  learnWin.loadURL(`${ORIGIN}/learn.html`);
+}
+const sendCommand = (cmd) => { if (!learnWin) createLearnWindow(); learnWin.webContents.send('command', cmd); };
+
+// Extra full-size windows (the audio spike test page).
 const pages = new Map();
 function openPage(file, title, width, height) {
   if (pages.has(file)) return pages.get(file).focus();
@@ -169,25 +209,56 @@ function openPage(file, title, width, height) {
 
 function buildMenu() {
   const isMac = process.platform === 'darwin';
+  const cmd = (label, c, accelerator) => ({ label, accelerator, click: () => sendCommand(c) });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    ...(isMac ? [{ role: 'appMenu' }] : [{ label: 'File', submenu: [{ role: 'quit' }] }]),
-    { role: 'editMenu' }, // copy/paste, e.g. for the API key
+    ...(isMac ? [{ role: 'appMenu' }] : []),
+    {
+      label: 'File',
+      submenu: [
+        cmd('Open Music Folder…', 'source-folder', 'CmdOrCtrl+O'),
+        cmd('Use Practice Tracks', 'source-practice'),
+        cmd('Use rekordbox Library', 'source-rekordbox'),
+        { type: 'separator' },
+        cmd('Find Music…', 'search', 'CmdOrCtrl+F'),
+        ...(isMac ? [{ type: 'separator' }, { role: 'close' }] : [{ type: 'separator' }, { role: 'quit' }]),
+      ],
+    },
+    { role: 'editMenu' },
+    {
+      label: 'Mix',
+      submenu: [
+        cmd('Play / Pause Deck A', 'play-left'),
+        cmd('Play / Pause Deck B', 'play-right'),
+        { type: 'separator' },
+        cmd('Change Level…', 'level', 'CmdOrCtrl+L'),
+        cmd('Start the Lesson Again', 'restart-lesson'),
+      ],
+    },
     {
       label: 'View',
       submenu: [
-        { label: 'Keep on Top of rekordbox', type: 'checkbox', checked: pinned, accelerator: 'CmdOrCtrl+Shift+T', click: (i) => setPinned(i.checked) },
+        cmd('Appearance…', 'theme', 'CmdOrCtrl+Shift+A'),
         { type: 'separator' },
-        { label: 'Side Panel', type: 'radio', checked: mode === 'panel', accelerator: 'CmdOrCtrl+1', click: () => win?.webContents.send('set-mode', 'panel') },
-        { label: 'Practice Decks', type: 'radio', checked: mode === 'practice', accelerator: 'CmdOrCtrl+2', click: () => win?.webContents.send('set-mode', 'practice') },
-        { label: 'Mini Beatmatch', type: 'radio', checked: mode === 'mini', accelerator: 'CmdOrCtrl+3', click: () => win?.webContents.send('set-mode', 'mini') },
-        { label: 'Dock to Right Edge', accelerator: 'CmdOrCtrl+Shift+D', click: () => win?.setBounds(boundsFor(mode), true) },
+        { label: 'Cue Coach', accelerator: 'CmdOrCtrl+1', click: () => createLearnWindow() },
+        {
+          label: 'rekordbox Side Panel (Club Mode)',
+          submenu: [
+            { label: 'Open Side Panel', accelerator: 'CmdOrCtrl+2', click: () => (win ? win.focus() : createWindow()) },
+            { label: 'Keep on Top of rekordbox', type: 'checkbox', checked: pinned, accelerator: 'CmdOrCtrl+Shift+T', click: (i) => setPinned(i.checked) },
+            { type: 'separator' },
+            { label: 'Side Panel', type: 'radio', checked: mode === 'panel', click: () => win?.webContents.send('set-mode', 'panel') },
+            { label: 'Practice Decks', type: 'radio', checked: mode === 'practice', click: () => win?.webContents.send('set-mode', 'practice') },
+            { label: 'Mini Beatmatch', type: 'radio', checked: mode === 'mini', click: () => win?.webContents.send('set-mode', 'mini') },
+            { label: 'Dock to Right Edge', accelerator: 'CmdOrCtrl+Shift+D', click: () => win?.setBounds(boundsFor(mode), true) },
+          ],
+        },
         { type: 'separator' },
-        { label: 'Learn to DJ (new app)', accelerator: 'CmdOrCtrl+4', click: () => openPage('learn.html', 'Cue Coach', 1240, 900) },
-        { label: 'Audio Spike (test page)', click: () => openPage('spike.html', 'Audio spike', 1000, 900) },
-        { role: 'reload' }, { role: 'toggleDevTools' },
+        { role: 'togglefullscreen' },
+        { label: 'Developer', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { label: 'Audio Spike (test page)', click: () => openPage('spike.html', 'Audio spike', 1000, 900) }] },
       ],
     },
     { role: 'windowMenu' },
+    { role: 'help', submenu: [cmd('Keyboard Shortcuts', 'help', 'CmdOrCtrl+/')] },
   ]));
 }
 
@@ -195,6 +266,15 @@ function buildMenu() {
 const fromUs = (e) => e.senderFrame?.url?.startsWith(ORIGIN);
 ipcMain.handle('pin', (e, v) => (fromUs(e) ? setPinned(v) : pinned));
 ipcMain.handle('get-pin', () => pinned);
+// The Learn page tells us its theme colours so the title bar and window background match.
+ipcMain.handle('chrome', (e, c) => {
+  if (!fromUs(e) || !learnWin || e.sender !== learnWin.webContents) return;
+  const hex = (v, d) => (/^#[0-9a-f]{3,8}$/i.test(String(v || '').trim()) ? String(v).trim() : d);
+  const bg = hex(c?.bg, '#f6f5f1'), fg = hex(c?.fg, '#1d2230');
+  learnWin.setBackgroundColor(bg);
+  if (!IS_MAC) learnWin.setTitleBarOverlay({ color: bg, symbolColor: fg, height: 46 });
+  writeWinState({ chrome: { bg, fg } });
+});
 ipcMain.handle('mode', (e, m) => { if (fromUs(e)) setMode(m); return mode; });
 // mini view: the page asks for the height its content needs
 ipcMain.handle('fit-height', (e, h) => {
@@ -287,8 +367,9 @@ app.whenReady().then(async () => {
   try { await startServer(); } catch (err) { console.error('Cannot serve Cue Coach:', err.message); app.quit(); return; }
   startHelper();
   buildMenu();
-  createWindow();
-  app.on('activate', () => { if (!win) createWindow(); });
+  if (IS_MAC && app.dock && fs.existsSync(ICON) && !app.isPackaged) app.dock.setIcon(ICON);
+  createLearnWindow();
+  app.on('activate', () => { if (!learnWin && !win) createLearnWindow(); });
 });
 app.on('window-all-closed', () => app.quit());
 app.on('will-quit', () => { stopHelper(); server?.close(); });

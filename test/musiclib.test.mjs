@@ -100,13 +100,13 @@ test('lesson walks through the steps in order', () => {
 
 test('beat hints and the alignment timer', () => {
   const s = mix({ left: { loaded: true, playing: true, bpm: 124 }, right: { loaded: true, playing: true, bpm: 124 }, bpmDiff: 0, offsetMs: -40, barOffset: 0 });
-  assert.equal(beatHint(s).text, 'Right is 40 ms late: nudge it forward');
+  assert.equal(beatHint(s).text, 'B is 40 ms late: nudge it forward');
   assert.equal(beatHint({ ...s, offsetMs: 8 }).tone, 'ok');
-  assert.equal(beatHint({ ...s, bpmDiff: 1.5 }).text, 'Right is 1.50 BPM faster: slow it down');
-  assert.equal(beatHint({ ...s, bpmDiff: -0.2 }).text, 'Right is 0.20 BPM slower: speed it up a touch');
+  assert.equal(beatHint({ ...s, bpmDiff: 1.5 }).text, 'B is 1.50 BPM faster: slow it down');
+  assert.equal(beatHint({ ...s, bpmDiff: -0.2 }).text, 'B is 0.20 BPM slower: speed it up a touch');
   // speed advice comes before the right deck is even playing
   assert.equal(beatHint({ ...s, right: { loaded: true, playing: false }, bpmDiff: 0.3 }).tone, 'close');
-  assert.equal(beatHint({ ...s, right: { loaded: true, playing: false }, bpmDiff: 0.02 }).text, 'Speeds match. Now start the right deck');
+  assert.equal(beatHint({ ...s, right: { loaded: true, playing: false }, bpmDiff: 0.02 }).text, 'Speeds match. Now start deck B');
   assert.equal(updateAligned(1, s, 0.1), 0);
   assert.ok(Math.abs(updateAligned(1, { ...s, offsetMs: 5 }, 0.1) - 1.1) < 1e-9);
 });

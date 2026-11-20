@@ -19,4 +19,7 @@ contextBridge.exposeInMainWorld('cueDesktop', {
   openScreenSettings: () => ipcRenderer.invoke('open-screen-settings'),
   ocr: (pngBytes) => ipcRenderer.invoke('ocr', pngBytes),
   startDrag: (filePath) => ipcRenderer.send('start-drag', String(filePath)),
+  // Learn app: match the title bar to the theme, and receive menu commands.
+  setChrome: (c) => ipcRenderer.invoke('chrome', { bg: String(c?.bg || ''), fg: String(c?.fg || '') }),
+  onCommand: (cb) => ipcRenderer.on('command', (_e, c) => cb(String(c))),
 });
