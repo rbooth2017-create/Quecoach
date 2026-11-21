@@ -206,3 +206,15 @@ test('key lock is a tool from Improver on, not for Starter', () => {
   assert.equal(featuresFor('starter').keyLock, false);
   for (const l of ['improver', 'confident', 'pro']) assert.equal(featuresFor(l).keyLock, true);
 });
+
+import { dialT, dialFromT } from '../js/deckmath.js';
+test('a centred dial puts 0 dB at 12 o\'clock and maps back', () => {
+  assert.equal(dialT(0, -30, 6, 0), 0.5);
+  assert.equal(dialT(-30, -30, 6, 0), 0);
+  assert.equal(dialT(6, -30, 6, 0), 1);
+  assert.equal(dialT(-15, -30, 6, 0), 0.25);
+  assert.equal(dialT(3, -30, 6, 0), 0.75);
+  for (const v of [-30, -12, -0.5, 0, 2, 6]) assert.ok(Math.abs(dialFromT(dialT(v, -30, 6, 0), -30, 6, 0) - v) < 1e-9);
+  assert.equal(dialT(0.25, 0, 1), 0.25); // no centre: straight line
+  assert.equal(dialFromT(0.5, 0, 1.25, 1), 1);
+});

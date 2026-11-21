@@ -18,6 +18,8 @@ const P = {
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   level: '<path d="M3 9.5l9-4.5 9 4.5-9 4.5z"/><path d="M7 11.5v4c0 1.2 2.2 2.6 5 2.6s5-1.4 5-2.6v-4"/>',
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M8 14h8"/>',
+  sliders: '<path d="M6 4v16M12 4v16M18 4v16"/><rect x="4" y="13" width="4" height="3" rx="1" fill="currentColor"/><rect x="10" y="7" width="4" height="3" rx="1" fill="currentColor"/><rect x="16" y="11" width="4" height="3" rx="1" fill="currentColor"/>',
+  metronome: '<path d="M9 3h6l4 18H5z"/><path d="M12 15l5-9"/><path d="M7 17h10"/>',
   eject: '<path d="M12 5l7 8H5z"/><path d="M5 18h14"/>',
   upload: '<path d="M12 16V5M7.5 9.5L12 5l4.5 4.5"/><path d="M5 19h14"/>',
   book: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/><path d="M9 7.5h6M9 11h4"/>',

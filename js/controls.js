@@ -1,5 +1,5 @@
 // On-screen DJ controls for the Learn app: a jog wheel you spin with the mouse or a finger, and rotary dials.
-import { angleDelta, jogBendFromSpeed, scrubSeconds, dialValue, dialAngle, TURNS_PER_SECOND } from './deckmath.js';
+import { angleDelta, jogBendFromSpeed, scrubSeconds, dialAngle, dialT, dialFromT, TURNS_PER_SECOND } from './deckmath.js';
 
 // ---------- jog wheel ----------
 export const jogHTML = (side, tip) => `<div class="jog" data-jog="${side}" role="slider" aria-label="${side} jog wheel" tabindex="-1"><canvas></canvas>${tip ? `<span class="jog-tip">${tip}</span>` : ''}</div>`;
@@ -89,8 +89,8 @@ function arc(a0, a1) {
 }
 
 /** A rotary dial. Drag up/down (or scroll, or arrow keys) to turn; double-click to reset. */
-export function dialHTML({ id, label, value, min, max, def = value, cut = false }) {
-  return `<div class="dial-wrap"><div class="dial" data-dial="${id}" data-min="${min}" data-max="${max}" data-def="${def}" data-value="${value}"
+export function dialHTML({ id, label, value, min, max, def = value, cut = false, centred = false }) {
+  return `<div class="dial-wrap"><div class="dial" data-dial="${id}" data-min="${min}" data-max="${max}" data-def="${def}" data-value="${value}"${centred ? ` data-centre="${def}"` : ''}
       tabindex="0" role="slider" aria-label="${label}" aria-valuemin="${min}" aria-valuemax="${max}" aria-valuenow="${value}" title="${label}: drag up or down · double-click to reset">
     <svg viewBox="0 0 64 64" aria-hidden="true"><path class="dial-track" d="${arc(dialAngle(0), dialAngle(1))}"/><path class="dial-fill"/>
       <circle class="dial-cap" cx="32" cy="32" r="17"/><line class="dial-ptr" x1="32" y1="32" x2="32" y2="19"/></svg></div>
@@ -101,12 +101,16 @@ export function setDial(el, value) {
   const min = +el.dataset.min, max = +el.dataset.max, def = +el.dataset.def;
   const v = Math.max(min, Math.min(max, value));
   el.dataset.value = v; el.setAttribute('aria-valuenow', Math.round(v * 100) / 100);
-  const t = (v - min) / (max - min), t0 = (def - min) / (max - min);
+  const c = centreOf(el), t = dialT(v, min, max, c), t0 = dialT(def, min, max, c);
   el.querySelector('.dial-fill').setAttribute('d', arc(dialAngle(t0), dialAngle(t)));
   el.querySelector('.dial-ptr').setAttribute('transform', `rotate(${(dialAngle(t) * 180) / Math.PI} 32 32)`);
   el.classList.toggle('low', v <= min + (max - min) * 0.05);
   return v;
 }
+
+const centreOf = (el) => (el.dataset.centre != null ? +el.dataset.centre : null);
+const travel = (el) => dialT(+el.dataset.value, +el.dataset.min, +el.dataset.max, centreOf(el));
+const fromTravel = (el, t) => dialFromT(t, +el.dataset.min, +el.dataset.max, centreOf(el));
 
 /** Wire up every dial under root. onChange(id, value) fires as it turns. */
 export function bindDials(root, onChange) {
@@ -116,12 +120,12 @@ export function bindDials(root, onChange) {
     const el = e.target.closest('[data-dial]'); if (!el) return;
     try { el.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
     el.classList.add('turning');
-    drag = { el, y: e.clientY, start: +el.dataset.value };
+    drag = { el, y: e.clientY, start: travel(el) };
   });
   root.addEventListener('pointermove', (e) => {
     if (!drag) return;
     const { el } = drag;
-    const v = setDial(el, dialValue(drag.start, e.clientY - drag.y, +el.dataset.min, +el.dataset.max, e.shiftKey ? 600 : 160));
+    const v = setDial(el, fromTravel(el, drag.start - (e.clientY - drag.y) / (e.shiftKey ? 600 : 160)));
     onChange(el.dataset.dial, v);
   });
   const end = () => { drag?.el.classList.remove('turning'); drag = null; };
@@ -131,8 +135,7 @@ export function bindDials(root, onChange) {
     onChange(el.dataset.dial, setDial(el, +el.dataset.def));
   });
   const nudgeDial = (el, steps) => {
-    const span = +el.dataset.max - +el.dataset.min;
-    onChange(el.dataset.dial, setDial(el, +el.dataset.value + steps * span / 40));
+    onChange(el.dataset.dial, setDial(el, fromTravel(el, travel(el) + steps / 40)));
   };
   root.addEventListener('wheel', (e) => {
     const el = e.target.closest('[data-dial]'); if (!el) return;

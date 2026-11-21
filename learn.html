@@ -248,6 +248,8 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 .play { width: 52px; height: 52px; padding: 0; border-radius: 50%; justify-content: center; background: var(--c); border-color: transparent; color: #fff; box-shadow: 0 2px 8px color-mix(in srgb, var(--c) 35%, transparent); }
 .play:hover { background: var(--c); filter: brightness(1.08); }
 .round { width: 32px; height: 32px; padding: 0; border-radius: 50%; justify-content: center; color: var(--ink-2); }
+.cue-btn { width: 44px; height: 26px; padding: 0; border-radius: 13px; justify-content: center; font-size: 11px; font-weight: 750; letter-spacing: .04em; color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, transparent); touch-action: none; user-select: none; }
+.cue-btn:active { background: var(--warn-soft); }
 .tlabel { font-size: 10px; color: var(--ink-3); text-align: center; margin-top: -6px; }
 .jog { position: relative; width: min(178px, 100%); aspect-ratio: 1; justify-self: center; touch-action: none; border-radius: 50%; cursor: grab; }
 .jog.touching { cursor: grabbing; }
@@ -257,6 +259,7 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 .jog:has(.jog-tip) { margin-bottom: 18px; }  /* room for the tip, so it never sits on the pads */
 .pitch { display: grid; justify-items: center; gap: 4px; }
 .pitch .vfader { height: 96px; }  /* the pitch column sets the deck's height: keep it close to the jog's */
+.pitch input[type=range].vfader { direction: ltr; }  /* top is slower, bottom faster: the way controller and CDJ tempo sliders work */
 .pitch .keylock { font-size: 10.5px; font-weight: 650; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink-2); display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
 .pitch .keylock.on { background: var(--c); border-color: var(--c); color: #fff; }
 .pitch .val { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: center; min-height: 15px; }
@@ -764,6 +767,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 .hp-level { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
 .hp-field .notice { margin: 0; }
 .phones { display: grid; justify-items: center; gap: 2px; margin-top: 4px; }
+.outs { display: flex; justify-content: center; gap: 14px; }
 /* Recording */
 .rec-btn { border-color: transparent; background: transparent; color: var(--ink-2); font-size: 12px; font-weight: 600; padding: 4px 10px; gap: 6px; -webkit-app-region: no-drag; }
 .rec-btn:hover { background: var(--card-2); color: var(--ink); }
@@ -793,6 +797,24 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 /* Quantise */
 .q-btn { justify-self: center; font-size: 11px; font-weight: 650; padding: 2px 10px; border-radius: 99px; color: var(--ink-3); }
 .q-btn.on { color: var(--left); border-color: var(--left); background: var(--left-soft); }
+/* Prepare a track */
+.deckfoot button.on { color: var(--c); border-color: var(--c); }
+.prep { display: grid; gap: 8px; padding: 10px; border-radius: 10px; background: var(--card-2); font-size: 12px; }
+.prep-head { display: flex; align-items: center; justify-content: space-between; }
+.prep-step { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; align-items: start; }
+.prep-step .n { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--c); color: #fff; font-size: 11px; font-weight: 700; }
+.prep-step b { display: block; }
+.prep-step small { display: block; color: var(--ink-2); margin: 1px 0 5px; }
+.prep-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.prep-row button { padding: 2px 8px; font-size: 12px; line-height: 20px; border-radius: 6px; }
+.prep-row button.on { color: var(--c); border-color: var(--c); }
+.prep-row input[type=number] { width: 72px; padding: 2px 6px; font: inherit; font-variant-numeric: tabular-nums; border-radius: 6px; border: 1px solid var(--line-2); background: var(--card); color: var(--ink); }
+.prep-row small { display: inline; margin: 0; }
+.prep-hc { display: inline-flex; align-items: center; gap: 2px; }
+.prep-hc > button:first-child { background: var(--hc); border-color: var(--hc); color: #fff; font-weight: 700; min-width: 26px; }
+.prep-hc small { font-variant-numeric: tabular-nums; color: var(--ink-3); }
+.prep-hc .x { padding: 0 4px; border: none; background: transparent; color: var(--ink-3); }
+.prep-foot { display: flex; align-items: center; gap: 8px; }
 </style>
 </head>
 <body>

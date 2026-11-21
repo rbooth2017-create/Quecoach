@@ -89,6 +89,22 @@ export function dialValue(start, dy, min, max, px = 160) {
   return Math.max(min, Math.min(max, start - (dy / px) * (max - min)));
 }
 
+/**
+ * Value → dial travel 0..1. With a centre (EQ: 0 dB), the centre sits at 12 o'clock and each side is
+ * scaled on its own, so a −30…+6 dB EQ reads "flat" at noon like a mixer, not three-quarters of the way round.
+ */
+export function dialT(v, min, max, centre = null) {
+  const x = Math.max(min, Math.min(max, v));
+  if (centre == null || !(centre > min && centre < max)) return (x - min) / (max - min);
+  return x <= centre ? 0.5 * (x - min) / (centre - min) : 0.5 + 0.5 * (x - centre) / (max - centre);
+}
+/** Dial travel 0..1 → value (the inverse of dialT). */
+export function dialFromT(t, min, max, centre = null) {
+  const u = Math.max(0, Math.min(1, t));
+  if (centre == null || !(centre > min && centre < max)) return min + u * (max - min);
+  return u <= 0.5 ? min + (u / 0.5) * (centre - min) : centre + ((u - 0.5) / 0.5) * (max - centre);
+}
+
 /** Dial position 0..1 → pointer angle in radians, sweeping 270° from bottom-left (−135°) to bottom-right (+135°). */
 export const dialAngle = (t) => (-135 + 270 * Math.max(0, Math.min(1, t))) * Math.PI / 180;
 

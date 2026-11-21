@@ -19,7 +19,7 @@
     "electron-builder": "26.18.1"
   },
   "main": "desktop/main.cjs",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "DJ coaching side panel for rekordbox",
   "author": "Cue Coach",
   "build": {

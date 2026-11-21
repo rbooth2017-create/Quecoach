@@ -29,7 +29,7 @@ export const LESSONS = [
     steps: [
       { id: 'load', title: 'Load a track on deck A', body: 'Pick any track in the library and press its A button, or double-click it.', action: 'music', done: (s) => s.left.loaded },
       { id: 'play', title: 'Press play', body: 'The big round button on deck A. Watch the wheel turn with the music.', key: 'Q', done: (s) => s.left.playing },
-      { id: 'restart', title: 'Jump back to the start', body: 'The small button under play takes the track back to its very first beat.', done: (s) => s.did.has('restart') },
+      { id: 'restart', title: 'Jump back to the start', body: 'The small ⏮ button under CUE takes the track back to its very first beat.', done: (s) => s.did.has('restart') },
       { id: 'scrub', title: 'Find a spot with the wheel', body: 'Pause, then turn the wheel slowly. It moves you through the track, just like a record.', done: (s) => s.did.has('scrub') },
     ],
   },
