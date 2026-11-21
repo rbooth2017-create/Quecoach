@@ -1,5 +1,6 @@
 // Engine: next-track scoring, mix-in / mix-out points, transition plans. DOM-free.
 import { keyRelation } from './library.js';
+import { energyOf } from './energy.js';
 
 /** Pitch change (%) the incoming track needs to match `fromBpm`, allowing half/double time. */
 export function pitchNeeded(fromBpm, toBpm) {
@@ -36,11 +37,12 @@ export function scoreCandidate(current, cand, opts = {}) {
   const genreScore = !ga || !gb ? 0.5 : current.genre === cand.genre ? 1 : ga === gb ? 0.7 : 0.2;
 
   let energyScore = 0.5;
-  if (current.energy != null && cand.energy != null) {
-    const d = cand.energy - current.energy;
+  const eCur = energyOf(current), eCand = energyOf(cand);
+  if (eCur != null && eCand != null) {
+    const d = eCand - eCur;
     const want = opts.direction === 'up' ? 1 : opts.direction === 'down' ? -1 : 0;
     energyScore = Math.max(0, 1 - Math.abs(d - want) / 3);
-    reasons.push(`energy ${current.energy}→${cand.energy}`);
+    reasons.push(`energy ${eCur}→${eCand}`);
   }
   const ratingScore = (cand.rating || 0) / 5;
 

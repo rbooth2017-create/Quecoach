@@ -4,8 +4,9 @@ import { CONTROLLERS } from './controllers.js';
 
 export { CONTROLLERS };
 export const findController = (id) => CONTROLLERS.find((c) => c.id === id) || null;
-/** Which supported controller is this MIDI device? */
-export const detectController = (deviceName) => CONTROLLERS.find((c) => deviceName.toLowerCase().includes(c.match.toLowerCase())) || null;
+/** Which supported controller is this MIDI device? Maps the DJ made themselves (exact device name) come first. */
+export const detectController = (deviceName, custom = []) => custom.find((c) => c.match === deviceName)
+  || CONTROLLERS.find((c) => deviceName.toLowerCase().includes(c.match.toLowerCase())) || null;
 
 export function emptyController() {
   const deck = () => ({
@@ -17,6 +18,7 @@ export function emptyController() {
   return { connected: false, decks: { 1: deck(), 2: deck() }, crossfader: null, headMix: null, msb: {} };
 }
 
+const BUTTONS = new Set(['play', 'cue', 'sync', 'headphones']);
 const lookups = new WeakMap();
 function lookup(profile) {
   if (!lookups.has(profile)) lookups.set(profile, new Map(profile.controls.map(([s, d, name, part]) => [`${s}:${d}`, [name, part]])));
@@ -36,8 +38,9 @@ export function applyMidi(profile, ctl, [status, data1, data2], now = Date.now()
   const d = deckNo ? ctl.decks[deckNo] : null;
   const type = status & 0xf0;
 
-  if (part === 'note') {
-    if (type !== 0x90 || data2 === 0) return null; // presses only
+  const button = part === 'note' || (BUTTONS.has(what) && part === '7'); // some controllers send buttons as CCs
+  if (button) {
+    if ((part === 'note' && type !== 0x90) || data2 === 0) return null; // presses only
     if (what === 'headphones') d.headphones = !d.headphones;
     else { d.presses[what] = (d.presses[what] || 0) + 1; d.lastPress[what] = now; }
     return `${deckNo}.${what}`;
@@ -53,7 +56,7 @@ export function applyMidi(profile, ctl, [status, data1, data2], now = Date.now()
   if (what === 'tempo') {
     // Pioneer-style: top of the slider (0) = slower, middle = 0 %, bottom = faster
     const pct = (raw / ((max + 1) / 2) - 1) * (opts.tempoRange ?? 10);
-    d.tempo = opts.invertTempo ? -pct : pct;
+    d.tempo = (opts.invertTempo ?? profile.invertTempo) ? -pct : pct;
   } else if (d) d[what] = v;
   else ctl[what] = v;
   return part === 'lsb' ? null : `${deckNo || 'mixer'}.${what}`;

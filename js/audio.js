@@ -1,10 +1,101 @@
 // Audio: decks, demo synth, per-bar energy analysis, BPM estimate, beatmatch maths.
 import { DEMO_STRUCTURE, camelotRoot } from './library.js';
 import { barLen, beatLen } from './engine.js';
+import { analyseGrid } from './beatgrid.js';
+import { wrapInLoop, keyLockSemitones, heardPosition } from './deckmath.js';
 
 export const ctx = new (window.AudioContext || window.webkitAudioContext)();
-const master = ctx.createGain();
+// Stereo buses: a mono track is spread to both sides, so neither speaker nor headphone side goes quiet.
+const STEREO = { channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers' };
+const master = new GainNode(ctx, STEREO);
 master.connect(ctx.destination);
+/** The main mix, after the crossfader (the sampler plays in here too). */
+export const masterBus = master;
+
+// ---------- outputs: speakers and headphones ----------
+// Decks with Listen on feed cueBus. The headphone feed is a blend of the cue and the main mix
+// (the controller's HEADPHONES MIX knob). Where it goes depends on the route (headphones.js):
+//   channels: one sound card, speakers on outputs 1-2, headphones on 3-4
+//   device:   headphones on a second sound output, through an <audio> element
+//   speakers: no separate headphones: the cue plays quietly through the speakers (the old "Listen")
+export const cueBus = new GainNode(ctx, STEREO);
+const hpCue = new GainNode(ctx, STEREO), hpMaster = new GainNode(ctx, STEREO), hpOut = new GainNode(ctx, STEREO);
+cueBus.connect(hpCue); master.connect(hpMaster); hpCue.connect(hpOut); hpMaster.connect(hpOut);
+hpMaster.gain.value = 0;
+const SPEAKER_CUE = 0.5; // Listen through the speakers: quieter than the room
+const speakerCue = ctx.createGain(); speakerCue.gain.value = SPEAKER_CUE; cueBus.connect(speakerCue);
+let wiring = [];      // nodes made for the current route, to take down on the next
+let hpElement = null; // <audio> for a separate headphone device
+export const outputState = { mode: 'speakers', channels: 2, deviceId: null, error: null };
+
+function unwire() {
+  try { master.disconnect(ctx.destination); } catch { /* not connected */ }
+  try { speakerCue.disconnect(); } catch { /* */ }
+  try { hpOut.disconnect(); } catch { /* */ }
+  for (const n of wiring) { try { n.disconnect(); } catch { /* */ } }
+  wiring = [];
+  if (hpElement) { hpElement.pause(); hpElement.srcObject = null; hpElement = null; }
+}
+
+/** Send the main mix and the headphones where the route says. Resolves once the headphone device is playing. */
+export async function routeOutputs(route) {
+  unwire();
+  outputState.error = null;
+  const dest = ctx.destination;
+  if (route.mode === 'channels' && dest.maxChannelCount >= route.channels) {
+    dest.channelCount = route.channels; dest.channelCountMode = 'explicit'; dest.channelInterpretation = 'discrete';
+    const merger = new ChannelMergerNode(ctx, { numberOfInputs: route.channels });
+    const split = (node, [l, r]) => { const sp = new ChannelSplitterNode(ctx, { numberOfOutputs: 2 }); node.connect(sp); sp.connect(merger, 0, l); sp.connect(merger, 1, r); wiring.push(sp); };
+    split(master, route.master); split(hpOut, route.cue);
+    merger.connect(dest); wiring.push(merger);
+    Object.assign(outputState, { mode: 'channels', channels: route.channels, deviceId: null });
+    return outputState;
+  }
+  dest.channelCount = 2; dest.channelCountMode = 'explicit'; dest.channelInterpretation = 'speakers';
+  master.connect(dest);
+  if (route.mode === 'device' && route.deviceId) {
+    const out = ctx.createMediaStreamDestination(); hpOut.connect(out); wiring.push(out);
+    const el = new Audio(); el.srcObject = out.stream; el.autoplay = true; hpElement = el;
+    try {
+      if (el.setSinkId) await el.setSinkId(route.deviceId);
+      await el.play();
+      Object.assign(outputState, { mode: 'device', channels: 2, deviceId: route.deviceId });
+      return outputState;
+    } catch (err) {
+      outputState.error = `Couldn't play to the headphone output: ${err.message}`;
+      unwire(); master.connect(dest);
+    }
+  }
+  speakerCue.connect(dest);
+  Object.assign(outputState, { mode: 'speakers', channels: 2, deviceId: null });
+  return outputState;
+}
+
+/** The headphone blend of cue and main mix, as gains (headphones.js headphoneMix). */
+export function setHeadphoneMix({ cue, master: m }) { hpCue.gain.value = cue; hpMaster.gain.value = m; }
+/** Headphone volume, 0..1 (the controller's own LEVEL knob also works on its socket). */
+export function setHeadphoneLevel(v) { hpOut.gain.value = Math.max(0, Math.min(1.5, v)); }
+
+/** A short test sound in the speakers or the headphones only, so you can check each is where it should be. */
+export function testTone(where = 'headphones') {
+  ctx.resume();
+  const t0 = ctx.currentTime + 0.05, g = ctx.createGain(); g.gain.value = 0;
+  const freqs = where === 'headphones' ? [880, 1320] : [440, 660];
+  freqs.forEach((f, i) => {
+    const o = ctx.createOscillator(); o.frequency.value = f; o.connect(g);
+    o.start(t0 + i * 0.25); o.stop(t0 + i * 0.25 + 0.22);
+  });
+  for (let i = 0; i < 2; i++) { g.gain.setValueAtTime(0.0001, t0 + i * 0.25); g.gain.exponentialRampToValueAtTime(0.25, t0 + i * 0.25 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.25 + 0.2); }
+  // into the bus only: headphones get cue (bypassing the mix knob, so it's heard whatever the knob says)
+  if (where === 'headphones') g.connect(hpOut); else g.connect(master);
+  setTimeout(() => g.disconnect(), 900);
+}
+
+// Key lock: Signalsmith Stretch (MIT, WASM in an AudioWorklet), loaded the first time a deck turns key lock on.
+let stretchLoader = null;
+const loadStretch = () => (stretchLoader ??= import('../node_modules/signalsmith-stretch/SignalsmithStretch.mjs').then((m) => m.default));
+/** Stretch block size: smaller is less delay but a little rougher. 60 ms keeps the delay under a 1/16 beat at 128 BPM. */
+export const KEYLOCK_BLOCK_MS = 60;
 
 export class Deck {
   constructor(name) {
@@ -13,39 +104,122 @@ export class Deck {
     this.source = null; this.playing = false;
     this.offset = 0; this.anchor = 0;   // position = offset + (now - anchor) * rate
     this.tempoPct = 0; this.bend = 0;
+    this.loop = null; // { start, end, beats } in track seconds, while a loop is on
+    // Key lock: source → input → dry ─────────────→ EQ
+    //                          ↘ stretch → wet ↗      (only one of dry/wet is open)
+    this.keyLock = false; this.stretch = null; this.lag = 0; this.startedAt = 0; this.startOffset = 0;
+    this.input = new GainNode(ctx, { channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers' });
+    this.dry = ctx.createGain(); this.wet = ctx.createGain(); this.wet.gain.value = 0;
     this.low = ctx.createBiquadFilter(); this.low.type = 'lowshelf'; this.low.frequency.value = 200;
     this.vol = ctx.createGain(); this.xf = ctx.createGain();
-    this.low.connect(this.vol); this.vol.connect(this.xf); this.xf.connect(master);
+    this.mid = ctx.createBiquadFilter(); this.mid.type = 'peaking'; this.mid.frequency.value = 1000; this.mid.Q.value = 0.7;
+    this.high = ctx.createBiquadFilter(); this.high.type = 'highshelf'; this.high.frequency.value = 3500;
+    this.input.connect(this.dry); this.dry.connect(this.low); this.wet.connect(this.low);
+    this.low.connect(this.mid); this.mid.connect(this.high); this.high.connect(this.vol); this.vol.connect(this.xf); this.xf.connect(master);
   }
   get rate() { return (1 + this.tempoPct / 100) * (1 + this.bend); }
   get bpm() { return this.track?.grid ? this.track.grid.bpm * (1 + this.tempoPct / 100) : null; }
-  position() { return this.playing ? this.offset + (ctx.currentTime - this.anchor) * this.rate : this.offset; }
+  /** Where the deck is playing from (track seconds). */
+  playhead() { return this.playing ? wrapInLoop(this.offset + Math.max(0, ctx.currentTime - this.anchor) * this.rate, this.loop) : this.offset; }
+  /** Where the listener is: the playhead, minus the key lock's delay. Everything on screen follows this. */
+  position() {
+    if (!this.playing || !this.lag) return this.playhead();
+    const raw = this.offset + Math.max(0, ctx.currentTime - this.anchor) * this.rate;
+    return wrapInLoop(heardPosition({ raw, lag: this.lag, rate: this.rate, since: ctx.currentTime - this.startedAt, startOffset: this.startOffset }), this.loop);
+  }
   load(track, buffer, analysis) {
-    this.stop(); this.track = track; this.buffer = buffer; this.analysis = analysis;
+    this.stop(); this.loop = null; this.track = track; this.buffer = buffer; this.analysis = analysis;
     this.peaks = buffer ? computePeaks(buffer) : null;
     this.offset = track.grid?.firstDownbeat || 0;
   }
-  play() {
+  /** Play from the current position, now or at `when` (audio clock seconds, for quantise). */
+  play(when = 0) {
     if (!this.buffer || this.playing) return;
     ctx.resume();
+    const at = Math.max(ctx.currentTime, when || 0);
     const src = ctx.createBufferSource();
-    src.buffer = this.buffer; src.playbackRate.value = this.rate; src.connect(this.low);
-    src.start(0, Math.max(0, this.offset));
+    src.buffer = this.buffer; src.playbackRate.value = this.rate; src.connect(this.input);
+    if (this.loop) { src.loop = true; src.loopStart = this.loop.start; src.loopEnd = this.loop.end; }
+    src.start(at, Math.max(0, this.offset));
     src.onended = () => { if (this.source === src) { this.playing = false; this.source = null; } };
-    this.source = src; this.anchor = ctx.currentTime; this.playing = true;
+    this.source = src; this.anchor = this.startedAt = at; this.startOffset = this.offset; this.playing = true;
+  }
+  /** Jump to `t`, at `when` on the audio clock: the track plays on until then (quantise). */
+  jumpAt(t, when) {
+    if (!this.playing || !(when > ctx.currentTime + 0.002)) return this.seek(t);
+    const old = this.source; this.source = null;
+    try { old.stop(when); } catch { /* already stopped */ }
+    this.playing = false; this.offset = Math.max(0, t);
+    if (this.loop && (this.offset < this.loop.start || this.offset >= this.loop.end)) this.loop = null;
+    this.play(when);
   }
   stop() {
-    if (this.source) { this.offset = this.position(); const s = this.source; this.source = null; try { s.stop(); } catch { /* already stopped */ } }
+    if (this.source) { this.offset = this.playhead(); const s = this.source; this.source = null; try { s.stop(); } catch { /* already stopped */ } }
     this.playing = false;
   }
   toggle() { this.playing ? this.stop() : this.play(); }
-  seek(t) { const was = this.playing; this.stop(); this.offset = Math.max(0, t); if (was) this.play(); }
-  reanchor() { this.offset = this.position(); this.anchor = ctx.currentTime; if (this.source) this.source.playbackRate.value = this.rate; }
-  setTempo(pct) { this.reanchor(); this.tempoPct = pct; this.reanchor(); }
+  seek(t) {
+    const was = this.playing; this.stop(); this.offset = Math.max(0, t);
+    if (this.loop && (this.offset < this.loop.start || this.offset >= this.loop.end)) this.loop = null; // jumped out of the loop
+    if (was) this.play();
+  }
+  /** Loop between two points (track seconds). Playback carries on from where it is if that's inside. */
+  setLoop(loop) {
+    this.reanchor();
+    this.loop = loop;
+    const src = this.source;
+    if (this.playhead() < loop.start || this.playhead() >= loop.end) return this.seek(loop.start);
+    if (src) { src.loopStart = loop.start; src.loopEnd = loop.end; src.loop = true; }
+  }
+  /** Leave the loop and play on from where it is. */
+  clearLoop() {
+    if (!this.loop) return;
+    this.offset = this.playhead(); this.anchor = ctx.currentTime;
+    this.loop = null;
+    if (this.source) this.source.loop = false;
+  }
+  reanchor() { this.offset = this.playhead(); this.anchor = ctx.currentTime; if (this.source) this.source.playbackRate.value = this.rate; }
+  setTempo(pct) { this.reanchor(); this.tempoPct = pct; this.reanchor(); if (this.keyLock && this.stretch) this.stretch.schedule({ semitones: keyLockSemitones(pct) }); }
+  /** Key lock on: changing the tempo keeps the key. Off: the pitch follows the tempo, like a record. */
+  async setKeyLock(on) {
+    this.keyLock = !!on;
+    if (this.keyLock && !this.stretch) {
+      const Stretch = await loadStretch();
+      if (this.stretch) return this.applyKeyLock(); // a second call got there first
+      const node = await Stretch(ctx);
+      await node.configure({ blockMs: KEYLOCK_BLOCK_MS });
+      this.stretchLatency = await node.latency();
+      if (this.stretch || this.disposed) { node.disconnect(); return this.applyKeyLock(); }
+      this.input.connect(node); node.connect(this.wet);
+      this.stretch = node;
+    }
+    this.applyKeyLock();
+  }
+  applyKeyLock() {
+    const on = this.keyLock && !!this.stretch, t = ctx.currentTime;
+    if (on) this.stretch.schedule({ active: true, semitones: keyLockSemitones(this.tempoPct) });
+    // A 20 ms crossfade between the straight and the key-locked sound, so switching doesn't click.
+    for (const [g, v] of [[this.dry, on ? 0 : 1], [this.wet, on ? 1 : 0]]) { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(v, t + 0.02); }
+    if (!on && this.stretch) this.stretch.schedule({ active: false, output: t + 0.05 }); // stop processing once faded out
+    this.lag = on ? this.stretchLatency : 0;
+  }
+  /** Stop and let go of the audio nodes (when a deck is replaced). */
+  dispose() {
+    this.stop(); this.disposed = true;
+    if (this.stretch) { this.stretch.schedule({ active: false }); this.stretch.disconnect(); this.stretch = null; }
+    this.xf.disconnect();
+  }
   setBend(b) { this.reanchor(); this.bend = b; this.reanchor(); }
   setLowEQ(db) { this.low.gain.value = db; }
+  /** band: 'low' | 'mid' | 'high', gain in dB (−30 = cut) */
+  setEQ(band, db) { this[band].gain.value = db; }
   setVolume(v) { this.vol.gain.value = v; }
   /** Position inside the current beat / bar, 0..1 */
+  /** Seconds until this deck's next beat (null without a grid or when stopped). */
+  toNextBeat() {
+    const ph = this.beatPhase(); if (ph == null || !this.playing) return null;
+    return ((1 - ph) % 1) * (60 / this.bpm) / (1 + this.bend);
+  }
   beatPhase() { const g = this.track?.grid; if (!g) return null; const x = (this.position() - g.firstDownbeat) / beatLen(g); return x - Math.floor(x); }
   barPhase() { const g = this.track?.grid; if (!g) return null; const x = (this.position() - g.firstDownbeat) / barLen(g); return x - Math.floor(x); }
 }
@@ -117,38 +291,9 @@ export function barEnergy(buffer, grid) {
   return Array.from(out);
 }
 
-/** Estimate BPM + first downbeat for files rekordbox didn't give us a grid for. */
+/** BPM + first downbeat for files rekordbox didn't give us a grid for: fitted to the kicks of the whole track. */
 export function estimateGrid(buffer) {
-  const lp = lowpass(buffer), sr = buffer.sampleRate;
-  const hop = Math.floor(sr / 200); // ~5 ms frames
-  const HPS = sr / hop;             // exact frames per second
-  const len = Math.min(lp.length, sr * 75);
-  const env = new Float32Array(Math.floor(len / hop));
-  let prev = 0;
-  for (let f = 0; f < env.length; f++) {
-    let e = 0; const i = f * hop; for (let j = 0; j < hop; j++) e += lp[i + j] * lp[i + j];
-    env[f] = Math.max(0, e - prev); prev = e;
-  }
-  const at = (x) => { const i = Math.floor(x), fr = x - i; return i + 1 < env.length ? env[i] * (1 - fr) + env[i + 1] * fr : 0; };
-  // Compare each onset with the ones 1, 2, 4 and 8 beats later: long lags make the tempo precise.
-  const score = (bpm) => {
-    const lag = HPS * 60 / bpm; let s = 0;
-    for (let i = 0; i + 8 * lag < env.length; i++) if (env[i]) s += env[i] * (at(i + lag) + at(i + 2 * lag) + at(i + 4 * lag) + at(i + 8 * lag));
-    return s * (bpm >= 100 && bpm <= 150 ? 1 : 0.7); // prefer 100–150 so we don't land on half/double time
-  };
-  let best = 120, bs = -1;
-  for (let bpm = 90; bpm <= 180; bpm += 0.5) { const s = score(bpm); if (s > bs) { bs = s; best = bpm; } }
-  const lo = best - 0.6;
-  for (let bpm = lo; bpm <= lo + 1.2; bpm += 0.01) { const s = score(bpm); if (s > bs) { bs = s; best = bpm; } }
-  const bpm = Math.round(best * 100) / 100;
-  const beatF = HPS * 60 / bpm;
-  let phase = 0, ps = -1;
-  for (let p = 0; p < beatF; p += 0.25) {
-    let s = 0; for (let k = p; k < env.length; k += beatF) s += at(k) + 0.5 * at(k + 1);
-    if (s > ps) { ps = s; phase = p; }
-  }
-  // onsets are detected a frame late; shift back half a frame
-  return { bpm, firstDownbeat: Math.max(0, phase - 0.5) / HPS, estimated: true };
+  return analyseGrid(buffer.getChannelData(0), buffer.sampleRate);
 }
 
 // ---------- Demo synth: a 4/4 track with intro / build / drop / break / outro ----------
