@@ -14,6 +14,8 @@ export const STOPS = [
   { id: 'mixer', target: '#mixer', title: 'The mixer', text: 'The crossfader at the bottom moves the sound from A to B. Listen lets you hear a deck before the room does.' },
   { id: 'library', target: '#library', title: 'Your music', text: 'Pick a track and press A or B to load it, or + to add it to your set. Suggested shows tracks that mix well with what\'s playing.' },
   { id: 'panel', target: '#tutor', title: 'Lessons, Track and Set', text: 'Lessons teach you step by step. Track shows how the loaded song is built and where to mix. Set plans a whole set.' },
+  { id: 'record', target: '#recBtn', title: 'Record your mix', text: 'Press Record (or R) to record what the room hears, and save it when you stop. Every mix also gets a short clip you can play back from its report.' },
+  { id: 'controller', target: '#ctlBtn', title: 'Controller and headphones', text: 'Plug in a DJ controller and it runs the decks. Click here to set up its headphone socket and test your speakers and headphones.' },
   { id: 'level', target: '#levelBtn', title: 'Your level', text: 'As you get better, move up a level. The coaching fades away and more of the mixer appears.' },
   { id: 'ai', target: '#aiBtn', title: 'AI coach', text: 'Add your own Anthropic API key and the AI coach builds sets and picks your next track, with a reason for each.' },
   { id: 'help', target: '#helpBtn', title: 'Help is here', text: 'Take this tour again, read how songs are built, or see the keyboard shortcuts.' },

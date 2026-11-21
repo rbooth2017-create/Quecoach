@@ -12,7 +12,7 @@ test('stops have a target, a title and short text', () => {
     if (s.needs) assert.ok(FEATURES.includes(s.needs), `${s.id} needs an unknown feature`);
     assert.ok(!/\bsync\b/i.test(s.text));
   }
-  assert.ok(STOPS.length >= 7 && STOPS.length <= 10);
+  assert.ok(STOPS.length >= 7 && STOPS.length <= 12);
 });
 
 test('stops follow the level', () => {
