@@ -7,7 +7,7 @@ import { readTags, TAG_BYTES } from './tags.js';
 import { beatHint, updateAligned, fill, HOLD_S, ALIGN_MS, TEMPO_OK } from './lesson.js';
 import { LESSONS, TIERS, lessonById, advanceLesson, stepIndex, nextLesson, courseProgress } from './lessons.js';
 import { VIBES, EVENTS, AUDIENCES, quickSet, setMinutes, setSources, tracksFrom, NEW_SET_TITLE, makeSet, inSet, toggleInSet, addToSet, removeFromSet, moveInSet, voteInSet, mergeRefined, refineSet } from './setbuilder.js';
-import { aiStatus, aiSetKey, aiClearKey, buildSetAI, refineSetAI, suggestAI } from './coachai.js';
+import { aiStatus, aiSetKey, aiClearKey, buildSetAI, refineSetAI, suggestAI, describeTrackAI } from './coachai.js';
 import { keyRelation } from './library.js';
 import { bandPeaks, barEnergies, phrasesFromEnergy } from './beatgrid.js';
 
@@ -1248,7 +1248,37 @@ function trackPaneHTML() {
     <h4 class="tb-sub">The parts</h4>
     <ol class="tb-parts">${b.sections.map((s) => `<li><button data-tjump="${s.start}" title="Jump deck ${LETTER[side]} here"><i style="background:${s.color}"></i><span><b>${esc(s.name)}</b><small>${clock(s.start)} · ${s.bars} bars</small></span></button><p>${esc(s.what)} <em>${esc(s.mix)}</em></p></li>`).join('')}</ol>
     ${b.tips.length ? `<h4 class="tb-sub">Mixing tips for this track</h4><ul class="tb-tips">${b.tips.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${aiNotesHTML(t)}
     ${guideBtn}`;
+}
+
+// AI coach's notes on a track: kept per track for this session and the next few.
+const aiNotes = new Map(Object.entries(store.get('aiNotes', {})));
+function aiNotesHTML(t) {
+  const n = aiNotes.get(t.id), busy = state.aiNotesBusy === t.id;
+  const head = `<h4 class="tb-sub">${icon('wand', 12)} AI coach's notes</h4>`;
+  if (n?.error) return `${head}<div class="tb-ai"><p class="muted small">${esc(n.error)}</p><button class="ghost small" data-a="ai-notes">Try again</button></div>`;
+  if (n) {
+    return `${head}<div class="tb-ai"><p>${esc(n.summary)}</p><p class="muted">${esc(n.when)}</p>
+      <ul class="tb-tips">${n.howto.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+      ${n.next?.length ? `<div class="tb-next"><span class="small muted">Could come next:</span>${n.next.map((x) => { const tr = state.tracks.find((y) => y.id === x.id); return tr ? `<button class="ghost small" data-next="${esc(tr.id)}" title="${esc(x.why)}">${keyBadge(tr)} ${esc(tr.title)}</button>` : ''; }).join('')}</div>` : ''}</div>`;
+  }
+  if (!state.ai.hasKey) return `${head}<div class="tb-ai"><p class="muted small">Connect the AI coach for a write-up of this track: where it fits in a set, how to mix it and what could come next.</p><button class="ghost small" data-a="ai-settings">${icon('key', 14)} Connect the AI coach</button></div>`;
+  return `${head}<div class="tb-ai"><button data-a="ai-notes" ${busy ? 'disabled' : ''}>${busy ? '<span class="spinner"></span> Writing…' : `${icon('wand', 14)} Describe this track`}</button></div>`;
+}
+async function fetchAiNotes() {
+  const side = trackSide(), t = decks[side].track, b = t && describeTrack(t);
+  if (!b || state.aiNotesBusy) return;
+  state.aiNotesBusy = t.id; aiNotes.delete(t.id); renderTutor();
+  try {
+    const candidates = lib.rankNext(t, state.tracks, { exclude: [t.id], limit: 8 }).map((r) => r.track || r);
+    const parts = b.sections.map((s) => ({ part: s.name, start: clock(s.start), bars: s.bars }));
+    const r = await describeTrackAI({ track: t, parts, candidates, level: state.level });
+    aiNotes.set(t.id, { summary: r.summary, when: r.when, howto: r.howto, next: r.next.map((x) => ({ id: x.track.id, why: x.why })) });
+    store.set('aiNotes', Object.fromEntries([...aiNotes].filter(([, v]) => !v.error).slice(-40)));
+  } catch (err) {
+    aiNotes.set(t.id, { error: err.message || 'The AI coach couldn\'t write notes this time.' });
+  } finally { state.aiNotesBusy = null; renderTutor(); }
 }
 
 /** Move the "now" line on the breakdown's timeline as the deck plays. */
@@ -2093,6 +2123,9 @@ function bind() {
     if (b.dataset.gjump) return seekDeck('left', +b.dataset.gjump);
     if (b.dataset.tside) { state.trackSide = b.dataset.tside; return renderTutor(); }
     if (b.dataset.tjump) { state.did.add('jumpPart'); return seekDeck(trackSide(), +b.dataset.tjump); }
+    if (b.dataset.a === 'ai-notes') return fetchAiNotes();
+    if (b.dataset.a === 'ai-settings' && paneTab() === 'track') return openAI();
+    if (b.dataset.next) { const tr = state.tracks.find((y) => y.id === b.dataset.next); if (tr) { const side = trackSide() === 'left' ? 'right' : 'left'; loadTo(side, tr); } return; }
     if (state.guideOpen || paneTab() === 'track') return;
     if (paneTab() === 'set') { setPanelClick(e); return; }
     if (b.dataset.a === 'last-report') { state.report = store.get('lastReport', null); renderReport(); return; }
@@ -2106,7 +2139,7 @@ function bind() {
     const r = await aiSetKey($('#aiKey').value);
     $('#aiSave').disabled = false; $('#aiSave').textContent = 'Save key';
     if (r?.error) { $('#aiErr').textContent = r.error; return; }
-    $('#aiKey').value = ''; state.ai = r; renderAI(); toast('AI coach connected.');
+    $('#aiKey').value = ''; state.ai = r; renderAI(); renderTutor(); toast('AI coach connected.');
   });
   $('#aiRemove').addEventListener('click', async () => { state.ai = await aiClearKey(); renderAI(); });
   $('#coach').addEventListener('click', (e) => {

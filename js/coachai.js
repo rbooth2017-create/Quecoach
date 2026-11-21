@@ -175,3 +175,36 @@ Pick the best 3 to play next, best first.`;
   const data = await ask({ system: SYSTEM, prompt, schema: PICK_SCHEMA, effort: 'low' });
   return { note: data.note, picks: data.picks.filter((p) => byId.has(p.id)).slice(0, 3).map((p) => ({ ...byId.get(p.id), why: p.why, tip: p.tip })) };
 }
+
+// ---------- track notes ----------
+const TRACK_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['summary', 'when', 'howto', 'next'],
+  properties: {
+    summary: { type: 'string', description: 'Two sentences: what kind of track this is and how it moves, in plain words.' },
+    when: { type: 'string', description: 'One sentence: where in a set it fits best (warm-up, build, peak, cool-down) and why.' },
+    howto: { type: 'array', items: { type: 'string' }, description: 'Two or three concrete tips for mixing in and out of this track, using its real times and bars.' },
+    next: {
+      type: 'array',
+      items: { type: 'object', additionalProperties: false, required: ['id', 'why'], properties: { id: { type: 'string' }, why: { type: 'string', description: 'Under 15 words.' } } },
+      description: 'Up to two tracks from the candidates that would mix well after this one.',
+    },
+  },
+};
+
+/**
+ * Notes on one track for the Track tab: what it is, where it fits in a set, how to mix it and what could come
+ * next. Only details are sent (title, artist, BPM, key, energy, genre, its parts with times), never audio.
+ */
+export async function describeTrackAI({ track, parts, candidates = [], level }) {
+  const byId = new Map(candidates.map((t) => [t.id, t]));
+  const prompt = `Describe this track for a DJ learning to mix. You can't hear it: work from its details and the structure the app found, and don't claim to know how it sounds beyond that.
+The DJ is ${LEVEL_NOTE[level] || LEVEL_NOTE.starter}.
+
+Track: ${JSON.stringify(slimTrack(track))}
+Its parts, in order (start time, length in bars): ${JSON.stringify(parts)}
+
+Tracks that could come next (JSON lines, checked for key and tempo by the app):
+${candidates.map((t) => JSON.stringify(slimTrack(t))).join('\n') || '(none)'}`;
+  const data = await ask({ system: SYSTEM, prompt, schema: TRACK_SCHEMA, effort: 'low' });
+  return { summary: data.summary, when: data.when, howto: (data.howto || []).slice(0, 3), next: (data.next || []).filter((n) => byId.has(n.id)).slice(0, 2).map((n) => ({ track: byId.get(n.id), why: n.why })) };
+}
