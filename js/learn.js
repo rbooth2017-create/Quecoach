@@ -30,6 +30,7 @@ import { detectController, emptyController } from './controller.js';
 import { icon } from './icons.js';
 import * as stream from './streaming.js';
 import * as lay from './layout.js';
+import { stopsFor, step as tourStep, shouldAutoStart, progressLabel } from './tour.js';
 
 const THEMES = [
   { id: 'auto', name: 'Match my computer', bg: '#f6f5f1', bg2: '#14161b', left: '#2f7df6', right: '#ff6b4a' },
@@ -1017,7 +1018,7 @@ function renderTutor() {
     const cls = i < idx ? 'done' : i === idx ? 'now' : '';
     return `<li class="${cls}">${icon(i < idx ? 'check' : i === idx ? 'dot' : 'circle', 16)}<div><b>${esc(st.title)}</b>${i === idx ? `<p>${esc(st.body)}</p>` : ''}</div></li>`;
   };
-  keepFocus(el, `${head(`${prog.done} of ${prog.total} done`)}
+  keepFocus(el, `${head("")}
     <div class="tutor-body">
       <button class="guide-entry" data-a="guide">${icon('book', 16)}<span><b>How songs are built</b><small>Beats, phrases and the parts of a track, in 3 minutes</small></span>${icon('chevron', 14, 'style="transform:rotate(-90deg)"')}</button>
       <section class="tutor-sec" data-panel="lesson" data-group="lessons">
@@ -1048,6 +1049,98 @@ function renderTutor() {
     </div>`);
   lay.applyLayout(state.layout, el); markDraggable(el);
 }
+// ---------- the first-run tour ----------
+const tour = { stops: [], i: 0, back: null };
+const visibleEl = (sel) => $$(sel).find((x) => x.offsetParent !== null && x.getClientRects().length && !x.closest('.hidden'));
+const tourOpen = () => !$('#tour').classList.contains('hidden');
+function startTour() {
+  closeHelpMenu();
+  if (!$('#welcomeView').classList.contains('hidden')) return;
+  for (const d of $$('dialog[open]')) d.close();
+  tour.stops = stopsFor(state.level, (st) => !!visibleEl(st.target));
+  if (!tour.stops.length) return;
+  tour.i = 0; tour.back = document.activeElement;
+  $('#tour').classList.remove('hidden');
+  showTourStop();
+}
+function endTour() {
+  if (!tourOpen()) return;
+  $('#tour').classList.add('hidden'); store.set('tourDone', true);
+  if (tour.back?.isConnected) tour.back.focus();
+}
+function moveTour(dir) { const n = tourStep(tour.i, dir, tour.stops.length); if (n < 0) return endTour(); tour.i = n; showTourStop(); }
+function showTourStop() {
+  const st = tour.stops[tour.i], el = visibleEl(st.target);
+  if (!el) { tour.stops.splice(tour.i, 1); if (tour.i >= tour.stops.length) return endTour(); return showTourStop(); }
+  $('#tourCount').textContent = progressLabel(tour.i, tour.stops.length);
+  $('#tourTitle').textContent = st.title; $('#tourText').textContent = st.text;
+  $('[data-tour="back"]').disabled = tour.i === 0;
+  $('[data-tour="next"]').textContent = tour.i === tour.stops.length - 1 ? 'Done' : 'Next';
+  el.scrollIntoView({ block: 'nearest' });
+  placeTour(el);
+  $('.tour-card').focus();
+}
+function placeTour(el = tour.stops[tour.i] && visibleEl(tour.stops[tour.i].target)) {
+  if (!el) return;
+  const r = el.getBoundingClientRect(), pad = 6, vw = innerWidth, vh = innerHeight;
+  Object.assign($('.tour-ring').style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + pad * 2}px`, height: `${r.height + pad * 2}px` });
+  const card = $('.tour-card'), cw = card.offsetWidth, ch = card.offsetHeight, gap = 14;
+  let left, top;
+  if (r.bottom + gap + ch < vh) { top = r.bottom + gap; left = r.left; }
+  else if (r.top - gap - ch > 0) { top = r.top - gap - ch; left = r.left; }
+  else if (r.left - gap - cw > 0) { left = r.left - gap - cw; top = r.top; }
+  else { left = r.right + gap; top = r.top; }
+  card.style.left = `${Math.max(16, Math.min(vw - cw - 16, left))}px`;
+  card.style.top = `${Math.max(16, Math.min(vh - ch - 16, top))}px`;
+}
+function maybeStartTour() {
+  if (shouldAutoStart({ done: store.get('tourDone', false), hasSource: !!state.source, welcomeOpen: !$('#welcomeView').classList.contains('hidden') })) setTimeout(startTour, 600);
+}
+function bindTour() {
+  $('#tour').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tour]'); if (!b) return;
+    ({ skip: endTour, back: () => moveTour(-1), next: () => moveTour(1) })[b.dataset.tour]();
+  });
+  addEventListener('resize', () => { if (tourOpen()) placeTour(); });
+  // keep keyboard focus inside the card
+  $('.tour-card').addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const items = $$('.tour-card button:not([disabled])'); if (!items.length) return;
+    const first = items[0], last = items.at(-1);
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === $('.tour-card'))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+}
+/** Keys while the tour is open. True when the tour took the key. */
+function tourKey(e) {
+  if (!tourOpen()) return false;
+  if (e.key === 'Escape') { e.preventDefault(); endTour(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); moveTour(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); moveTour(-1); }
+  return true; // nothing else reacts while touring (Enter / Space still press the focused button)
+}
+
+// ---------- help menu ----------
+function toggleHelpMenu(open = $('#helpMenu').classList.contains('hidden')) {
+  $('#helpMenu').classList.toggle('hidden', !open); $('#helpBtn').setAttribute('aria-expanded', open);
+  if (open) $('#helpMenu button').focus();
+}
+function closeHelpMenu() { if (!$('#helpMenu').classList.contains('hidden')) toggleHelpMenu(false); }
+function bindHelpMenu() {
+  $('#helpBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleHelpMenu(); });
+  $('#helpMenu').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-help]'); if (!b) return;
+    closeHelpMenu();
+    ({ tour: startTour, guide: openGuide, keys: () => $('#help').showModal() })[b.dataset.help]();
+  });
+  $('#helpMenu').addEventListener('keydown', (e) => {
+    const items = $$('#helpMenu button'), i = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
+    else if (e.key === 'Escape') { e.stopPropagation(); closeHelpMenu(); $('#helpBtn').focus(); }
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.help-wrap')) closeHelpMenu(); });
+}
+
 // ---------- track breakdown and the "How songs are built" guide ----------
 const GUIDE_LESSONS = new Set(['counting', 'phrase', 'phrasing', 'timing']);
 const trackSide = () => (state.trackSide === 'right' && decks.right.buffer) || (!decks.left.buffer && decks.right.buffer) ? 'right' : 'left';
@@ -1878,7 +1971,7 @@ function bind() {
   mixerEvents();
   $('#themeBtn').innerHTML = icon('palette', 18); $('#helpBtn').innerHTML = icon('help', 18); $('#searchIcon').innerHTML = icon('search', 15);
   $$('[data-icon]').forEach((x) => { x.outerHTML = icon(x.dataset.icon, 26); });
-  $('#helpBtn').addEventListener('click', () => $('#help').showModal());
+  bindHelpMenu(); bindTour();
   $('#settingsBtn').innerHTML = icon('gear', 18); $('#menuBtn').innerHTML = icon('menu', 18);
   $('#settingsBtn').addEventListener('click', openSettings);
   $('#settingsList').addEventListener('click', (e) => { const b = e.target.closest('[data-set]'); if (b) runSetting(b.dataset.set); });
@@ -1937,7 +2030,7 @@ function bind() {
   });
   $('#welcomeView').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-source]'); if (!b || b.disabled) return;
-    if (await useSource(b.dataset.source)) { $('#welcomeView').classList.add('hidden'); focusLibrary('left', 'all'); }
+    if (await useSource(b.dataset.source)) { $('#welcomeView').classList.add('hidden'); focusLibrary('left', 'all'); maybeStartTour(); }
   });
   $('#libTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { state.tab = b.dataset.tab; renderLibrary(); } });
   $('#source').addEventListener('click', async (e) => {
@@ -2070,6 +2163,8 @@ function runCommand(cmd) {
     level: () => { renderLevels(); $('#levels').showModal(); },
     theme: () => { renderThemes(); $('#themes').showModal(); },
     help: () => $('#help').showModal(),
+    tour: startTour,
+    guide: openGuide,
     'restart-lesson': () => startLesson(state.lessonId),
     'toggle-lessons': () => setPane(!state.paneOpen),
     'build-set': () => { if (!state.paneOpen) setPane(true); setPaneTab('set'); },
@@ -2079,6 +2174,7 @@ function runCommand(cmd) {
 }
 
 function onKey(e) {
+  if (tourKey(e)) return;
   const typing = !!e.target?.matches?.('input[type=search], input[type=text], textarea');
   if (e.key === 'Escape') { if (typing) e.target.blur(); if (state.target) { state.target = null; renderLibrary(); } return; }
   if (typing || e.metaKey || e.ctrlKey || e.altKey || !$('#welcomeView').classList.contains('hidden')) return;
@@ -2676,6 +2772,7 @@ async function boot() {
   }
   const ok = await useSource(state.source, { fromGesture: false });
   if (!ok && state.source !== 'folder') await useSource('practice');
+  maybeStartTour();
 }
 
 boot();

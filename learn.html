@@ -452,6 +452,7 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .pane-tabs button .ic { color: var(--ink-3); }
 .pane-tabs button.active .ic { color: var(--left); }
 .tutor-head .grow { flex: 1; }
+.tutor-head .small { white-space: nowrap; }
 .tutor-body { overflow: auto; padding: 14px 16px 24px; display: grid; align-content: start; gap: 16px; }
 .lesson-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 10px; background: var(--bg); }
 .lesson-card h3 { margin: 0; font-size: 15px; }
@@ -682,6 +683,21 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 .sg-parts b { color: var(--ink); }
 .sg-cheat { padding: 12px 14px; border-radius: 12px; background: var(--card-2); }
 .sg-cheat ol { margin: 0; padding-left: 18px; display: grid; gap: 5px; }
+
+/* Help menu and the first-run tour */
+.help-wrap { position: relative; display: inline-flex; }
+.help-wrap .menu { min-width: 260px; }
+.tour { position: fixed; inset: 0; z-index: 80; }
+.tour-block { position: absolute; inset: 0; }
+.tour-ring { position: absolute; border-radius: 14px; box-shadow: 0 0 0 3px var(--left), 0 0 0 9999px rgba(8, 10, 16, .55); transition: all .25s ease; pointer-events: none; }
+.tour-card { position: absolute; width: min(320px, calc(100vw - 32px)); background: var(--card); color: var(--ink); border: 1px solid var(--line-2); border-radius: 14px; padding: 16px; box-shadow: 0 18px 40px rgba(0,0,0,.3); display: grid; gap: 8px; transition: top .25s ease, left .25s ease; outline: none; }
+.tour-card h2 { margin: 0; font-size: 16px; }
+.tour-card p { margin: 0; color: var(--ink-2); }
+.tour-count { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--left); }
+.tour-foot { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.tour-foot .grow { flex: 1; }
+.tour-foot .ghost { padding-left: 0; }
+@media (prefers-reduced-motion: reduce) { .tour-ring, .tour-card { transition: none; } }
 </style>
 </head>
 <body>
@@ -695,7 +711,12 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <button class="icon-btn" id="lessonsBtn" title="Show or hide lessons and your set (L)" aria-label="Lessons and set" aria-pressed="false"></button>
     <button class="icon-btn" id="themeBtn" title="Appearance" aria-label="Appearance"></button>
     <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings"></button>
-    <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"></button>
+    <span class="help-wrap"><button class="icon-btn" id="helpBtn" title="Help: tour, guide and shortcuts" aria-label="Help" aria-haspopup="menu" aria-expanded="false"></button>
+      <div class="menu hidden" id="helpMenu" role="menu">
+        <button role="menuitem" data-help="tour">Take the tour<small>A one-minute look around the screen</small></button>
+        <button role="menuitem" data-help="guide">How songs are built<small>Beats, phrases, intros, drops and outros</small></button>
+        <button role="menuitem" data-help="keys">Keyboard shortcuts<small>Every key Cue Coach listens to</small></button>
+      </div></span>
   </div>
 </header>
 
@@ -857,6 +878,17 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 </dialog>
 
 <div id="linkMenu" class="menu link-menu hidden" role="menu"></div>
+
+<div class="tour hidden" id="tour">
+  <div class="tour-block"></div>
+  <div class="tour-ring"></div>
+  <div class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tourTitle" aria-describedby="tourText" tabindex="-1">
+    <div class="tour-count" id="tourCount"></div>
+    <h2 id="tourTitle"></h2>
+    <p id="tourText"></p>
+    <div class="tour-foot"><button class="ghost" data-tour="skip">Skip tour</button><span class="grow"></span><button data-tour="back">Back</button><button class="primary" data-tour="next">Next</button></div>
+  </div>
+</div>
 <script type="module" src="js/learn.js"></script>
 </body>
 </html>

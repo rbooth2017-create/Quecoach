@@ -282,7 +282,7 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
-    { role: 'help', submenu: [cmd('Keyboard Shortcuts', 'help', 'CmdOrCtrl+/')] },
+    { role: 'help', submenu: [cmd('Take the Tour', 'tour'), cmd('How Songs Are Built', 'guide'), { type: 'separator' }, cmd('Keyboard Shortcuts', 'help', 'CmdOrCtrl+/')] },
   ]));
 }
 
