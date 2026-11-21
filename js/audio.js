@@ -5,10 +5,91 @@ import { analyseGrid } from './beatgrid.js';
 import { wrapInLoop, keyLockSemitones, heardPosition } from './deckmath.js';
 
 export const ctx = new (window.AudioContext || window.webkitAudioContext)();
-const master = ctx.createGain();
+// Stereo buses: a mono track is spread to both sides, so neither speaker nor headphone side goes quiet.
+const STEREO = { channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers' };
+const master = new GainNode(ctx, STEREO);
 master.connect(ctx.destination);
 /** The main mix, after the crossfader (the sampler plays in here too). */
 export const masterBus = master;
+
+// ---------- outputs: speakers and headphones ----------
+// Decks with Listen on feed cueBus. The headphone feed is a blend of the cue and the main mix
+// (the controller's HEADPHONES MIX knob). Where it goes depends on the route (headphones.js):
+//   channels: one sound card, speakers on outputs 1-2, headphones on 3-4
+//   device:   headphones on a second sound output, through an <audio> element
+//   speakers: no separate headphones: the cue plays quietly through the speakers (the old "Listen")
+export const cueBus = new GainNode(ctx, STEREO);
+const hpCue = new GainNode(ctx, STEREO), hpMaster = new GainNode(ctx, STEREO), hpOut = new GainNode(ctx, STEREO);
+cueBus.connect(hpCue); master.connect(hpMaster); hpCue.connect(hpOut); hpMaster.connect(hpOut);
+hpMaster.gain.value = 0;
+const SPEAKER_CUE = 0.5; // Listen through the speakers: quieter than the room
+const speakerCue = ctx.createGain(); speakerCue.gain.value = SPEAKER_CUE; cueBus.connect(speakerCue);
+let wiring = [];      // nodes made for the current route, to take down on the next
+let hpElement = null; // <audio> for a separate headphone device
+export const outputState = { mode: 'speakers', channels: 2, deviceId: null, error: null };
+
+function unwire() {
+  try { master.disconnect(ctx.destination); } catch { /* not connected */ }
+  try { speakerCue.disconnect(); } catch { /* */ }
+  try { hpOut.disconnect(); } catch { /* */ }
+  for (const n of wiring) { try { n.disconnect(); } catch { /* */ } }
+  wiring = [];
+  if (hpElement) { hpElement.pause(); hpElement.srcObject = null; hpElement = null; }
+}
+
+/** Send the main mix and the headphones where the route says. Resolves once the headphone device is playing. */
+export async function routeOutputs(route) {
+  unwire();
+  outputState.error = null;
+  const dest = ctx.destination;
+  if (route.mode === 'channels' && dest.maxChannelCount >= route.channels) {
+    dest.channelCount = route.channels; dest.channelCountMode = 'explicit'; dest.channelInterpretation = 'discrete';
+    const merger = new ChannelMergerNode(ctx, { numberOfInputs: route.channels });
+    const split = (node, [l, r]) => { const sp = new ChannelSplitterNode(ctx, { numberOfOutputs: 2 }); node.connect(sp); sp.connect(merger, 0, l); sp.connect(merger, 1, r); wiring.push(sp); };
+    split(master, route.master); split(hpOut, route.cue);
+    merger.connect(dest); wiring.push(merger);
+    Object.assign(outputState, { mode: 'channels', channels: route.channels, deviceId: null });
+    return outputState;
+  }
+  dest.channelCount = 2; dest.channelCountMode = 'explicit'; dest.channelInterpretation = 'speakers';
+  master.connect(dest);
+  if (route.mode === 'device' && route.deviceId) {
+    const out = ctx.createMediaStreamDestination(); hpOut.connect(out); wiring.push(out);
+    const el = new Audio(); el.srcObject = out.stream; el.autoplay = true; hpElement = el;
+    try {
+      if (el.setSinkId) await el.setSinkId(route.deviceId);
+      await el.play();
+      Object.assign(outputState, { mode: 'device', channels: 2, deviceId: route.deviceId });
+      return outputState;
+    } catch (err) {
+      outputState.error = `Couldn't play to the headphone output: ${err.message}`;
+      unwire(); master.connect(dest);
+    }
+  }
+  speakerCue.connect(dest);
+  Object.assign(outputState, { mode: 'speakers', channels: 2, deviceId: null });
+  return outputState;
+}
+
+/** The headphone blend of cue and main mix, as gains (headphones.js headphoneMix). */
+export function setHeadphoneMix({ cue, master: m }) { hpCue.gain.value = cue; hpMaster.gain.value = m; }
+/** Headphone volume, 0..1 (the controller's own LEVEL knob also works on its socket). */
+export function setHeadphoneLevel(v) { hpOut.gain.value = Math.max(0, Math.min(1.5, v)); }
+
+/** A short test sound in the speakers or the headphones only, so you can check each is where it should be. */
+export function testTone(where = 'headphones') {
+  ctx.resume();
+  const t0 = ctx.currentTime + 0.05, g = ctx.createGain(); g.gain.value = 0;
+  const freqs = where === 'headphones' ? [880, 1320] : [440, 660];
+  freqs.forEach((f, i) => {
+    const o = ctx.createOscillator(); o.frequency.value = f; o.connect(g);
+    o.start(t0 + i * 0.25); o.stop(t0 + i * 0.25 + 0.22);
+  });
+  for (let i = 0; i < 2; i++) { g.gain.setValueAtTime(0.0001, t0 + i * 0.25); g.gain.exponentialRampToValueAtTime(0.25, t0 + i * 0.25 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.25 + 0.2); }
+  // into the bus only: headphones get cue (bypassing the mix knob, so it's heard whatever the knob says)
+  if (where === 'headphones') g.connect(hpOut); else g.connect(master);
+  setTimeout(() => g.disconnect(), 900);
+}
 
 // Key lock: Signalsmith Stretch (MIT, WASM in an AudioWorklet), loaded the first time a deck turns key lock on.
 let stretchLoader = null;

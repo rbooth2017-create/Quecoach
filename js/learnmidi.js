@@ -39,7 +39,8 @@ export function midiToAction(profile, ctl, data, { tempoRange = 8, now = Date.no
     case 'filter': return { type: 'filter', side, value: d.filter };
     case 'headphones': return { type: 'listen', side, on: d.headphones };
     case 'crossfader': return { type: 'xfader', value: ctl.crossfader };
-    default: return null; // the headphone mix knob isn't used yet
+    case 'headMix': return ctl.headMix == null ? null : { type: 'headMix', value: ctl.headMix };
+    default: return null;
   }
 }
 
@@ -66,6 +67,7 @@ export function describeAction(a) {
     case 'volume': return `Channel fader ${Math.round(a.value * 100)}%${deck}`;
     case 'listen': return `Listen ${a.on ? 'on' : 'off'}${deck}`;
     case 'xfader': return `Crossfader ${Math.round(a.value * 100)}% to B`;
+    case 'headMix': return `Headphone mix ${Math.round(a.value * 100)}% room`;
     case 'search': return `Fast search ${a.ticks > 0 ? '+' : ''}${a.ticks}${deck}`;
     case 'touch': return `Jog top ${a.on ? 'touched' : 'released'}${deck}`;
     case 'shift': return `Shift ${a.on ? 'down' : 'up'}`;

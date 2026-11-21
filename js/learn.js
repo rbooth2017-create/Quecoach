@@ -1,6 +1,7 @@
 // Cue Coach "Learn": a beginner-first DJ app. Two decks, a mixer, a music library and a coach that fades
 // out as you level up. Works with mouse and keyboard; a controller is optional (later).
-import { ctx, Deck, beatmatch, synthDemoTrack, estimateGrid, setCrossfader } from './audio.js';
+import { ctx, Deck, beatmatch, synthDemoTrack, estimateGrid, setCrossfader, cueBus, routeOutputs, outputState, setHeadphoneMix, setHeadphoneLevel, testTone } from './audio.js';
+import { cueRoute, headphoneMix, setupTip, MODES as HP_MODES } from './headphones.js';
 import { beatLen, barLen, fmtTime, timeOfBar } from './engine.js';
 import * as lib from './musiclib.js';
 import { readTags, TAG_BYTES } from './tags.js';
@@ -93,9 +94,10 @@ const decks = {};
 const jogs = {};
 function makeDeck(side) {
   const d = new Deck(LETTER[side]);
-  // "Listen": a quiet copy of the deck that ignores the crossfader, standing in for headphones.
+  // "Listen" (headphone CUE): the deck before its channel fader and the crossfader, into the headphone bus.
+  d.pre = ctx.createGain(); d.pre.connect(d.vol);
   d.listenGain = ctx.createGain(); d.listenGain.gain.value = 0;
-  d.vol.connect(d.listenGain); d.listenGain.connect(ctx.destination);
+  d.pre.connect(d.listenGain); d.listenGain.connect(cueBus);
   // Level meter, after the channel volume and EQ (before the crossfader), like a real mixer.
   d.meter = ctx.createAnalyser(); d.meter.fftSize = 512; d.vol.connect(d.meter);
   d.meterBuf = new Float32Array(d.meter.fftSize); d.peak = 0;
@@ -104,7 +106,7 @@ function makeDeck(side) {
   d.trimNode = ctx.createGain(); d.filterNode = ctx.createBiquadFilter();
   d.filterNode.type = 'lowpass'; d.filterNode.frequency.value = 22000; d.filterNode.Q.value = 0.9;
   d.high.disconnect(); d.high.connect(d.trimNode); d.trimNode.connect(d.filterNode);
-  d.fx = new FxRack(d, d.filterNode, d.vol); // pad FX and Beat FX
+  d.fx = new FxRack(d, d.filterNode, d.pre); // pad FX and Beat FX
   d.padMode = 'hotcue';
   d.setTrim = (db) => { d.trimNode.gain.value = Math.pow(10, db / 20); };
   /** 0..1: left of centre sweeps a low-pass down, right of centre sweeps a high-pass up, centre is off. */
@@ -276,6 +278,7 @@ function renderMixer() {
       <div class="pc-foot"><span class="pc-status" data-pstatus></span><button class="pc-align" data-align hidden>Align</button></div>
     </div>
     <div class="strips">${strip('left')}${strip('right')}</div>
+    ${hasPhones() ? `<div class="phones" title="Headphones: left is only what you're cueing (Listen), right is what the room hears">${dialHTML({ id: 'hp:mix', label: 'Phones mix', value: hp.mix, min: 0, max: 1, def: 0 })}<span class="small muted">Cue ↔ Room</span></div>` : ''}
     <div class="xf"><span style="color:var(--left)">A</span><input type="range" id="xfader" min="0" max="1" step="0.005" value="${state.xfader}" aria-label="Crossfader" title="Crossfader ([ and ])"><span style="color:var(--right)">B</span></div>
     ${f.beatFx ? `<div class="bfx">
       <div class="label">Beat FX</div>
@@ -1748,7 +1751,7 @@ function setEQ(side, band, db, rerender = true) {
   $(`[data-cut="${side}:${band}"]`)?.classList.toggle('on', db <= -25);
 }
 function setListen(side, on) {
-  const d = decks[side]; d.listening = on; d.listenGain.gain.value = on ? 0.5 : 0;
+  const d = decks[side]; d.listening = on; d.listenGain.gain.value = on ? 1 : 0;
   const b = $(`[data-listen="${side}"]`); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
 }
 function moveXfader(x) {
@@ -2052,6 +2055,7 @@ function deckEvents(side) {
 function mixerEvents() {
   const m = $('#mixer');
   bindDials(m, (id, v) => {
+    if (id === 'hp:mix') return setHpMix(v);
     if (id === 'fx:depth') { state.bfx.depth = v; for (const r of state.bfxRunning) decks[r.side].fx.setDepth(r.id, v); return; }
     const [side, band] = id.split(':'); setEQ(side, band, v, false);
   });
@@ -2111,7 +2115,8 @@ function bind() {
   $('#aiBtn').addEventListener('click', openAI);
   $('#ctlBtn').addEventListener('click', openCtl);
   $('#sinkSel').addEventListener('change', (e) => useSink(e.target.value));
-  navigator.mediaDevices?.addEventListener?.('devicechange', () => { if ($('#ctlDlg').open) listSinks(); });
+  navigator.mediaDevices?.addEventListener?.('devicechange', () => { if ($('#ctlDlg').open) listSinks(); applyRoute(true); });
+  bindHeadphones();
   bindSetPanel($('#tutor'));
   bindLayout();
   $('#tutor').addEventListener('click', (e) => {
@@ -2695,6 +2700,7 @@ function onControllerMessage(profile, ctl, data) {
     case 'volume': { d.setVolume(a.value); const f = $(`[data-vol="${a.side}"]`); if (f && document.activeElement !== f) f.value = a.value; return; }
     case 'listen': return setListen(a.side, a.on);
     case 'xfader': return moveXfader(a.value);
+    case 'headMix': return setHpMix(a.value, true);
   }
 }
 
@@ -2819,8 +2825,60 @@ async function useSink(id) {
   if (!ctx.setSinkId) return;
   try { await ctx.setSinkId(id); store.set('sink', id); }
   catch (err) { toast(`Couldn't switch the sound output: ${err.message}`); listSinks(); }
+  await applyRoute(true);
 }
-function openCtl() { renderCtl(); renderMidiLog(); listSinks(); $('#ctlDlg').showModal(); }
+
+// ---------- headphones ----------
+const hp = { outputs: [], route: null, mix: store.get('hpMix', 0), level: store.get('hpLevel', 1) };
+async function soundOutputs() {
+  try { return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput' && d.deviceId !== 'default').map((d, i) => ({ id: d.deviceId, label: d.label || `Output ${i + 1}` })); } catch { return []; }
+}
+/** Work out where the headphones go and wire it up. tell: say so when the route changes. */
+async function applyRoute(tell = false) {
+  hp.outputs = await soundOutputs();
+  const before = hp.route?.mode;
+  hp.route = cueRoute({ maxChannels: ctx.destination.maxChannelCount, outputs: hp.outputs, mainId: store.get('sink', ''), choice: store.get('hpChoice', 'auto') });
+  await routeOutputs(hp.route);
+  setHeadphoneMix(headphoneMix(hp.mix)); setHeadphoneLevel(hp.level);
+  if (outputState.error) toast(outputState.error);
+  else if (tell && before !== outputState.mode && outputState.mode !== 'speakers') toast(outputState.mode === 'channels' ? 'Headphones ready: plug them into your controller. Press a Listen button to hear a deck in them.' : 'Headphones ready on their own output. Press a Listen button to hear a deck in them.');
+  renderHeadphones(); renderMixer();
+}
+const hasPhones = () => outputState.mode !== 'speakers';
+function setHpMix(v, fromController = false) {
+  hp.mix = Math.max(0, Math.min(1, v)); store.set('hpMix', hp.mix); setHeadphoneMix(headphoneMix(hp.mix));
+  const dl = $('[data-dial="hp:mix"]'); if (dl && fromController) setDial(dl, hp.mix);
+}
+function renderHeadphones() {
+  const box = $('#hpState'); if (!box) return;
+  const r = hp.route || { mode: 'speakers', why: '' }, mode = outputState.mode;
+  const choice = store.get('hpChoice', 'auto'), cv = typeof choice === 'object' ? `dev:${choice.device}` : choice;
+  const mainLabel = hp.outputs.find((o) => o.id === store.get('sink', ''))?.label || '';
+  const tip = setupTip({ mode }, { platform: desktop?.platform || (navigator.platform.startsWith('Win') ? 'win32' : navigator.platform.startsWith('Mac') ? 'darwin' : ''), mainLabel });
+  box.innerHTML = `<div class="hp-status ${mode === 'speakers' ? 'off' : 'on'}">${icon('headphones', 16)}<div><b>${esc(HP_MODES[mode])}</b><span class="small muted">${esc(outputState.error || r.why || '')}</span></div></div>
+    <label class="small muted" for="hpSel">Headphones</label>
+    <select id="hpSel" class="sel">
+      <option value="auto" ${cv === 'auto' ? 'selected' : ''}>Automatic</option>
+      <option value="channels" ${cv === 'channels' ? 'selected' : ''} ${ctx.destination.maxChannelCount >= 4 ? '' : 'disabled'}>Controller headphone socket (outputs 3-4)${ctx.destination.maxChannelCount >= 4 ? '' : ': needs a 4-output sound card'}</option>
+      ${hp.outputs.filter((o) => o.id !== store.get('sink', '')).map((o) => `<option value="dev:${esc(o.id)}" ${cv === `dev:${o.id}` ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+      <option value="speakers" ${cv === 'speakers' ? 'selected' : ''}>No headphones: Listen through the speakers</option>
+    </select>
+    <div class="hp-tests"><button type="button" data-hptest="speakers">${icon('play', 13)} Test speakers</button><button type="button" data-hptest="headphones" ${mode === 'speakers' ? 'disabled' : ''}>${icon('headphones', 14)} Test headphones</button>
+      <label class="hp-level small muted">Level <input type="range" id="hpLevel" min="0" max="1.5" step="0.05" value="${hp.level}" aria-label="Headphone level"></label></div>
+    ${tip ? `<p class="small notice">${esc(tip)}</p>` : ''}
+    <span class="small muted">You should hear the test sound only where it says. Press Listen on a deck to hear it in your headphones before the room does; the Phones mix knob blends in what the room hears.</span>`;
+}
+function bindHeadphones() {
+  $('#hpState').addEventListener('change', (e) => {
+    if (e.target.id !== 'hpSel') return;
+    const v = e.target.value;
+    store.set('hpChoice', v.startsWith('dev:') ? { device: v.slice(4) } : v);
+    applyRoute(true);
+  });
+  $('#hpState').addEventListener('input', (e) => { if (e.target.id === 'hpLevel') { hp.level = +e.target.value; store.set('hpLevel', hp.level); setHeadphoneLevel(hp.level); } });
+  $('#hpState').addEventListener('click', (e) => { const b = e.target.closest('[data-hptest]'); if (b) testTone(b.dataset.hptest); });
+}
+function openCtl() { renderCtl(); renderMidiLog(); listSinks(); renderHeadphones(); applyRoute(); $('#ctlDlg').showModal(); }
 
 // ---------- rekordbox helper ----------
 /**
@@ -2882,7 +2940,8 @@ async function boot() {
   startLesson(state.lessonId);
   aiStatus().then((st) => { state.ai = st; renderAI(); });
   initController();
-  const sink = store.get('sink', ''); if (sink && ctx.setSinkId) ctx.setSinkId(sink).catch(() => store.set('sink', ''));
+  const sink = store.get('sink', '');
+  (sink && ctx.setSinkId ? ctx.setSinkId(sink).catch(() => store.set('sink', '')) : Promise.resolve()).then(() => applyRoute());
   const rb = watchRekordbox();
   if (!state.source) { $('#welcomeView').classList.remove('hidden'); return; }
   if (state.source === 'rekordbox') {

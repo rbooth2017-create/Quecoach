@@ -753,6 +753,17 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 .tb-ai > button { justify-self: start; }
 .tb-next { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .tb-sub .ic { vertical-align: -2px; }
+/* Headphones */
+.hp-field { gap: 6px; }
+.hp-status { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: var(--card-2); }
+.hp-status.on { background: var(--ok-soft); }
+.hp-status.on .ic { color: var(--ok); }
+.hp-status div { display: grid; }
+.hp-field .sel { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card-2); }
+.hp-tests { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.hp-level { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+.hp-field .notice { margin: 0; }
+.phones { display: grid; justify-items: center; gap: 2px; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -882,6 +893,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <select id="sinkSel" style="padding:6px 8px;border-radius:8px;border:1px solid var(--line-2);background:var(--card-2)"></select>
     <span class="small muted">Controllers like the DDJ-FLX4 have their own sound card: choose it here and plug your speakers and headphones into the controller.</span>
   </div>
+  <div class="field hp-field" id="hpState"></div>
   <ul class="small">
     <li>Supported: Pioneer DDJ-FLX4, DDJ-400, DDJ-200, DDJ-SB3; Hercules Inpulse 200, 300, 500; Numark Mixtrack 3.</li>
     <li>Play, cue (back to the start), jog wheels, tempo, EQ, channel faders, crossfader and the headphone buttons (Listen) all work.</li>
