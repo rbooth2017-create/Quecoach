@@ -28,8 +28,9 @@ import { SAMPLES, playSample, stopSample, samplePlaying } from './sampler.js';
 const PAD_MODE_LIST = [['hotcue', 'Cues'], ['loop', 'Loop'], ['jump', 'Jump'], ['fx1', 'FX 1'], ['fx2', 'FX 2'], ['sampler', 'Sampler']];
 const BFX_BEATS = [0.25, 0.5, 1, 2, 4, 8];
 const beatsLabel = (b) => (b < 1 ? `1/${Math.round(1 / b)}` : String(b));
-import { midiToAction, KEEPALIVE, describeAction, hexBytes, flx4Lights, flx4Meters, JOG_STEPS_PER_TURN } from './learnmidi.js';
+import { midiToAction, LIGHTS, KEEPALIVE, describeAction, hexBytes, flx4Lights, flx4Meters, JOG_STEPS_PER_TURN } from './learnmidi.js';
 import { detectController, emptyController } from './controller.js';
+import { LEARN_STEPS, learnControl, buildProfile, learnedCount } from './midilearn.js';
 import { icon } from './icons.js';
 import * as stream from './streaming.js';
 import * as lay from './layout.js';
@@ -2167,6 +2168,13 @@ function bind() {
   $('#sinkSel').addEventListener('change', (e) => useSink(e.target.value));
   navigator.mediaDevices?.addEventListener?.('devicechange', () => { if ($('#ctlDlg').open) listSinks(); applyRoute(true); });
   bindHeadphones();
+  $('#ctlState').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.learnStart) return startLearn(b.dataset.learnStart);
+    if (b.dataset.learnForget) return forgetMap(b.dataset.learnForget);
+    ({ back: () => learnMove(-1), skip: () => learnMove(1), save: saveLearn, cancel: stopLearn })[b.dataset.learn]?.();
+  });
+  $('#ctlDlg').addEventListener('close', () => { if (state.learn) stopLearn(); });
   bindSetPanel($('#tutor'));
   bindLayout();
   $('#tutor').addEventListener('click', (e) => {
@@ -2692,8 +2700,8 @@ async function initController() {
       ctlState.timers.forEach(clearInterval); ctlState.timers = [];
       for (const input of access.inputs.values()) {
         if (input.state === 'disconnected') continue;
-        const profile = detectController(input.name);
-        if (!profile) { ctlState.unknown.push(input.name); input.onmidimessage = null; continue; }
+        const profile = detectController(input.name, store.get('customMaps', []));
+        if (!profile) { ctlState.unknown.push(input.name); input.onmidimessage = (e) => onLearnMessage(input.name, e.data); continue; }
         const ctl = emptyController();
         input.onmidimessage = (e) => onControllerMessage(profile, ctl, e.data);
         ctlState.connected.push({ name: profile.name, profile });
@@ -2704,20 +2712,21 @@ async function initController() {
           const hello = () => { try { out.send(k.bytes); } catch { /* port went away */ } };
           hello(); ctlState.timers.push(setInterval(hello, k.everyMs));
         }
-        const lightsOut = profile.id === 'ddj-flx4' && [...access.outputs.values()].find((o) => o.state !== 'disconnected' && o.name === input.name);
+        const lightsOut = LIGHTS.has(profile.id) && [...access.outputs.values()].find((o) => o.state !== 'disconnected' && o.name === input.name);
         if (lightsOut) { ctlState.lightsOut = lightsOut; ctlState.lightCache = new Map(); }
       }
       const now = ctlState.connected.map((c) => c.name).join();
       if (now && now !== before) toast(`${ctlState.connected[0].name} connected. Your decks and mixer follow it now.`);
       renderCtl();
     };
-    access.onstatechange = bind; bind();
+    access.onstatechange = bind; ctlState.rebind = bind; bind();
   } catch (err) { console.warn('MIDI unavailable', err); ctlState.error = 'Cue Coach wasn\'t allowed to use MIDI, so it can\'t read controllers. Restart the app and try again.'; renderCtl(); }
 }
 
 let syncTold = -Infinity; // when we last explained there's no sync (shown at most every 8 s)
 function onControllerMessage(profile, ctl, data) {
   if (data[0] === 0xF0) return; // SysEx replies to our keep-alive
+  if (state.learn && state.learn.device === profile.name) return onLearnMessage(profile.name, data);
   const a = midiToAction(profile, ctl, data, { tempoRange: tempoRange(state.level) });
   logMidi(data, a);
   if (!a) return;
@@ -2862,14 +2871,57 @@ function loadSelected(side) {
   if (t) loadTo(side, t); else toast('Turn the browse knob to pick a track first.');
 }
 
+// ---------- map my controller (MIDI learn) ----------
+function startLearn(device) { state.learn = { device, i: 0, learned: {}, msgs: [], timer: null }; renderCtl(); }
+function stopLearn() { clearTimeout(state.learn?.timer); state.learn = null; renderCtl(); }
+function learnMove(dir) { const L = state.learn; if (!L) return; clearTimeout(L.timer); L.msgs = []; L.i = Math.max(0, Math.min(LEARN_STEPS.length, L.i + dir)); renderCtl(); }
+function onLearnMessage(device, data) {
+  const L = state.learn;
+  logMidi(data, null);
+  if (!L || L.device !== device || L.i >= LEARN_STEPS.length || data[0] === 0xF0) return;
+  const st = LEARN_STEPS[L.i];
+  // the same control learned for an earlier step (e.g. its release): ignore it
+  const taken = Object.entries(L.learned).some(([id, r]) => id !== st.id && r?.controls.some(([s, d1]) => s === data[0] && d1 === data[1]) && (data[0] & 0xf0) !== 0x80);
+  if (taken || (data[0] & 0xf0) === 0x80) return;
+  L.msgs.push([...data]);
+  clearTimeout(L.timer);
+  const settle = () => { const r = learnControl(st, L.msgs); L.msgs = []; if (r) { L.learned[st.id] = r; L.i++; } renderCtl(); };
+  if (st.kind === 'button') { if ((data[0] & 0xf0) === 0x90 && data[2] > 0) settle(); else if ((data[0] & 0xf0) === 0xb0 && data[2] > 0) settle(); }
+  else L.timer = setTimeout(settle, st.kind === 'jog' ? 600 : 900);
+  const pr = $('#learnHeard'); if (pr) pr.textContent = 'Got it, keep going…';
+}
+function saveLearn() {
+  const L = state.learn; if (!L || !learnedCount(L.learned)) return stopLearn();
+  const p = buildProfile(L.device, L.learned);
+  store.set('customMaps', [p, ...store.get('customMaps', []).filter((x) => x.match !== L.device)]);
+  toast(`Saved your map for ${L.device}.`);
+  state.learn = null; ctlState.rebind?.(); renderCtl();
+}
+function forgetMap(device) {
+  store.set('customMaps', store.get('customMaps', []).filter((x) => x.match !== device));
+  ctlState.rebind?.(); renderCtl();
+}
+function learnHTML() {
+  const L = state.learn, n = LEARN_STEPS.length;
+  if (L.i >= n) return `<div class="learn"><b>All done: ${learnedCount(L.learned)} of ${n} controls mapped.</b><p class="small muted">Save the map and your controller works like a supported one. You can map it again any time.</p><div class="card-actions"><button class="primary" data-learn="save">Save my map</button><button class="ghost" data-learn="back">Back</button><button class="ghost" data-learn="cancel">Cancel</button></div></div>`;
+  const st = LEARN_STEPS[L.i], got = L.learned[st.id];
+  return `<div class="learn"><span class="small muted">Mapping ${esc(L.device)} · ${L.i + 1} of ${n}</span>
+    <div class="bar"><i style="width:${(L.i / n) * 100}%"></i></div>
+    <b>${esc(st.title)}</b><p>${esc(st.text)}</p><span class="small muted" id="learnHeard">${got ? 'Already mapped. Use it again to change, or press Next.' : 'Waiting for the control…'}</span>
+    <div class="card-actions"><button class="ghost" data-learn="back" ${L.i ? '' : 'disabled'}>Back</button><button data-learn="skip">${got ? 'Next' : 'Skip'}</button><span class="grow"></span><button class="ghost" data-learn="save" ${learnedCount(L.learned) ? '' : 'disabled'}>Save now</button><button class="ghost" data-learn="cancel">Cancel</button></div></div>`;
+}
+
 function renderCtl() {
+  if (state.learn) { $('#ctlState').innerHTML = learnHTML(); return; }
   const c = ctlState.connected[0];
   const b = $('#ctlBtn');
   b.classList.toggle('on', !!c);
   b.innerHTML = `<span class="led"></span>${c ? esc(c.name.replace(/^(Pioneer|Hercules|Numark) /, '')) : 'No controller'}`;
   $('#ctlState').innerHTML = c
     ? `<span class="ok-pill">${icon('check', 14)} ${esc(c.name)} connected</span>`
-    : `<span class="off-pill">No controller connected</span>${ctlState.error ? `<span class="err">${esc(ctlState.error)}</span>` : ''}${ctlState.unknown.length ? `<span class="small muted">Found ${esc(ctlState.unknown.join(', '))}, which Cue Coach doesn't support yet.</span>` : ''}`;
+    : `<span class="off-pill">No controller connected</span>${ctlState.error ? `<span class="err">${esc(ctlState.error)}</span>` : ''}`;
+  $('#ctlState').innerHTML += ctlState.unknown.map((name) => `<div class="learn-offer"><span class="small">Found <b>${esc(name)}</b>. Cue Coach doesn't know it yet: map it by pressing and moving its controls (about 2 minutes).</span><button class="primary" data-learn-start="${esc(name)}">Map my controller</button></div>`).join('')
+    + (c?.profile.custom ? `<div class="learn-offer"><span class="small">Using the map you made for this controller.</span><button data-learn-start="${esc(c.profile.match)}">Map again</button><button class="ghost" data-learn-forget="${esc(c.profile.match)}">Forget my map</button></div>` : '');
 }
 
 // ---------- sound output ----------

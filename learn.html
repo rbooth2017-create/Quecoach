@@ -784,6 +784,12 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 .ss-open small { color: var(--ink-3); }
 .skills { margin-top: 4px; }
 .skills li { grid-template-columns: 120px 1fr 26px; }
+/* Map my controller */
+.learn, .learn-offer { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--card-2); }
+.learn p { margin: 0; }
+.learn .card-actions { align-items: center; }
+.learn .card-actions .grow { flex: 1; }
+.learn-offer { grid-template-columns: 1fr auto auto; align-items: center; margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -916,7 +922,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
   </div>
   <div class="field hp-field" id="hpState"></div>
   <ul class="small">
-    <li>Supported: Pioneer DDJ-FLX4, DDJ-400, DDJ-200, DDJ-SB3; Hercules Inpulse 200, 300, 500; Numark Mixtrack 3.</li>
+    <li>Supported: Pioneer DDJ-FLX4, DDJ-400, DDJ-200, DDJ-SB3; Hercules Inpulse 200, 300, 500; Numark Mixtrack 3. Anything else (like a DDJ-FLX2): plug it in and press Map my controller.</li>
     <li>Play, cue (back to the start), jog wheels, tempo, EQ, channel faders, crossfader and the headphone buttons (Listen) all work.</li>
     <li>There's no sync on purpose: matching the speed yourself is the skill you're learning.</li>
   </ul>

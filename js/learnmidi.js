@@ -10,7 +10,7 @@ export const eqDb = (v) => (v >= 0.5 ? (v - 0.5) * 12 : -30 * (1 - v * 2));
  * Hercules and Numark count from 1 forward and down from 127 backward.
  */
 export function jogTicks(profile, value) {
-  if (profile.id.startsWith('ddj-')) return value - 64;
+  if (profile.jog === 'centered' || (!profile.jog && profile.id.startsWith('ddj-'))) return value - 64;
   return value >= 64 ? value - 128 : value;
 }
 
@@ -158,7 +158,11 @@ function flx4Extras(ctl, [status, d1, v]) {
   if (type === 0xb0 && ch === 4 && d1 === 0x02) return { type: 'fxLevel', value: v / 127 };
   return undefined; // let the generated map handle it
 }
-const EXTRAS = { 'ddj-flx4': flx4Extras };
+// The DDJ-400 is the FLX4's predecessor with the same MIDI layout (its Mixxx map matches the FLX4's control
+// for control), so it gets the same pads, loops, browse, Beat FX and lights.
+const EXTRAS = { 'ddj-flx4': flx4Extras, 'ddj-400': flx4Extras };
+/** Controllers whose button lights and level meters Cue Coach drives. */
+export const LIGHTS = new Set(['ddj-flx4', 'ddj-400']);
 
 /**
  * Button lights to send for the current state: [[status, data1, value], ...] (FLX4).
