@@ -1,6 +1,7 @@
 // Cue Coach "Learn": a beginner-first DJ app. Two decks, a mixer, a music library and a coach that fades
 // out as you level up. Works with mouse and keyboard; a controller is optional (later).
-import { ctx, Deck, beatmatch, synthDemoTrack, estimateGrid, setCrossfader, cueBus, routeOutputs, outputState, setHeadphoneMix, setHeadphoneLevel, testTone } from './audio.js';
+import { Take, pickMime, fileName as recFileName, elapsed as recElapsed } from './recorder.js';
+import { ctx, Deck, beatmatch, synthDemoTrack, estimateGrid, setCrossfader, masterBus, cueBus, routeOutputs, outputState, setHeadphoneMix, setHeadphoneLevel, testTone } from './audio.js';
 import { cueRoute, headphoneMix, setupTip, MODES as HP_MODES } from './headphones.js';
 import { beatLen, barLen, fmtTime, timeOfBar } from './engine.js';
 import * as lib from './musiclib.js';
@@ -1081,15 +1082,49 @@ function recordMix(s, dt) {
     bassTool: mixControls(state.f, ctlState.connected.length > 0).low, bpm: decks.left.bpm || decks.right.bpm || 120,
   };
   const r = feedMix(state.mixRec, sample, dt);
-  if (r) onMixReport(r);
+  // a clip of every transition, for "Listen back" in the report
+  if (state.mixRec.mix && !rec.clip && rec.ok) rec.clip = new Take(recStream());
+  if (r) { const clip = rec.clip; rec.clip = null; onMixReport(r, clip); }
+  else if (!state.mixRec.mix && rec.clip) { const c = rec.clip; rec.clip = null; c.stop(); } // backed out: no report
+  if (rec.set) { const el = $('#recBtn [data-rectime]'); const t = recElapsed(rec.set.seconds); if (el && el.textContent !== t) el.textContent = t; }
 }
-function onMixReport(r) {
+
+// ---------- recording ----------
+const rec = { ok: typeof MediaRecorder !== 'undefined' && !!pickMime(), dest: null, set: null, clip: null };
+function recStream() { if (!rec.dest) { rec.dest = ctx.createMediaStreamDestination(); masterBus.connect(rec.dest); } return rec.dest.stream; }
+function saveBlob(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+async function toggleRecording() {
+  if (!rec.ok) return toast('Recording isn\'t available on this computer.');
+  if (!rec.set) {
+    ctx.resume(); rec.set = new Take(recStream()); renderRecBtn();
+    toast('Recording what the room hears. Press Stop to save it.');
+    return;
+  }
+  const take = rec.set; rec.set = null; renderRecBtn();
+  const blob = await take.stop();
+  if (!blob) return toast('Nothing was recorded.');
+  saveBlob(blob, recFileName('set', new Date(take.startedAt), take.mime));
+  toast(`Saved your ${recElapsed(take.seconds)} recording.`);
+}
+function renderRecBtn() {
+  const b = $('#recBtn'); if (!b) return;
+  b.classList.toggle('on', !!rec.set); b.setAttribute('aria-pressed', !!rec.set);
+  b.innerHTML = rec.set ? `<span class="rec-dot"></span>Stop <span data-rectime>0:00</span>` : '<span class="rec-dot"></span>Record';
+  b.title = rec.set ? 'Stop and save the recording' : 'Record what the room hears (R)';
+}
+function onMixReport(r, clip = null) {
+  if (clip) clip.stop().then((blob) => { if (blob && state.report && state.report.at === at) { state.report.clip = URL.createObjectURL(blob); state.report.clipMime = clip.mime; renderReport(); } });
+  const at = Date.now();
   state.mixHistory = addToHistory(state.mixHistory, r); store.set('mixHistory', state.mixHistory);
   (state.lessonMixes ||= []).push(r.score);
   // clean mixes count towards the next level (the first-mix lesson counts its own)
   if (r.score >= CLEAN_SCORE && state.lessonId !== 'first-mix') { state.cleanMixes += 1; store.set('cleanMixes', state.cleanMixes); }
-  state.report = { ...r, levelUp: r.score >= CLEAN_SCORE ? suggestLevelUp(state.level, state.cleanMixes) : null, fromTitle: decks[r.from].track?.title, toTitle: decks[r.to].track?.title };
-  store.set('lastReport', state.report);
+  if (state.report?.clip) URL.revokeObjectURL(state.report.clip);
+  state.report = { ...r, at, levelUp: r.score >= CLEAN_SCORE ? suggestLevelUp(state.level, state.cleanMixes) : null, fromTitle: decks[r.from].track?.title, toTitle: decks[r.to].track?.title };
+  store.set('lastReport', { ...state.report, clip: null });
   renderReport();
   if (state.paneOpen && paneTab() === 'lessons' && !state.guideOpen) renderTutor();
 }
@@ -1103,6 +1138,7 @@ function renderReport() {
       <div class="mr-title"><span class="mr-kicker">Mix report</span><h2>${esc(r.grade)}</h2><span class="small muted">${esc(r.fromTitle || LETTER[r.from])} → ${esc(r.toTitle || LETTER[r.to])} · ${r.bars} bars</span></div>
       <button class="icon-btn" data-mr="close" aria-label="Close the mix report">${icon('x', 16)}</button></div>
     <ul class="mr-parts">${r.parts.map((p) => `<li><span>${esc(p.name)}</span><i><s class="${p.score >= 75 ? 'ok' : p.score >= 55 ? 'close' : 'warn'}" style="width:${p.score}%"></s></i><b>${p.score}</b></li>`).join('')}</ul>
+    ${r.clip ? `<div class="mr-clip"><span class="small muted">Listen back</span><audio controls src="${r.clip}"></audio><button class="ghost small" data-mr="save-clip" title="Save this mix as a file">Save</button></div>` : ''}
     ${r.praise ? `<p class="mr-praise">${icon('check', 14)} ${esc(r.praise)}</p>` : ''}
     ${r.tips.map((t) => `<div class="mr-tip"><p>${esc(t.text)}</p><button class="ghost small" data-mr="lesson" data-lesson="${t.lesson}">Practise: ${esc(lessonName(t.lesson))}</button></div>`).join('')}
     ${r.notes.map((n) => `<p class="mr-note">${esc(n)}</p>`).join('')}
@@ -1112,6 +1148,7 @@ function bindReport() {
   $('#mixReport').addEventListener('click', (e) => {
     const b = e.target.closest('[data-mr]'); if (!b) return;
     const a = b.dataset.mr;
+    if (a === 'save-clip') { const r = state.report; if (r?.clip) fetch(r.clip).then((x) => x.blob()).then((bl) => saveBlob(bl, recFileName('mix', new Date(r.at), r.clipMime))); return; }
     if (a === 'lesson') { startLesson(b.dataset.lesson); if (!state.paneOpen) setPane(true); setPaneTab('lessons'); }
     if (a === 'levelup') { state.cleanMixes = 0; store.set('cleanMixes', 0); setLevel(b.dataset.level); }
     state.report = null; renderReport();
@@ -2088,6 +2125,7 @@ function bind() {
   $('#themeBtn').innerHTML = icon('palette', 18); $('#helpBtn').innerHTML = icon('help', 18); $('#searchIcon').innerHTML = icon('search', 15);
   $$('[data-icon]').forEach((x) => { x.outerHTML = icon(x.dataset.icon, 26); });
   bindHelpMenu(); bindTour(); bindReport();
+  $('#recBtn').addEventListener('click', toggleRecording); renderRecBtn(); $('#recBtn').hidden = !rec.ok;
   // set chart ⇄ set list: hovering a dot highlights its row, and the other way round
   $('#tutor').addEventListener('pointerover', (e) => {
     const id = e.target.closest('[data-eid]')?.dataset.eid ?? e.target.closest('.srow')?.dataset.id ?? null;
@@ -2329,6 +2367,7 @@ function onKey(e) {
     '/': () => focusLibrary(null),
     c: check,
     '?': () => $('#help').showModal(),
+    r: () => { if (!e.repeat) toggleRecording(); },
   }[k];
   if (!act) return;
   if (e.target?.matches?.('input[type=range]') && k.startsWith('arrow')) e.target.blur();

@@ -764,6 +764,17 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 .hp-level { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
 .hp-field .notice { margin: 0; }
 .phones { display: grid; justify-items: center; gap: 2px; margin-top: 4px; }
+/* Recording */
+.rec-btn { border-color: transparent; background: transparent; color: var(--ink-2); font-size: 12px; font-weight: 600; padding: 4px 10px; gap: 6px; -webkit-app-region: no-drag; }
+.rec-btn:hover { background: var(--card-2); color: var(--ink); }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); opacity: .55; }
+.rec-btn.on { color: var(--warn); background: var(--warn-soft); }
+.rec-btn.on .rec-dot { opacity: 1; animation: rec-blink 1s steps(2) infinite; }
+.rec-btn [data-rectime] { font-variant-numeric: tabular-nums; }
+@keyframes rec-blink { 50% { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .rec-btn.on .rec-dot { animation: none; } }
+.mr-clip { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.mr-clip audio { width: 100%; height: 30px; }
 </style>
 </head>
 <body>
@@ -771,6 +782,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
   <div class="brand"><button class="icon-btn win-only" id="menuBtn" title="Menu" aria-label="Menu"></button><span class="logo"></span>Cue Coach</div>
   <div class="tb-center" id="progress"></div>
   <div class="tb-right">
+    <button class="rec-btn" id="recBtn" aria-pressed="false"></button>
     <button class="ctl-chip" id="ctlBtn" title="Controller and sound output"></button>
     <button class="pill-btn" id="levelBtn" title="Your level"></button>
     <button class="icon-btn" id="aiBtn" title="AI coach settings" aria-label="AI coach settings"></button>
@@ -941,6 +953,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <tr><td><kbd>C</kbd></td><td>Check your beats (Confident level)</td></tr>
     <tr><td><kbd>/</kbd></td><td>Search your music</td></tr>
     <tr><td><kbd>L</kbd></td><td>Show or hide lessons and your set</td></tr>
+    <tr><td><kbd>R</kbd></td><td>Start or stop recording</td></tr>
   </table>
   <form method="dialog" class="dlg-foot"><button class="primary">Got it</button></form>
 </dialog>
