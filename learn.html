@@ -630,6 +630,58 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
   .library.with-crates .lib-body { grid-template-columns: 140px minmax(0, 1fr); }
 }
 @container (max-width: 1060px) { .trow .why { display: none; } }
+
+/* Track breakdown (side panel "Track" tab) and the "How songs are built" guide */
+.guide-entry { width: 100%; justify-content: flex-start; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--left-soft); border-color: transparent; text-align: left; }
+.guide-entry:hover { background: color-mix(in srgb, var(--left-soft) 70%, var(--left) 12%); }
+.guide-entry > .ic:first-child { color: var(--left); }
+.guide-entry span { flex: 1; display: grid; }
+.guide-entry small { color: var(--ink-2); font-size: 11.5px; }
+.link-btn { justify-self: start; border: none; background: transparent; padding: 0; color: var(--left); font-weight: 600; font-size: 12px; }
+.link-btn:hover { background: transparent; text-decoration: underline; }
+.deck-switch { justify-self: start; }
+.deck-switch button[disabled] { opacity: .4; }
+.tb-empty { display: grid; gap: 8px; padding: 12px; border: 1px dashed var(--line-2); border-radius: 12px; }
+.tb-empty p { margin: 0; }
+.tb-head { display: grid; gap: 3px; }
+.tb-head h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.tb-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { font-size: 11px; font-weight: 650; padding: 2px 8px; border-radius: 99px; background: var(--card-2); color: var(--ink-2); }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.close { background: var(--close-soft); color: var(--close); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.sg-pic { display: block; width: 100%; height: auto; color: var(--ink); overflow: visible; }
+.sg-time { height: 76px; }
+.tb-time { padding: 2px 0; }
+.tb-story p, .sg-sec p { margin: 0 0 6px; color: var(--ink-2); }
+.tb-story p:first-child { color: var(--ink); }
+.tb-jumps { display: flex; flex-wrap: wrap; gap: 6px; }
+.tb-jumps button { font-size: 12px; padding: 4px 10px; }
+.tb-sub { margin: 4px 0 -6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.tb-parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.tb-parts li { display: grid; gap: 2px; padding: 4px 0 6px; border-bottom: 1px solid var(--line); }
+.tb-parts li:last-child { border-bottom: none; }
+.tb-parts button { border: none; background: transparent; padding: 3px 4px; gap: 9px; justify-content: flex-start; text-align: left; }
+.tb-parts button:hover { background: var(--card-2); }
+.tb-parts button i, .sg-parts i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.tb-parts button span { display: flex; gap: 8px; align-items: baseline; }
+.tb-parts small { color: var(--ink-3); }
+.tb-parts p { margin: 0 0 0 25px; font-size: 12px; color: var(--ink-2); }
+.tb-parts em, .sg-parts em { font-style: normal; color: var(--ink); }
+.tb-tips { margin: 0; padding-left: 18px; display: grid; gap: 4px; color: var(--ink-2); font-size: 12px; }
+.guide-pane { gap: 18px; }
+.guide-pane h2 { margin: -6px 0 -10px; font-size: 19px; outline: none; }
+.guide-pane h2:focus-visible { box-shadow: none; }
+.guide-top { margin: -6px 0 -8px -8px; }
+.sg-sec { display: grid; gap: 8px; }
+.sg-sec h3 { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.sg-n { width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--card); display: grid; place-items: center; font-size: 11px; }
+.sg-parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; font-size: 12px; color: var(--ink-2); }
+.sg-parts li { display: grid; grid-template-columns: 12px 1fr; gap: 9px; align-items: start; }
+.sg-parts li i { margin-top: 3px; }
+.sg-parts b { color: var(--ink); }
+.sg-cheat { padding: 12px 14px; border-radius: 12px; background: var(--card-2); }
+.sg-cheat ol { margin: 0; padding-left: 18px; display: grid; gap: 5px; }
 </style>
 </head>
 <body>

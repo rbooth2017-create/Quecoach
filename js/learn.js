@@ -13,8 +13,7 @@ import { bandPeaks, barEnergies, phrasesFromEnergy } from './beatgrid.js';
 
 // Colours that read on every theme: hot cue pads and phrase sections.
 const CUE_COLORS = ['#ef4f5c', '#22b573', '#f0a020', '#8b6cf6'];
-const PHRASE_COLORS = { Intro: '#2bb5a0', Up: '#f0a020', Chorus: '#ef4f5c', Down: '#8b6cf6', Outro: '#4a90e2', Verse: '#7cbf3a', Bridge: '#c06cd8' };
-const phraseColor = (label = '') => PHRASE_COLORS[label] || PHRASE_COLORS[Object.keys(PHRASE_COLORS).find((k) => label.startsWith(k))] || '#888';
+import { phraseColor, describeTrack, timelineSVG, sectionsFromBars, beatsSVG, phraseSVG, mixMapSVG, GUIDE, GUIDE_PARTS, CHEAT_SHEET, clock } from './songguide.js';
 const PHRASE_NAMES = { Up: 'Build', Down: 'Breakdown' };
 import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex, eqBands } from './levels.js';
 import { JogWheel, jogHTML, dialHTML, setDial, bindDials } from './controls.js';
@@ -234,6 +233,7 @@ function renderDeck(side) {
     <div class="deckfoot"><span class="role" data-live></span>${keys}<span class="grow"></span>
       ${f.gridEdit && t.grid?.estimated ? `<span class="gridtools" title="Cue Coach worked out this beat grid. If the beats sound off, nudge it.">Grid <button data-grid="-1" aria-label="Move grid earlier">‹</button><button data-grid="1" aria-label="Move grid later">›</button><button data-grid="one" title="Move the &quot;1&quot; to the next beat">1 ›</button></span>` : ''}
       ${f.barCounter ? '<span class="barcount" data-bar></span>' : ''}
+      <button class="ghost small" data-a="breakdown" title="What's in this track and where to mix it">${icon('list', 14)} Breakdown</button>
       <button class="ghost small" data-a="choose" title="Load a different track">${icon('eject', 14)} Change</button></div>`;
   jogs[side] = new JogWheel($('[data-jog]', el), () => decks[side], (kind) => {
     state.jogUsed = true; $('.jog', el)?.classList.add('used');
@@ -358,6 +358,7 @@ async function loadTo(side, track) {
     console.error(err); toast(`Couldn't load "${track.title}": ${err.message}`);
   } finally {
     delete state.loading[side]; renderDeck(side); renderLibrary();
+    if (state.paneOpen && (paneTab() === 'track' || state.guideOpen)) { if (decks[side].buffer) state.trackSide = side; renderTutor(); }
   }
 }
 
@@ -992,9 +993,17 @@ function renderTutor() {
   const tab = paneTab();
   el.setAttribute('aria-label', tab === 'set' ? 'Set list' : 'Lessons');
   const tabBtn = (id, ic, name) => `<button data-ptab="${id}" role="tab" aria-selected="${tab === id}" class="${tab === id ? 'active' : ''}">${icon(ic, 14)} ${name}</button>`;
-  const head = (note) => `<div class="tutor-head"><div class="tabs pane-tabs" role="tablist" aria-label="Side panel">${tabBtn('lessons', 'book', 'Lessons')}${tabBtn('set', 'list', 'Set')}</div>
+  const head = (note) => `<div class="tutor-head"><div class="tabs pane-tabs" role="tablist" aria-label="Side panel">${tabBtn('lessons', 'book', 'Lessons')}${tabBtn('track', 'music', 'Track')}${tabBtn('set', 'list', 'Set')}</div>
       <span class="grow"></span><span class="small muted">${note}</span>
       <button class="icon-btn" data-a="close" title="Hide the side panel (L)" aria-label="Hide the side panel">${icon('x', 16)}</button></div>`;
+  if (state.guideOpen) {
+    keepFocus(el, head('') + `<div class="tutor-body guide-pane">${guideHTML()}</div>`);
+    return;
+  }
+  if (tab === 'track') {
+    keepFocus(el, head('') + `<div class="tutor-body track-pane">${trackPaneHTML()}</div>`);
+    return;
+  }
   if (tab === 'set') {
     const n = setItems().length;
     keepFocus(el, head(n ? `${n} track${n === 1 ? '' : 's'}` : '') + `<div class="tutor-body set-pane">${setPanelHTML()}</div>`);
@@ -1010,6 +1019,7 @@ function renderTutor() {
   };
   keepFocus(el, `${head(`${prog.done} of ${prog.total} done`)}
     <div class="tutor-body">
+      <button class="guide-entry" data-a="guide">${icon('book', 16)}<span><b>How songs are built</b><small>Beats, phrases and the parts of a track, in 3 minutes</small></span>${icon('chevron', 14, 'style="transform:rotate(-90deg)"')}</button>
       <section class="tutor-sec" data-panel="lesson" data-group="lessons">
       <div class="fold-head">${fold('lesson', 'Current lesson')}</div>
       <div class="lesson-card">
@@ -1018,6 +1028,7 @@ function renderTutor() {
         <p class="why">${esc(L.why)}</p>
         ${need ? `<div class="notice">This lesson uses ${need[0]}, which appears at the Improver level.<button class="primary" data-a="need-level" data-level="${need[1]}">Switch to Improver</button></div>` : ''}
         ${L.hidesLane ? '<div class="notice">The beat lane stays hidden during this lesson. Use your ears.</div>' : ''}
+        ${GUIDE_LESSONS.has(L.id) ? `<button class="link-btn" data-a="guide">${icon('book', 14)} Learn more: how songs are built</button>` : ''}
         <ol class="steps">${L.steps.map(stepRow).join('')}</ol>
         <div class="card-actions">
           ${idx >= L.steps.length && next ? `<button class="primary" data-lesson="${next.id}">Next: ${esc(next.title)}</button>` : ''}
@@ -1037,6 +1048,72 @@ function renderTutor() {
     </div>`);
   lay.applyLayout(state.layout, el); markDraggable(el);
 }
+// ---------- track breakdown and the "How songs are built" guide ----------
+const GUIDE_LESSONS = new Set(['counting', 'phrase', 'phrasing', 'timing']);
+const trackSide = () => (state.trackSide === 'right' && decks.right.buffer) || (!decks.left.buffer && decks.right.buffer) ? 'right' : 'left';
+function openTrackTab(side) { state.trackSide = side; state.guideOpen = false; if (!state.paneOpen) setPane(true); setPaneTab('track'); }
+function openGuide() { state.guideReturn = document.activeElement; state.guideOpen = true; if (!state.paneOpen) setPane(true); else renderTutor(); requestAnimationFrame(() => $('#tutor .guide-pane h2')?.focus()); }
+function closeGuide() { state.guideOpen = false; renderTutor(); const back = state.guideReturn; state.guideReturn = null; if (back?.isConnected) back.focus(); else $('#tutor [data-a="guide"]')?.focus(); }
+
+function trackPaneHTML() {
+  const side = trackSide(), d = decks[side], t = d.track;
+  const sw = `<div class="tabs deck-switch" role="tablist" aria-label="Which deck">${SIDES.map((s) => `<button data-tside="${s}" role="tab" aria-selected="${s === side}" class="${s === side ? 'active' : ''}" ${decks[s].buffer ? '' : 'disabled'}>Deck ${LETTER[s]}</button>`).join('')}</div>`;
+  const guideBtn = `<button class="guide-entry" data-a="guide">${icon('book', 16)}<span><b>How songs are built</b><small>What intros, builds, drops and outros are</small></span>${icon('chevron', 14, 'style="transform:rotate(-90deg)"')}</button>`;
+  if (!d.buffer) {
+    return `${sw}<div class="tb-empty"><b>Load a track to see its breakdown</b><p class="muted small">Cue Coach shows each part of the track, what it's for and where to mix. Here's what a typical club track looks like:</p>
+      ${timelineSVG(sectionsFromBars(), { width: 300 })}</div>${guideBtn}`;
+  }
+  const b = describeTrack(t);
+  if (!b) return `${sw}<div class="tb-empty"><b>${esc(t.title)}</b><p class="muted small">No beat grid or phrases for this track yet. They're worked out when the track is analysed.</p></div>${guideBtn}`;
+  const marks = [...(b.drops[0] ? [{ time: b.drops[0].time, label: 'Drop', color: phraseColor('Chorus') }] : []), { time: b.mixOut.time, label: 'Mix out', color: 'currentColor' }];
+  const ease = { easy: 'ok', ok: 'close', hard: 'warn' }[b.ease.id];
+  return `${sw}
+    <div class="tb-head"><h3>${esc(t.title)}</h3><div class="muted small">${esc(t.artist || '')}${t.artist ? ' · ' : ''}${esc(b.headline)}</div>
+      <div class="tb-chips"><span class="chip ${ease}" title="${esc(b.ease.why)}">${esc(b.ease.name)}</span><span class="chip">${esc(b.shape)}</span></div></div>
+    <div class="tb-time" data-tbtime data-side="${side}">${timelineSVG(b.sections, { width: 300, marks, now: d.position() })}</div>
+    <div class="tb-story">${b.story.map((x) => `<p>${esc(x)}</p>`).join('')}</div>
+    <div class="tb-jumps"><button data-tjump="${b.mixIn.time}" title="${esc(b.mixIn.why)}">${icon('restart', 14)} Start</button>${b.drops[0] ? `<button data-tjump="${b.drops[0].time}">Jump to the drop</button>` : ''}<button data-tjump="${b.mixOut.time}" title="${esc(b.mixOut.why)}">Jump to the outro</button></div>
+    <h4 class="tb-sub">The parts</h4>
+    <ol class="tb-parts">${b.sections.map((s) => `<li><button data-tjump="${s.start}" title="Jump deck ${LETTER[side]} here"><i style="background:${s.color}"></i><span><b>${esc(s.name)}</b><small>${clock(s.start)} · ${s.bars} bars</small></span></button><p>${esc(s.what)} <em>${esc(s.mix)}</em></p></li>`).join('')}</ol>
+    ${b.tips.length ? `<h4 class="tb-sub">Mixing tips for this track</h4><ul class="tb-tips">${b.tips.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${guideBtn}`;
+}
+
+/** Move the "now" line on the breakdown's timeline as the deck plays. */
+function updateTrackNow() {
+  const box = state.paneOpen && !state.guideOpen && paneTab() === 'track' ? $('#tutor [data-tbtime]') : null;
+  const line = box && $('[data-now]', box); if (!line) return;
+  const d = decks[box.dataset.side], svg = $('svg', box), secs = describeTrack(d.track)?.sections; if (!d.buffer || !secs) return;
+  const w = +svg.viewBox.baseVal.width, t0 = Math.min(secs[0].start, 0), x = ((d.position() - t0) / (secs.at(-1).end - t0)) * w;
+  const v = String(Math.max(0, Math.min(w, x)).toFixed(1));
+  if (line.getAttribute('x1') !== v) { line.setAttribute('x1', v); line.setAttribute('x2', v); }
+}
+
+function guideHTML() {
+  const t = decks.left.track, b = t && describeTrack(t);
+  const pic = (id) => ({
+    beats: beatsSVG(), phrase: phraseSVG(),
+    parts: `${timelineSVG(sectionsFromBars(), { width: 300 })}<ul class="sg-parts">${GUIDE_PARTS.map((p) => `<li><i style="background:${p.color}"></i><div><b>${esc(p.name)}</b> ${esc(p.what)} <em>${esc(p.mix)}</em></div></li>`).join('')}</ul>`,
+    mixmap: mixMapSVG({ width: 300 }),
+  }[id] || '');
+  const yours = b ? `<section class="sg-sec"><h3>Your track: ${esc(t.title)}</h3><p>${esc(b.story.slice(0, 3).join(' '))}</p>
+      ${timelineSVG(b.sections, { width: 300, marks: [{ time: b.mixOut.time, label: 'Mix out' }, ...(b.drops[0] ? [{ time: b.drops[0].time, label: 'Drop', color: phraseColor('Chorus') }] : [])] })}
+      <div class="tb-jumps">${b.drops[0] ? `<button data-gjump="${b.drops[0].time}">Jump to the drop</button>` : ''}<button data-gjump="${b.mixOut.time}">Jump to the outro</button></div></section>`
+    : '<section class="sg-sec"><h3>Your track</h3><p class="muted">Load a track on deck A to see its parts here.</p></section>';
+  return `<div class="guide-top"><button class="ghost" data-a="guide-back">${icon('chevron', 14, 'style="transform:rotate(90deg)"')} Back</button></div>
+    <h2 tabindex="-1">How songs are built</h2>
+    <p class="muted">Dance tracks follow a pattern. Once you can hear it, you always know when to mix.</p>
+    ${GUIDE.map((g, i) => `<section class="sg-sec"><h3><span class="sg-n">${i + 1}</span>${esc(g.title)}</h3>${g.text.map((x) => `<p>${esc(x)}</p>`).join('')}${pic(g.pic)}</section>`).join('')}
+    ${yours}
+    <section class="sg-sec sg-cheat"><h3>Cheat sheet</h3><ol>${CHEAT_SHEET.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></section>`;
+}
+
+function seekDeck(side, t) {
+  const d = decks[side]; if (!d.buffer || !Number.isFinite(t)) return;
+  if (isLive(side)) toast(`Jumped deck ${LETTER[side]} while it's playing to the room. Pause it first if you only want to look.`);
+  d.seek(Math.max(0, Math.min(d.buffer.duration - 0.5, t)));
+}
+
 const fold = (id, label) => lay.foldButton(id, esc(label), `<span class="fold-ic">${icon('chevron', 14)}</span>`);
 
 function setPane(open) { state.paneOpen = open; store.set('paneOpen', open); state.coachKey = null; renderTutor(); for (const s of SIDES) decks[s]._wave = null; }
@@ -1431,6 +1508,7 @@ function frame(now) {
   syncLights();
   updateBfx();
   updateMixPlan();
+  updateTrackNow();
   requestAnimationFrame(frame);
 }
 
@@ -1729,6 +1807,7 @@ function deckEvents(side) {
     const b = e.target.closest('[data-a]'); if (!b) return;
     const a = b.dataset.a;
     if (a === 'keylock') return toggleKeyLock(side);
+    if (a === 'breakdown') return openTrackTab(side);
     if (a === 'choose') return focusLibrary(side, side === 'right' && state.f.upNext && decks.left.buffer ? 'suggested' : 'all');
     if (!d().buffer) return;
     if (a === 'play') togglePlay(side);
@@ -1827,6 +1906,12 @@ function bind() {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.ptab) return setPaneTab(b.dataset.ptab);
     if (b.dataset.a === 'close') return setPane(false);
+    if (b.dataset.a === 'guide') return openGuide();
+    if (b.dataset.a === 'guide-back') return closeGuide();
+    if (b.dataset.gjump) return seekDeck('left', +b.dataset.gjump);
+    if (b.dataset.tside) { state.trackSide = b.dataset.tside; return renderTutor(); }
+    if (b.dataset.tjump) return seekDeck(trackSide(), +b.dataset.tjump);
+    if (state.guideOpen || paneTab() === 'track') return;
     if (paneTab() === 'set') { setPanelClick(e); return; }
     if (b.dataset.a === 'restart-lesson') startLesson(state.lessonId);
     else if (b.dataset.a === 'need-level') setLevel(b.dataset.level);
@@ -2107,7 +2192,7 @@ function loadNextFromSet() {
 }
 
 const paneTab = () => state.paneTab || (state.f.setFirst ? 'set' : 'lessons');
-function setPaneTab(tab) { state.paneTab = tab; store.set('paneTab', tab); renderTutor(); }
+function setPaneTab(tab) { state.paneTab = tab; state.guideOpen = false; store.set('paneTab', tab); renderTutor(); }
 function renderSetPanel() { if (state.paneOpen && paneTab() === 'set') renderTutor(); }
 
 /** The three questions the set builder asks: where the music comes from, what the event is, who's coming. */
