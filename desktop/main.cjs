@@ -234,6 +234,8 @@ function buildMenu() {
         cmd('Open Music Folder…', 'source-folder', 'CmdOrCtrl+O'),
         cmd('Use Practice Tracks', 'source-practice'),
         cmd('Use rekordbox Library', 'source-rekordbox'),
+        cmd('Use My Library', 'source-managed'),
+        cmd('Import Music to My Library…', 'library-import', 'CmdOrCtrl+I'),
         { type: 'separator' },
         cmd('Find Music…', 'search', 'CmdOrCtrl+F'),
         { type: 'separator' },
@@ -294,6 +296,100 @@ ipcMain.handle('show-menu', (e, pos) => { if (fromLearn(e)) Menu.getApplicationM
 ipcMain.handle('ai-set-key', (e, key) => (fromLearn(e) ? ai.setKey(key) : null));
 ipcMain.handle('ai-clear-key', (e) => (fromLearn(e) ? ai.clearKey() : null));
 ipcMain.handle('ai-request', (e, payload) => (fromLearn(e) ? ai.request(payload) : { error: 'Not allowed.' }));
+// ---------- My library: music copied into Cue Coach's own folder ----------
+// userData/Music holds the files, userData/library.json the tracks and crates (see libstore.cjs).
+const libModel = require('./libmodel.cjs');
+const { createStore, walkAudio } = require('./libstore.cjs');
+let libStore = null;
+const store = () => (libStore ||= createStore(app.getPath('userData')));
+let tagsModule = null;
+const readTagsFn = async () => (tagsModule ||= await import(require('node:url').pathToFileURL(path.join(ROOT, 'js', 'tags.js')).href)).readTags;
+let importing = null; // AbortController of the import in progress
+
+const libView = (lib) => ({
+  musicDir: store().musicDir,
+  tracks: lib.tracks.map((t) => ({ ...t, path: store().filePath(t) })),
+  crates: lib.crates,
+});
+/** Only plain data from the page: a size cap and a JSON round trip. */
+const plain = (v, max = 2e6) => { try { const s = JSON.stringify(v ?? {}); return s.length > max ? {} : JSON.parse(s); } catch { return {}; } };
+
+async function runImport(items) {
+  if (importing) return { busy: true };
+  importing = new AbortController();
+  const send = (p) => learnWin?.webContents.send('library-progress', p);
+  try {
+    const res = await store().importItems(items, { readTags: await readTagsFn(), signal: importing.signal, onProgress: send });
+    send({ ...res, finished: true, errors: res.errors.slice(0, 5) });
+    return { ...res, errors: res.errors.slice(0, 20), library: libView(await store().load()) };
+  } finally { importing = null; }
+}
+
+ipcMain.handle('library-list', async (e) => (fromLearn(e) ? libView(await store().load()) : null));
+ipcMain.handle('library-read', async (e, id) => {
+  if (!fromLearn(e)) return null;
+  await store().load();
+  const rec = store().get(String(id));
+  if (!rec) throw new Error('That track is no longer in your library.');
+  return fs.promises.readFile(store().filePath(rec));
+});
+ipcMain.handle('library-import-dialog', async (e, kind) => {
+  if (!fromLearn(e)) return null;
+  const folder = kind === 'folder';
+  const r = await dialog.showOpenDialog(learnWin, folder
+    ? { title: 'Import a folder of music', buttonLabel: 'Import', properties: ['openDirectory', 'multiSelections'] }
+    : { title: 'Import music', buttonLabel: 'Import', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'mp4', 'wav', 'aif', 'aiff', 'flac', 'ogg', 'oga', 'opus'] }] });
+  if (r.canceled || !r.filePaths.length) return { cancelled: true };
+  const paths = [];
+  for (const p of r.filePaths) {
+    if (folder) paths.push(...(await walkAudio(p)));
+    else if (libModel.isAudioName(p)) paths.push(p);
+  }
+  if (!paths.length) return { added: 0, skipped: 0, failed: 0, total: 0, ids: [], errors: [], empty: true };
+  return runImport(paths.map((p) => ({ path: p })));
+});
+ipcMain.handle('library-import', async (e, payload) => {
+  if (!fromLearn(e)) return null;
+  const raw = Array.isArray(payload?.items) ? payload.items.slice(0, 20000) : [];
+  const items = [];
+  for (const it of raw) {
+    const meta = plain(it?.meta);
+    if (typeof it?.path === 'string' && it.path) {
+      const p = path.normalize(it.path);
+      if (path.isAbsolute(p) && libModel.isAudioName(p) && fs.existsSync(p)) items.push({ path: p, meta });
+      else items.push({ name: path.basename(p), error: 'the original file wasn\'t found' });
+    } else if (it?.bytes instanceof Uint8Array && typeof it.name === 'string') items.push({ bytes: it.bytes, name: path.basename(it.name), meta });
+  }
+  return runImport(items);
+});
+ipcMain.handle('library-cancel-import', (e) => { if (fromLearn(e)) importing?.abort(); });
+ipcMain.handle('library-update-analysis', async (e, id, data) => {
+  if (!fromLearn(e)) return;
+  const d = plain(data);
+  await store().update((l) => libModel.updateAnalysis(l, String(id), { grid: d.grid, duration: d.duration, phrases: d.phrases }));
+});
+ipcMain.handle('library-crate', async (e, op, args) => {
+  if (!fromLearn(e)) return null;
+  const a = plain(args, 1e6), ids = Array.isArray(a.trackIds) ? a.trackIds.map(String) : [];
+  let created = null;
+  const lib = await store().update((l) => {
+    switch (op) {
+      case 'create': { const r = libModel.createCrate(l, require('node:crypto').randomUUID(), a.name); created = r.crate; return ids.length ? libModel.addToCrate(r.lib, r.crate.id, ids) : r.lib; }
+      case 'rename': return libModel.renameCrate(l, String(a.id), a.name);
+      case 'delete': return libModel.deleteCrate(l, String(a.id));
+      case 'add': return libModel.addToCrate(l, String(a.id), ids);
+      case 'remove': return libModel.removeFromCrate(l, String(a.id), ids);
+      default: return l;
+    }
+  });
+  return { crates: lib.crates, created };
+});
+ipcMain.handle('library-delete', async (e, ids) => {
+  if (!fromLearn(e) || !Array.isArray(ids)) return null;
+  return libView(await store().remove(ids.map(String), (p) => shell.trashItem(p)));
+});
+app.on('will-quit', () => { importing?.abort(); });
+
 // The Learn page tells us its theme colours so the title bar and window background match.
 ipcMain.handle('chrome', (e, c) => {
   if (!fromUs(e) || !learnWin || e.sender !== learnWin.webContents) return;

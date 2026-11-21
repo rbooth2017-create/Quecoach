@@ -12,6 +12,23 @@ export function stretchParams(tempoPct, bend = 0, keyLock = true) {
 }
 
 /**
+ * Key lock as a pitch correction after the deck: the deck plays at its tempo (which bends the pitch, like a
+ * turntable) and the key lock shifts it back by this many semitones. Only the tempo fader is corrected, not a
+ * jog nudge, so a nudge still sounds like a nudge and the correction doesn't wobble while the wheel moves.
+ */
+export const keyLockSemitones = (tempoPct) => (tempoPct ? -12 * Math.log2(1 + tempoPct / 100) : 0);
+
+/**
+ * Where the listener is in the track (track seconds) when the sound reaches them `lag` seconds late
+ * (the key lock's processing delay). raw: where the deck's playhead is. since: seconds since play was pressed,
+ * startOffset: where play was pressed. During the first `lag` seconds nothing has come out yet.
+ */
+export function heardPosition({ raw, lag = 0, rate = 1, since = Infinity, startOffset = raw }) {
+  if (!(lag > 0)) return raw;
+  return since < lag ? startOffset : raw - lag * rate;
+}
+
+/**
  * Jog wheel nudge from a relative MIDI value (Pioneer, Hercules and Numark send 64 = still,
  * above 64 = forward, below 64 = back). Returns a temporary bend fraction, clamped to ±maxBend.
  */
@@ -87,6 +104,35 @@ export function beatCount(grid, pos, phraseBars = 16) {
   if (beats < 0) return null;
   const bar = Math.floor(beats / 4) + 1, barInPhrase = ((bar - 1) % phraseBars) + 1;
   return { beat: (beats % 4) + 1, bar, barInPhrase, block: Math.ceil(barInPhrase / 4), barInBlock: ((barInPhrase - 1) % 4) + 1, phrase: Math.floor((bar - 1) / phraseBars) + 1 };
+}
+
+/** Beats into the phrase (0 ≤ x < phraseBars×4, fractional), or null before the first downbeat or without a grid. */
+export function phraseBeat(grid, pos, phraseBars = 16) {
+  if (!grid?.bpm) return null;
+  const beats = (pos - grid.firstDownbeat) * grid.bpm / 60;
+  if (beats < -1e-6) return null;
+  const n = phraseBars * 4;
+  return ((beats % n) + n) % n;
+}
+
+/**
+ * How far `other` has to jump, in whole beats, to sit on the same beat and bar of the phrase as `ref`
+ * (the nearest way round, so −½ phrase ≤ beats < +½ phrase). Whole beats keep the other deck's place
+ * within the beat, so beatmatching survives the jump. Each deck uses its own grid, so the BPMs can differ.
+ * Returns { beats, bars, target, canAlign } or null. `canAlign`: 1 beat to `maxBeats` apart and the
+ * landing point is inside the music.
+ */
+export function phraseOffset(refGrid, refPos, otherGrid, otherPos, { phraseBars = 16, maxBeats = 8, duration = Infinity } = {}) {
+  const a = phraseBeat(refGrid, refPos, phraseBars), b = phraseBeat(otherGrid, otherPos, phraseBars);
+  if (a == null || b == null) return null;
+  const n = phraseBars * 4;
+  let beats = Math.round(a - b);
+  beats = ((beats % n) + n) % n;
+  if (beats >= n / 2) beats -= n;
+  beats = beats || 0; // no −0
+  const target = otherPos + beats * 60 / otherGrid.bpm;
+  const canAlign = beats !== 0 && Math.abs(beats) <= maxBeats && target >= otherGrid.firstDownbeat - 1e-6 && target < duration;
+  return { beats, bars: beats / 4, target, canAlign };
 }
 
 // ---------- loops and beat jump ----------

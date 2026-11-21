@@ -92,6 +92,58 @@ export function keyHue(camelot) {
   return Number.isFinite(n) ? ((n - 1) * 30 + 200) % 360 : null;
 }
 
+// ---------- My library (copied into the desktop app's own folder) ----------
+/** A Learn library track from a My library record (see desktop/libmodel.cjs). */
+export function managedTrack(rec) {
+  let grid = rec.grid || null;
+  if (grid?.estimated && !(grid.v >= GRID_VERSION)) grid = null; // worked out by an older, less accurate method
+  const bpm = grid?.bpm || rec.bpm || null;
+  return {
+    id: `lib:${rec.id}`, libId: rec.id, source: 'managed',
+    title: rec.title || 'Untitled', artist: rec.artist || '', genre: rec.genre || '',
+    bpm: bpm ? Math.round(bpm * 100) / 100 : null,
+    key: rec.key || '', camelot: toCamelot(rec.key), energy: rec.energy ?? null,
+    duration: rec.duration || 0, rating: 0,
+    grid: grid || (rec.bpm ? { bpm: rec.bpm, firstDownbeat: 0, approx: true } : null),
+    analysed: !!grid && !grid.approx,
+    phrases: rec.phrases || [], cues: rec.cues || [],
+    path: rec.path || '', fileName: rec.file, size: rec.size, addedAt: rec.addedAt,
+  };
+}
+
+/** The tracks in a crate, in the crate's order. No crate: every track. */
+export function tracksInCrate(tracks, crate) {
+  if (!crate) return tracks;
+  const byLib = new Map(tracks.map((t) => [t.libId, t]));
+  return crate.trackIds.map((id) => byLib.get(id)).filter(Boolean);
+}
+
+/** What the library should keep about a track it copies: tags, beat grid, phrases and cues. */
+export function importPayload(t) {
+  const meta = {
+    title: t.title, artist: t.artist, genre: t.genre, key: t.key, bpm: t.bpm, energy: t.energy,
+    duration: t.duration || 0, cues: t.cues || [], phrases: t.phrases || [],
+  };
+  if (t.grid && !t.grid.approx && (t.analysed || t.source === 'rekordbox')) meta.grid = t.grid;
+  for (const k of Object.keys(meta)) if (meta[k] == null || meta[k] === '') delete meta[k];
+  return meta;
+}
+
+/** "Added 18 tracks · 2 were already in My library · 1 couldn't be copied" */
+export function importSummary(r) {
+  if (!r) return '';
+  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  const parts = [];
+  if (r.added || (!r.skipped && !r.failed)) parts.push(`Added ${n(r.added || 0, 'track', 'tracks')}`);
+  if (r.skipped) parts.push(`${n(r.skipped, 'was', 'were')} already in My library`);
+  if (r.failed) parts.push(`${r.failed} couldn't be copied`);
+  if (r.cancelled) parts.push('stopped');
+  return parts.join(' · ');
+}
+
+/** Can this track be copied into My library? (It needs a real file.) */
+export const canImport = (t) => !!t && t.source !== 'managed' && t.source !== 'practice' && (!!t.path || !!t.file);
+
 export const practiceLibrary = () => demoLibrary(24).map((t) => ({ ...t, source: 'practice', analysed: true }));
 
 // ---------- browser: IndexedDB ----------
@@ -211,6 +263,73 @@ export function saveAnalysis(t, buffer, grid, phrases = null) {
 /** Save a track's grid and phrases again, e.g. after the DJ fine-tunes the grid. */
 export function persistAnalysis(t) {
   if (t.source === 'folder') anaSet(cacheKey(t), { grid: t.grid, duration: t.duration, phrases: t.phrases || [] });
+  if (t.source === 'managed') window.cueDesktop?.library?.updateAnalysis(t.libId, { grid: t.grid, duration: t.duration, phrases: t.phrases || [] }).catch(() => {});
+}
+
+// ---------- browser: My library (desktop app only) ----------
+const desktopLib = () => (typeof window !== 'undefined' ? window.cueDesktop?.library : null) || null;
+export const hasManaged = () => !!desktopLib();
+
+/** Turn the main process's { tracks, crates } into Learn tracks that can play. */
+export function fromManaged(view) {
+  const L = desktopLib();
+  const tracks = (view?.tracks || []).map((rec) => {
+    const t = managedTrack(rec);
+    Object.defineProperty(t, 'file', { value: async () => new Blob([await L.read(rec.id)]), enumerable: false });
+    return t;
+  });
+  return { tracks, crates: view?.crates || [] };
+}
+export async function loadManaged() { return fromManaged(await desktopLib().list()); }
+
+/**
+ * Copy Learn tracks (from a folder, rekordbox or a drop) into My library. Files with a real path are copied
+ * by the desktop app straight from disk; the rest are sent as bytes, in batches so memory stays small.
+ * onBatch(done, total) is called before each batch, so progress can be shown across batches.
+ */
+export async function importTracks(tracks, { onBatch = () => {}, shouldStop = () => false } = {}) {
+  const L = desktopLib();
+  const out = { added: 0, skipped: 0, failed: 0, ids: [], errors: [], cancelled: false, total: tracks.length, library: null };
+  let items = [], bytes = 0, done = 0;
+  const flush = async () => {
+    if (!items.length) return;
+    onBatch(done, tracks.length);
+    const r = await L.importItems(items);
+    done += items.length; items = []; bytes = 0;
+    if (!r || r.busy) { out.busy = true; out.cancelled = true; return; }
+    for (const k of ['added', 'skipped', 'failed']) out[k] += r[k];
+    out.ids.push(...r.ids); out.errors.push(...r.errors); out.library = r.library;
+    if (r.cancelled) out.cancelled = true;
+  };
+  for (const t of tracks) {
+    if (out.cancelled || shouldStop()) { out.cancelled = true; break; }
+    if (t.source === 'rekordbox' && !t.detailed) {
+      try { Object.assign(t, await (await fetch(`${HELPER}/track/${encodeURIComponent(t.id)}`)).json(), { detailed: true, source: 'rekordbox' }); } catch { /* keep what the list had */ }
+    }
+    const meta = importPayload(t);
+    if (t.path) { items.push({ path: t.path, meta }); continue; }
+    const file = await t.file();
+    const real = window.cueDesktop.filePath?.(file);
+    if (real) items.push({ path: real, meta });
+    else {
+      items.push({ bytes: new Uint8Array(await file.arrayBuffer()), name: t.fileName || file.name || `${t.title}.mp3`, meta });
+      bytes += file.size;
+      if (bytes > 200e6) await flush();
+    }
+  }
+  if (!out.cancelled) await flush();
+  return out;
+}
+
+/** Copy audio files (dropped from Finder or Explorer) into My library. */
+export async function importFiles(files) {
+  const L = desktopLib(), items = [];
+  for (const f of files) {
+    if (!isAudioFile(f.name)) continue;
+    const real = window.cueDesktop.filePath?.(f);
+    items.push(real ? { path: real } : { bytes: new Uint8Array(await f.arrayBuffer()), name: f.name });
+  }
+  return items.length ? L.importItems(items) : null;
 }
 
 /** The tag BPM is usually right about half/double time; the audio estimate is right about the phase. */

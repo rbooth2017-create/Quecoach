@@ -65,6 +65,7 @@ test('FLX4 keep-alive is the SysEx Mixxx sends, and the monitor speaks plainly',
   assert.equal(describeAction(midiToAction(flx4, ctl, [177, 33, 61])), 'Jog -3, deck B');
   assert.equal(describeAction(midiToAction(flx4, ctl, [177, 15, 0])), 'Bass -30 dB, deck B');
   assert.equal(describeAction(null), 'not used yet');
+  assert.equal(describeAction(midiToAction(flx4, ctl, [145, 88, 127])), 'Beat sync: align this deck\'s phrase to the other deck, deck B');
   assert.equal(hexBytes(Uint8Array.from([144, 11, 127])), '90 0B 7F');
 });
 

@@ -138,7 +138,7 @@ export const GRID_VERSION = 2;
 // ---------- waveform ----------
 
 /**
- * Three-band waveform peaks (low / mid / high), `rate` columns per second, each 0..1 of the loudest
+ * Three-band waveform peaks (low / mid / high), `rate` columns per second (the Learn lane uses 600), each 0..1 of the loudest
  * column. Used for the coloured waveforms, like DJ software.
  */
 export function bandPeaks(x, sr, rate = 150) {

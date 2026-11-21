@@ -55,6 +55,16 @@ export const LESSONS = [
     steps: FIRST_MIX,
   },
   {
+    id: 'timing', tier: 'beginner', title: 'Time your mix', minutes: 6,
+    why: 'Start the next track at the right moment and its intro plays over the old track\'s outro, so the change feels natural. The mix panel counts you in.',
+    steps: [
+      { id: 'plan', title: 'Load a track on each deck', body: 'Deck A playing, a track waiting on B. The mix panel shows when to start B.', action: 'music', done: (s) => !!(s.left.playing && s.right.loaded) },
+      { id: 'ready', title: 'Get B ready', body: 'Match B\'s speed to A, and press Cue B up so it waits at its first beat.', done: (s) => !!s.bReady },
+      { id: 'go', title: 'Start B on the count', body: 'Watch the countdown and press play on B right on GO. Within a beat counts.', key: 'P', done: (s) => s.did.has('onCue') },
+      { id: 'blend', title: 'Blend over the outro', body: 'Bring B in through A\'s outro, swap the bass halfway, and finish with the crossfader on B.', done: (s) => s.did.has('onCue') && s.xfader >= 0.95 },
+    ],
+  },
+  {
     id: 'nudge', tier: 'beginner', title: 'Nudge like a pro', minutes: 3,
     why: 'Even matched tracks drift apart. DJs catch it early with tiny pushes on the wheel.',
     steps: [

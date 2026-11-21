@@ -30,11 +30,13 @@ const ON = {
   hotCues:       ['improver', 'confident', 'pro'],     // hot cues
   perfPads:      ['improver', 'confident', 'pro'],     // 8 performance pads: cues, loops, beat jump, pad FX, sampler
   beatFx:        ['confident', 'pro'],                 // Beat FX section in the mixer
+  mixGuide:      ['starter', 'improver', 'confident'], // when to start the next track: countdown, timeline, part tips
   gridEdit:      ['improver', 'confident', 'pro'],     // fine-tune a beat grid Cue Coach worked out itself
   barCounter:    ['improver', 'confident', 'pro'],     // "Bar 17 · phrase 2"
   phraseMarks:   ['improver', 'confident', 'pro'],     // phrase lines on the waveform
   pitchPercent:  ['confident', 'pro'],                 // speed shown as ±% rather than BPM only
   wideTempo:     ['pro'],                              // ±16 % instead of ±8 %
+  keyLock:       ['improver', 'confident', 'pro'],     // key lock button (Starter: the pitch follows the speed, like a record)
 };
 
 export const FEATURES = Object.keys(ON);

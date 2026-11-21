@@ -2,13 +2,19 @@
 import { DEMO_STRUCTURE, camelotRoot } from './library.js';
 import { barLen, beatLen } from './engine.js';
 import { analyseGrid } from './beatgrid.js';
-import { wrapInLoop } from './deckmath.js';
+import { wrapInLoop, keyLockSemitones, heardPosition } from './deckmath.js';
 
 export const ctx = new (window.AudioContext || window.webkitAudioContext)();
 const master = ctx.createGain();
 master.connect(ctx.destination);
 /** The main mix, after the crossfader (the sampler plays in here too). */
 export const masterBus = master;
+
+// Key lock: Signalsmith Stretch (MIT, WASM in an AudioWorklet), loaded the first time a deck turns key lock on.
+let stretchLoader = null;
+const loadStretch = () => (stretchLoader ??= import('../node_modules/signalsmith-stretch/SignalsmithStretch.mjs').then((m) => m.default));
+/** Stretch block size: smaller is less delay but a little rougher. 60 ms keeps the delay under a 1/16 beat at 128 BPM. */
+export const KEYLOCK_BLOCK_MS = 60;
 
 export class Deck {
   constructor(name) {
@@ -18,15 +24,28 @@ export class Deck {
     this.offset = 0; this.anchor = 0;   // position = offset + (now - anchor) * rate
     this.tempoPct = 0; this.bend = 0;
     this.loop = null; // { start, end, beats } in track seconds, while a loop is on
+    // Key lock: source → input → dry ─────────────→ EQ
+    //                          ↘ stretch → wet ↗      (only one of dry/wet is open)
+    this.keyLock = false; this.stretch = null; this.lag = 0; this.startedAt = 0; this.startOffset = 0;
+    this.input = new GainNode(ctx, { channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers' });
+    this.dry = ctx.createGain(); this.wet = ctx.createGain(); this.wet.gain.value = 0;
     this.low = ctx.createBiquadFilter(); this.low.type = 'lowshelf'; this.low.frequency.value = 200;
     this.vol = ctx.createGain(); this.xf = ctx.createGain();
     this.mid = ctx.createBiquadFilter(); this.mid.type = 'peaking'; this.mid.frequency.value = 1000; this.mid.Q.value = 0.7;
     this.high = ctx.createBiquadFilter(); this.high.type = 'highshelf'; this.high.frequency.value = 3500;
+    this.input.connect(this.dry); this.dry.connect(this.low); this.wet.connect(this.low);
     this.low.connect(this.mid); this.mid.connect(this.high); this.high.connect(this.vol); this.vol.connect(this.xf); this.xf.connect(master);
   }
   get rate() { return (1 + this.tempoPct / 100) * (1 + this.bend); }
   get bpm() { return this.track?.grid ? this.track.grid.bpm * (1 + this.tempoPct / 100) : null; }
-  position() { return this.playing ? wrapInLoop(this.offset + (ctx.currentTime - this.anchor) * this.rate, this.loop) : this.offset; }
+  /** Where the deck is playing from (track seconds). */
+  playhead() { return this.playing ? wrapInLoop(this.offset + (ctx.currentTime - this.anchor) * this.rate, this.loop) : this.offset; }
+  /** Where the listener is: the playhead, minus the key lock's delay. Everything on screen follows this. */
+  position() {
+    if (!this.playing || !this.lag) return this.playhead();
+    const raw = this.offset + (ctx.currentTime - this.anchor) * this.rate;
+    return wrapInLoop(heardPosition({ raw, lag: this.lag, rate: this.rate, since: ctx.currentTime - this.startedAt, startOffset: this.startOffset }), this.loop);
+  }
   load(track, buffer, analysis) {
     this.stop(); this.loop = null; this.track = track; this.buffer = buffer; this.analysis = analysis;
     this.peaks = buffer ? computePeaks(buffer) : null;
@@ -36,14 +55,14 @@ export class Deck {
     if (!this.buffer || this.playing) return;
     ctx.resume();
     const src = ctx.createBufferSource();
-    src.buffer = this.buffer; src.playbackRate.value = this.rate; src.connect(this.low);
+    src.buffer = this.buffer; src.playbackRate.value = this.rate; src.connect(this.input);
     if (this.loop) { src.loop = true; src.loopStart = this.loop.start; src.loopEnd = this.loop.end; }
     src.start(0, Math.max(0, this.offset));
     src.onended = () => { if (this.source === src) { this.playing = false; this.source = null; } };
-    this.source = src; this.anchor = ctx.currentTime; this.playing = true;
+    this.source = src; this.anchor = this.startedAt = ctx.currentTime; this.startOffset = this.offset; this.playing = true;
   }
   stop() {
-    if (this.source) { this.offset = this.position(); const s = this.source; this.source = null; try { s.stop(); } catch { /* already stopped */ } }
+    if (this.source) { this.offset = this.playhead(); const s = this.source; this.source = null; try { s.stop(); } catch { /* already stopped */ } }
     this.playing = false;
   }
   toggle() { this.playing ? this.stop() : this.play(); }
@@ -57,18 +76,47 @@ export class Deck {
     this.reanchor();
     this.loop = loop;
     const src = this.source;
-    if (this.position() < loop.start || this.position() >= loop.end) return this.seek(loop.start);
+    if (this.playhead() < loop.start || this.playhead() >= loop.end) return this.seek(loop.start);
     if (src) { src.loopStart = loop.start; src.loopEnd = loop.end; src.loop = true; }
   }
   /** Leave the loop and play on from where it is. */
   clearLoop() {
     if (!this.loop) return;
-    this.offset = this.position(); this.anchor = ctx.currentTime;
+    this.offset = this.playhead(); this.anchor = ctx.currentTime;
     this.loop = null;
     if (this.source) this.source.loop = false;
   }
-  reanchor() { this.offset = this.position(); this.anchor = ctx.currentTime; if (this.source) this.source.playbackRate.value = this.rate; }
-  setTempo(pct) { this.reanchor(); this.tempoPct = pct; this.reanchor(); }
+  reanchor() { this.offset = this.playhead(); this.anchor = ctx.currentTime; if (this.source) this.source.playbackRate.value = this.rate; }
+  setTempo(pct) { this.reanchor(); this.tempoPct = pct; this.reanchor(); if (this.keyLock && this.stretch) this.stretch.schedule({ semitones: keyLockSemitones(pct) }); }
+  /** Key lock on: changing the tempo keeps the key. Off: the pitch follows the tempo, like a record. */
+  async setKeyLock(on) {
+    this.keyLock = !!on;
+    if (this.keyLock && !this.stretch) {
+      const Stretch = await loadStretch();
+      if (this.stretch) return this.applyKeyLock(); // a second call got there first
+      const node = await Stretch(ctx);
+      await node.configure({ blockMs: KEYLOCK_BLOCK_MS });
+      this.stretchLatency = await node.latency();
+      if (this.stretch || this.disposed) { node.disconnect(); return this.applyKeyLock(); }
+      this.input.connect(node); node.connect(this.wet);
+      this.stretch = node;
+    }
+    this.applyKeyLock();
+  }
+  applyKeyLock() {
+    const on = this.keyLock && !!this.stretch, t = ctx.currentTime;
+    if (on) this.stretch.schedule({ active: true, semitones: keyLockSemitones(this.tempoPct) });
+    // A 20 ms crossfade between the straight and the key-locked sound, so switching doesn't click.
+    for (const [g, v] of [[this.dry, on ? 0 : 1], [this.wet, on ? 1 : 0]]) { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(v, t + 0.02); }
+    if (!on && this.stretch) this.stretch.schedule({ active: false, output: t + 0.05 }); // stop processing once faded out
+    this.lag = on ? this.stretchLatency : 0;
+  }
+  /** Stop and let go of the audio nodes (when a deck is replaced). */
+  dispose() {
+    this.stop(); this.disposed = true;
+    if (this.stretch) { this.stretch.schedule({ active: false }); this.stretch.disconnect(); this.stretch = null; }
+    this.xf.disconnect();
+  }
   setBend(b) { this.reanchor(); this.bend = b; this.reanchor(); }
   setLowEQ(db) { this.low.gain.value = db; }
   /** band: 'low' | 'mid' | 'high', gain in dB (−30 = cut) */

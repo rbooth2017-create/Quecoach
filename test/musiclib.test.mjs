@@ -148,3 +148,58 @@ test('level up is suggested after enough clean mixes', () => {
   assert.equal(suggestLevelUp('starter', 3).id, 'improver');
   assert.equal(suggestLevelUp('pro', 10), null);
 });
+
+// ---------- My library ----------
+import { managedTrack, tracksInCrate, importPayload, canImport } from '../js/musiclib.js';
+import { GRID_VERSION } from '../js/beatgrid.js';
+
+test('managedTrack turns a library record into a playable library track', () => {
+  const rec = { id: 'u1', file: 'A - B.mp3', size: 9, title: 'B', artist: 'A', key: 'Am', bpm: 124, grid: { bpm: 124.004, firstDownbeat: 0.1, estimated: true, v: GRID_VERSION }, phrases: [{ kind: 'intro' }], cues: [{ num: 0, time: 1 }], duration: 200, path: '/m/A - B.mp3' };
+  const t = managedTrack(rec);
+  assert.equal(t.id, 'lib:u1');
+  assert.equal(t.libId, 'u1');
+  assert.equal(t.source, 'managed');
+  assert.equal(t.camelot, '8A');
+  assert.equal(t.bpm, 124);
+  assert.equal(t.analysed, true);
+  assert.deepEqual(t.cues, rec.cues);
+  assert.equal(t.path, '/m/A - B.mp3');
+  // an old estimate is thrown away; the tag BPM stays as an approximate grid
+  const old = managedTrack({ ...rec, grid: { bpm: 120, firstDownbeat: 0, estimated: true, v: 0 } });
+  assert.equal(old.analysed, false);
+  assert.deepEqual(old.grid, { bpm: 124, firstDownbeat: 0, approx: true });
+  // rekordbox grids have no version and are kept
+  assert.equal(managedTrack({ ...rec, grid: { bpm: 126, firstDownbeat: 0.3 } }).analysed, true);
+  assert.equal(managedTrack({ id: 'x', file: 'x.mp3' }).grid, null);
+});
+
+test('tracksInCrate keeps the crate order and skips missing tracks', () => {
+  const tracks = ['a', 'b', 'c'].map((id) => managedTrack({ id, file: `${id}.mp3`, title: id }));
+  assert.equal(tracksInCrate(tracks, null), tracks);
+  assert.deepEqual(tracksInCrate(tracks, { trackIds: ['c', 'gone', 'a'] }).map((t) => t.libId), ['c', 'a']);
+});
+
+test('importPayload keeps tags, analysis and cues', () => {
+  const grid = { bpm: 125, firstDownbeat: 0.2, estimated: true, v: GRID_VERSION };
+  const p = importPayload({ source: 'folder', title: 'T', artist: '', key: 'Am', bpm: 125, grid, analysed: true, phrases: [{ kind: 'drop' }], cues: [], duration: 180, energy: null });
+  assert.deepEqual(p, { title: 'T', key: 'Am', bpm: 125, duration: 180, cues: [], phrases: [{ kind: 'drop' }], grid });
+  assert.equal(importPayload({ source: 'folder', title: 'T', grid: { bpm: 125, approx: true } }).grid, undefined, 'a guess from the tag BPM is not kept');
+  assert.ok(importPayload({ source: 'rekordbox', title: 'T', grid: { bpm: 125, firstDownbeat: 0.1 }, analysed: false }).grid);
+});
+
+test('canImport: only tracks with a real file, not already in My library', () => {
+  assert.equal(canImport({ source: 'practice' }), false);
+  assert.equal(canImport({ source: 'managed', path: '/x.mp3' }), false);
+  assert.equal(canImport({ source: 'rekordbox', path: '/x.mp3' }), true);
+  assert.equal(canImport({ source: 'rekordbox', path: '' }), false);
+  const t = { source: 'folder' }; Object.defineProperty(t, 'file', { value: async () => null });
+  assert.equal(canImport(t), true);
+});
+
+test('importSummary says what happened', async () => {
+  const { importSummary } = await import('../js/musiclib.js');
+  assert.equal(importSummary({ added: 18, skipped: 2, failed: 0 }), 'Added 18 tracks · 2 were already in My library');
+  assert.equal(importSummary({ added: 0, skipped: 1, failed: 0 }), '1 was already in My library');
+  assert.equal(importSummary({ added: 1, skipped: 0, failed: 1, cancelled: true }), "Added 1 track · 1 couldn't be copied · stopped");
+  assert.equal(importSummary({ added: 0, skipped: 0, failed: 0 }), 'Added 0 tracks');
+});

@@ -59,7 +59,7 @@ export function describeAction(a) {
   switch (a.type) {
     case 'play': return `Play / pause${deck}`;
     case 'restart': return `Cue: back to the start${deck}`;
-    case 'sync': return `Sync (there's no sync on purpose)${deck}`;
+    case 'sync': return `Beat sync: align this deck's phrase to the other deck${deck}`;
     case 'jog': return `Jog ${a.ticks > 0 ? '+' : ''}${a.ticks}${deck}`;
     case 'tempo': return `Tempo ${a.pct >= 0 ? '+' : ''}${a.pct.toFixed(2)}%${deck}`;
     case 'eq': return `${{ high: 'Treble', mid: 'Mid', low: 'Bass' }[a.band]} ${a.db > 0 ? '+' : ''}${a.db} dB${deck}`;

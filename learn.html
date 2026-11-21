@@ -100,6 +100,8 @@ html.win32 .titlebar, html.linux .titlebar { padding-right: 146px; }  /* room fo
 .midi-log .empty { color: var(--ink-3); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 .win-only { display: none; }
 html.win32 .win-only, html.linux .win-only { display: inline-flex; }
+.desktop-only { display: none !important; }
+html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { display: grid !important; }
 .settings-list { display: grid; gap: 4px; margin-bottom: 4px; }
 .settings-list button { justify-content: flex-start; gap: 12px; padding: 9px 12px; border-radius: 10px; text-align: left; }
 .settings-list button .ic { color: var(--ink-2); }
@@ -117,12 +119,41 @@ html.win32 .win-only, html.linux .win-only { display: inline-flex; }
 
 /* ---------- workspace: stage + docked lessons pane ---------- */
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
-.stage { container-type: inline-size; overflow: hidden; display: grid; grid-template-rows: auto auto minmax(150px, 1fr); gap: 10px; padding: 10px; min-height: 0; }
+.stage { container-type: inline-size; overflow-x: hidden; overflow-y: auto; display: grid; grid-template-rows: auto auto auto minmax(150px, 1fr); gap: 10px; padding: 10px; min-height: 0; }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; min-width: 0; min-height: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px 0; }
 .panel-title { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 
-.lane-panel { grid-row: 1; } .decks-row { grid-row: 2; } .library { grid-row: 3; }
+.lane-panel { grid-row: 1; } .mixplan { grid-row: 2; } .decks-row { grid-row: 3; } .library { grid-row: 4; }
+/* never squash these (the lane's canvas would spill over the next panel); the library gives way, then the stage scrolls */
+.lane-panel, .mixplan, .decks-row { min-height: min-content; }
+/* next mix: countdown, cue, timeline */
+.mixplan { display: grid; grid-template-columns: 58px minmax(0, 1.1fr) minmax(0, 1.5fr) auto; gap: 12px; align-items: center; padding: 8px 12px; }
+.mp-count { width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; align-content: center; background: var(--card-2); color: var(--ink-2); transition: background .15s, color .15s, transform .1s; }
+.mp-count b { font-size: 18px; line-height: 1; font-variant-numeric: tabular-nums; }
+.mp-count span { font-size: 9px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
+.mixplan[data-phase="soon"] .mp-count { background: var(--close-soft); color: var(--close); }
+.mixplan[data-phase="count"] .mp-count, .mixplan[data-phase="go"] .mp-count { background: var(--ok); color: #fff; }
+.mixplan[data-phase="go"] .mp-count { transform: scale(1.08); }
+.mixplan[data-phase="blend"] .mp-count, .mixplan[data-phase="done"] .mp-count { background: var(--ok-soft); color: var(--ok); }
+.mixplan[data-phase="late"] .mp-count, .mixplan[data-phase="early"] .mp-count { background: var(--warn-soft); color: var(--warn); }
+.mp-text { display: grid; gap: 1px; min-width: 0; }
+.mp-text b { font-size: 14px; }
+.mp-text span { color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mp-text .mp-part i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+.mp-time { width: 100%; height: 42px; display: block; }
+.mp-text .mp-note { font-weight: 600; white-space: normal; }
+.mp-note.early, .mp-note.late { color: var(--warn); }
+.mp-steps { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.mp-steps li { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 4px; border-radius: 99px; background: var(--card-2); color: var(--ink-3); font-size: 12px; font-weight: 600; }
+.mp-steps li b { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; background: var(--card); color: var(--ink-2); }
+.mp-steps li span { font-weight: 500; font-size: 11px; opacity: .8; font-variant-numeric: tabular-nums; }
+.mp-steps li.now { color: var(--ink); }
+.mp-steps li.current { background: var(--ok-soft); color: var(--ok); box-shadow: inset 0 0 0 1.5px var(--ok); }
+.mp-steps li.current b { background: var(--ok); color: #fff; }
+.mp-steps li.done { color: var(--ink-3); }
+.mp-steps li.done b { background: var(--ok); color: #fff; }
+.mp-steps li.missed { background: var(--warn-soft); color: var(--warn); }
 /* beat lane */
 .lane-panel { padding-bottom: 8px; }
 .lane-wrap { position: relative; margin: 6px 10px 0; }
@@ -148,17 +179,8 @@ html.win32 .win-only, html.linux .win-only { display: inline-flex; }
 .role { font-size: 11px; color: var(--ink-3); font-weight: 600; }
 .role.on { color: var(--c); }
 .wave { width: 100%; height: 40px; display: block; border-radius: 6px; background: var(--soft); }
-/* beat and phrase counter: 1 2 3 4 | phrase N: 1 2 3 4 */
+/* under each waveform: loop and section name (beat, bar and phrase are in the mixer) */
 .counter { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-3); font-weight: 650; min-height: 24px; }
-.counter .cells { display: flex; gap: 3px; }
-.counter .cells i { position: relative; overflow: hidden; width: 26px; height: 22px; border-radius: 5px; display: grid; place-items: center; font-style: normal; font-size: 12px; font-weight: 750; background: var(--card-2); color: var(--ink-3); transition: background .05s, color .05s; }
-.counter .beats i.on { background: var(--c); color: #fff; }
-.counter .blocks i { width: 30px; }
-.counter .blocks i.done { background: var(--soft); color: var(--c); }
-.counter .blocks i.on { color: var(--ink); background: var(--soft); }
-.counter .blocks i.on::before { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--p, 0) * 100%); background: var(--c); }
-.counter .ph { color: var(--ink-2); white-space: nowrap; }
-.counter .ph b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .counter .sec { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); white-space: nowrap; }
 .counter .sec i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .counter.before { opacity: .55; }
@@ -194,6 +216,8 @@ html.win32 .win-only, html.linux .win-only { display: inline-flex; }
 .jog-tip { position: absolute; left: 50%; bottom: -18px; transform: translateX(-50%); font-size: 11px; color: var(--ink-3); white-space: nowrap; pointer-events: none; transition: opacity .3s; }
 .jog.used .jog-tip { opacity: 0; }
 .pitch { display: grid; justify-items: center; gap: 4px; }
+.pitch .keylock { font-size: 10.5px; font-weight: 650; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink-2); display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+.pitch .keylock.on { background: var(--c); border-color: var(--c); color: #fff; }
 .pitch .val { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: center; min-height: 15px; }
 input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 99px; background: var(--line-2); margin: 0; }
 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--card); border: 1.5px solid var(--ink-3); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
@@ -219,13 +243,37 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .keybadge.unknown { background: var(--card-2); color: var(--ink-3); }
 
 /* mixer */
-.mixer { display: grid; grid-template-rows: auto 1fr auto; padding: 10px 10px 12px; gap: 8px; }
+.mixer { display: grid; grid-template-rows: auto auto 1fr auto; padding: 10px 10px 12px; gap: 8px; }
+.pcount { display: grid; gap: 4px; padding: 5px 6px; border-radius: 10px; background: var(--card-2); border: 1.5px solid transparent; transition: background .15s, border-color .15s; }
+.pcount.off { background: var(--warn-soft); border-color: var(--warn); }
+.pc-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.pc-col { display: grid; justify-items: center; gap: 3px; font-size: 10px; font-weight: 650; color: var(--ink-3); }
+.pc-col[data-pc="left"] { --c: var(--left); }
+.pc-col[data-pc="right"] { --c: var(--right); }
+.pc-col.before { opacity: .5; }
+.pc-top { display: flex; align-items: center; gap: 4px; }
+.pc-name { font-weight: 750; font-size: 11px; color: var(--c); }
+.pc-beats { display: flex; gap: 2px; }
+.pc-beats i { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; font-style: normal; font-size: 10px; font-weight: 750; background: var(--card); color: var(--ink-3); transition: background .05s, color .05s; }
+.pc-beats i.on { background: var(--c); color: #fff; }
+.pc-line { white-space: nowrap; }
+.pc-line b { font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.pc-foot { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 20px; }
+.pc-status { font-size: 11px; font-weight: 750; color: var(--ink-3); white-space: nowrap; }
+.pcount.off .pc-status { color: var(--warn); }
+.pcount.same .pc-status { color: var(--ok); }
+.pc-align { height: 20px; padding: 0 9px; font-size: 11px; font-weight: 750; border-radius: 6px; background: var(--warn); border-color: var(--warn); color: #fff; }
+.pc-align[hidden] { display: none; }
 .strips { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-height: 0; }
 .strip { display: grid; justify-items: center; align-content: start; gap: 8px; padding: 8px 4px; border-radius: 10px; background: var(--card-2); }
 .strip[data-side="left"] { --c: var(--left); --soft: var(--left-soft); }
 .strip[data-side="right"] { --c: var(--right); --soft: var(--right-soft); }
 .strip-name { font-weight: 750; font-size: 12px; color: var(--c); }
 .fader-row { display: flex; gap: 8px; align-items: flex-end; }
+.mixer .strips { grid-template-rows: minmax(0, 1fr); }
+.mixer .strip { display: flex; flex-direction: column; align-items: center; min-height: 0; }
+.mixer .fader-row { flex: 0 1 118px; min-height: 48px; align-items: stretch; }
+.mixer .meter, .mixer .fader-row .vfader { height: auto; }
 .meter { width: 10px; height: 118px; border-radius: 3px; display: block; }
 .cue { width: 40px; height: 30px; padding: 0; justify-content: center; border-radius: 8px; color: var(--ink-2); }
 .cue.on { background: var(--soft); border-color: var(--c); color: var(--c); }
@@ -247,8 +295,45 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .mixer .label { text-align: center; font-size: 10px; color: var(--ink-3); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
 
 /* library */
-.library { display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
+.library { display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+.library > .lib-body { overflow: hidden; border-radius: 0 0 12px 12px; }
+.library > .lib-head { position: relative; z-index: 6; }
+/* the library sits at the bottom of the window, so its menus open upwards */
+.lib-source .menu { top: auto; bottom: calc(100% + 6px); }
+.lib-body { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.library.with-crates .lib-body { grid-template-columns: 172px minmax(0, 1fr); }
+.library.filedrop { box-shadow: 0 0 0 2px var(--left); }
+.crates { display: none; overflow: auto; padding: 6px; border-right: 1px solid var(--line); background: var(--card-2); align-content: start; gap: 1px; }
+.library.with-crates .crates { display: grid; }
+.crates-title { font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 8px 8px 4px; }
+.crate { display: flex; align-items: center; gap: 7px; min-width: 0; width: 100%; padding: 5px 8px; border: none; border-radius: 7px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 550; text-align: left; cursor: default; }
+.crate .ic { flex: none; color: var(--ink-3); }
+.crate .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crate .count { color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.crate:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.crate.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.1); }
+.crate.on .ic { color: var(--left); }
+.crate.drop { background: color-mix(in srgb, var(--left) 18%, transparent); box-shadow: inset 0 0 0 2px var(--left); color: var(--ink); }
+.crate.new { color: var(--ink-3); margin-top: 4px; }
+.crate .cacts { display: none; gap: 2px; }
+.crate:hover .cacts, .crate:focus-within .cacts { display: flex; }
+.crate:hover .count, .crate:focus-within .count { display: none; }
+.crate .cacts button { padding: 2px 4px; border: none; background: transparent; color: var(--ink-3); border-radius: 5px; }
+.crate .cacts button:hover { background: var(--card); color: var(--ink); }
+.crate-edit { flex: 1; min-width: 0; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--left); background: var(--card); font: inherit; color: var(--ink); }
+.lib-size { display: flex; gap: 2px; }
+.lib-size .icon-btn[aria-pressed="true"] { color: var(--left); }
+.import-menu { right: auto; left: 0; }
+.menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 2px; width: auto; }
+.row-btns { display: flex; gap: 8px; justify-content: center; margin-top: 4px; }
+/* expanded: the library slides up over the decks, stopping just below their title rows */
+.stage.lib-expanded .library { position: relative; z-index: 5; margin-top: calc(-1 * var(--lib-lift, 0px)); box-shadow: 0 -10px 30px rgba(0,0,0,.16); transition: margin-top .18s ease; }
+/* collapsed: just its header, at the bottom of the window */
+.stage.lib-collapsed .library { align-self: end; grid-template-rows: auto; }
+.stage.lib-collapsed .library > :not(.lib-head) { display: none; }
+.stage.lib-collapsed .lib-head { border-bottom: none; }
 .library.flash { animation: flash 1.2s ease-out; }
+.deck.flash { animation: flash 1.2s ease-out; }
 @keyframes flash { 0% { box-shadow: 0 0 0 3px var(--c, var(--left)); } 100% { box-shadow: 0 0 0 3px transparent; } }
 .lib-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .tabs { display: flex; gap: 2px; background: var(--card-2); padding: 3px; border-radius: 8px; }
@@ -269,7 +354,7 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .lib-banner { display: flex; align-items: center; gap: 10px; padding: 6px 12px; font-size: 12px; background: var(--card-2); border-bottom: 1px solid var(--line); }
 .lib-banner:empty { display: none; }
 .table { overflow: auto; }
-.trow { display: grid; grid-template-columns: 40px minmax(0, 2.2fr) minmax(0, 1.2fr) 64px 50px minmax(0, 1.6fr) 96px; gap: 10px; align-items: center; padding: 0 12px; height: 34px; border-bottom: 1px solid var(--line); }
+.trow { display: grid; grid-template-columns: 40px minmax(0, 2.2fr) minmax(0, 1.2fr) 64px 50px minmax(0, 1.6fr) 118px; gap: 10px; align-items: center; padding: 0 12px; height: 34px; border-bottom: 1px solid var(--line); }
 .trow:hover { background: var(--card-2); }
 .trow.head { position: sticky; top: 0; z-index: 1; height: 28px; background: var(--card); color: var(--ink-3); font-size: 11px; font-weight: 650; }
 .trow.head:hover { background: var(--card); }
@@ -295,7 +380,7 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .welcome-card .logo { width: 64px; height: 64px; margin: 0 auto 16px; box-shadow: 0 0 0 10px #1a1e27; }
 .welcome h1 { font-size: 24px; letter-spacing: -.02em; margin: 0 0 6px; }
 .welcome p.lead { color: var(--ink-2); font-size: 14px; margin: 0 auto 24px; max-width: 460px; }
-.choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; text-align: left; }
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; text-align: left; }
 .choice { display: grid; align-content: start; gap: 6px; padding: 16px; border-radius: 12px; }
 .choice:hover { border-color: var(--ink-3); background: var(--card); transform: translateY(-1px); }
 .choice .ic { color: var(--left); margin-bottom: 4px; }
@@ -386,14 +471,16 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 /* smaller windows: let the page scroll instead of squashing */
 @media (max-height: 700px) {
   body { overflow: auto; grid-template-rows: auto auto auto; }
-  .stage { grid-template-rows: auto auto 420px; overflow: visible; }
+  .stage { grid-template-rows: auto auto auto 420px; overflow: visible; }
+  .stage.lib-collapsed { grid-template-rows: auto auto auto auto; }
 }
 /* the stage gets narrower when the lessons pane is open, so respond to its width, not the window's */
 @container (max-width: 900px) {
   .decks-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .mixer { grid-column: 1 / -1; grid-row: 2; }
-  .trow { grid-template-columns: 40px minmax(0, 2fr) 60px 96px; }
+  .trow { grid-template-columns: 40px minmax(0, 2fr) 60px 118px; }
   .trow .wide { display: none; }
+  .library.with-crates .lib-body { grid-template-columns: 140px minmax(0, 1fr); }
 }
 @container (max-width: 1060px) { .trow .why { display: none; } }
 </style>
@@ -424,6 +511,14 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     </div>
   </section>
 
+  <section class="panel mixplan hidden" id="mixPlan" aria-live="polite">
+    <div class="mp-count"><b data-mp-big>–</b><span data-mp-unit></span></div>
+    <div class="mp-text"><b data-mp-title></b><span data-mp-detail></span><span class="mp-note" data-mp-note hidden></span><span class="mp-part" data-mp-part></span></div>
+    <canvas class="mp-time" data-mp-time title="Deck A's parts, where to start B, and how B's intro lines up"></canvas>
+    <button data-a="cue-b" title="Put the next track at its starting beat, ready to play">Cue B up</button>
+    <ol class="mp-steps" data-mp-steps aria-label="Mix steps"></ol>
+  </section>
+
   <section class="decks-row">
     <div class="panel deck" data-side="left" id="deck-left"></div>
     <div class="panel mixer" id="mixer"></div>
@@ -435,9 +530,10 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
       <div class="tabs" id="libTabs"><button data-tab="suggested">Suggested</button><button data-tab="all">All music</button><button data-tab="set">Set</button></div>
       <label class="search"><span id="searchIcon"></span><input id="search" type="search" placeholder="Search title, artist, genre or key" autocomplete="off" spellcheck="false"></label>
       <div class="lib-source" id="source"></div>
+      <div class="lib-size"><button class="icon-btn" id="libExpand" aria-pressed="false"></button><button class="icon-btn" id="libCollapse" aria-pressed="false"></button></div>
     </div>
     <div class="lib-banner" id="libBanner"></div>
-    <div class="table" id="list"></div>
+    <div class="lib-body"><nav class="crates" id="crates" aria-label="My library and crates"></nav><div class="table" id="list"></div></div>
   </section>
 </main>
 <aside class="tutor hidden" id="tutor" aria-label="Lessons"></aside>
@@ -451,6 +547,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <div class="choices">
       <button class="choice" data-source="practice"><span data-icon="sparkle"></span><b>Practice tracks</b><span>Built-in tracks made for learning. Nothing to set up.</span><span class="tag">Best to start</span></button>
       <button class="choice" data-source="folder"><span data-icon="folder"></span><b>My music folder</b><span>MP3, WAV, AIFF or FLAC. We read the BPM and key for you.</span></button>
+      <button class="choice desktop-only" data-source="managed"><span data-icon="library"></span><b>My library</b><span>Copy your music into Cue Coach so it's always there, even with the drive unplugged.</span></button>
       <button class="choice" data-source="rekordbox" id="rbChoice"><span data-icon="disc"></span><b>My rekordbox library</b><span id="rbChoiceNote">Use the tracks, beat grids and keys you already have.</span></button>
     </div>
   </div>
