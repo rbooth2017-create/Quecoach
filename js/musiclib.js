@@ -4,6 +4,7 @@ import { toCamelot, demoLibrary } from './library.js';
 import { scoreCandidate } from './engine.js';
 import { readTags, TAG_BYTES } from './tags.js';
 import { GRID_VERSION } from './beatgrid.js';
+import { energyFeatures, estimateEnergy } from './energy.js';
 
 export const AUDIO_EXT = /\.(mp3|m4a|aac|mp4|wav|aif|aiff|flac|ogg|oga|opus)$/i;
 export const isAudioFile = (name) => AUDIO_EXT.test(name) && !name.startsWith('._');
@@ -38,6 +39,7 @@ export function trackFromFile({ name, relPath, size, lastModified }, tags = {}, 
     grid: analysis?.grid || (tags.bpm ? { bpm: tags.bpm, firstDownbeat: 0, approx: true } : null),
     analysed: !!analysis?.grid,
     phrases: analysis?.phrases || [],
+    energyEst: analysis?.energyEst ?? null,
     cues: [],
   };
 }
@@ -106,7 +108,7 @@ export function managedTrack(rec) {
     duration: rec.duration || 0, rating: 0,
     grid: grid || (rec.bpm ? { bpm: rec.bpm, firstDownbeat: 0, approx: true } : null),
     analysed: !!grid && !grid.approx,
-    phrases: rec.phrases || [], cues: rec.cues || [],
+    phrases: rec.phrases || [], cues: rec.cues || [], energyEst: rec.energyEst ?? null,
     path: rec.path || '', fileName: rec.file, size: rec.size, addedAt: rec.addedAt,
   };
 }
@@ -257,13 +259,16 @@ export function saveAnalysis(t, buffer, grid, phrases = null) {
   const g = reconcileBpm(grid, t.bpm && !t.analysed ? t.bpm : null);
   Object.assign(t, { grid: g, bpm: g.bpm, duration: buffer.duration, analysed: true });
   if (phrases) t.phrases = phrases;
+  if (t.energyEst == null) {
+    try { const f = energyFeatures(buffer.getChannelData(0), buffer.sampleRate, { bpm: g.bpm, phrases: t.phrases }); if (f) t.energyEst = estimateEnergy(f); } catch { /* no estimate */ }
+  }
   persistAnalysis(t);
   return t;
 }
 /** Save a track's grid and phrases again, e.g. after the DJ fine-tunes the grid. */
 export function persistAnalysis(t) {
-  if (t.source === 'folder') anaSet(cacheKey(t), { grid: t.grid, duration: t.duration, phrases: t.phrases || [] });
-  if (t.source === 'managed') window.cueDesktop?.library?.updateAnalysis(t.libId, { grid: t.grid, duration: t.duration, phrases: t.phrases || [] }).catch(() => {});
+  if (t.source === 'folder') anaSet(cacheKey(t), { grid: t.grid, duration: t.duration, phrases: t.phrases || [], energyEst: t.energyEst ?? null });
+  if (t.source === 'managed') window.cueDesktop?.library?.updateAnalysis(t.libId, { grid: t.grid, duration: t.duration, phrases: t.phrases || [], energyEst: t.energyEst ?? null }).catch(() => {});
 }
 
 // ---------- browser: My library (desktop app only) ----------

@@ -107,7 +107,7 @@ function findDuplicate(lib, sha1, size) {
 const addTrack = (lib, rec) => ({ ...lib, tracks: [...lib.tracks, rec] });
 
 /** Save a beat grid, length and phrases worked out by the Learn app. */
-function updateAnalysis(lib, id, { grid, duration, phrases } = {}) {
+function updateAnalysis(lib, id, { grid, duration, phrases, energyEst } = {}) {
   return {
     ...lib,
     tracks: lib.tracks.map((t) => (t.id !== id ? t : {
@@ -115,6 +115,7 @@ function updateAnalysis(lib, id, { grid, duration, phrases } = {}) {
       ...(grid && typeof grid === 'object' ? { grid, bpm: num(grid.bpm) ?? t.bpm } : {}),
       ...(num(duration) ? { duration: Number(duration) } : {}),
       ...(Array.isArray(phrases) ? { phrases } : {}),
+      ...(num(energyEst) ? { energyEst: Math.max(1, Math.min(10, Math.round(Number(energyEst)))) } : {}),
     })),
   };
 }

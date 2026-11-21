@@ -367,7 +367,7 @@ ipcMain.handle('library-cancel-import', (e) => { if (fromLearn(e)) importing?.ab
 ipcMain.handle('library-update-analysis', async (e, id, data) => {
   if (!fromLearn(e)) return;
   const d = plain(data);
-  await store().update((l) => libModel.updateAnalysis(l, String(id), { grid: d.grid, duration: d.duration, phrases: d.phrases }));
+  await store().update((l) => libModel.updateAnalysis(l, String(id), { grid: d.grid, duration: d.duration, phrases: d.phrases, energyEst: d.energyEst }));
 });
 ipcMain.handle('library-crate', async (e, op, args) => {
   if (!fromLearn(e)) return null;

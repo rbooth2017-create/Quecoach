@@ -1,6 +1,7 @@
 // Set planning: an energy curve over the length of a set, and a quick built-in set builder that works
 // with no AI and no internet. The AI builder (coachai.js) uses the same shapes. DOM-free.
 import { friendlyMatch } from './musiclib.js';
+import { energyOf } from './energy.js';
 
 export const VIBES = [
   { id: 'warmup', name: 'Warm-up', blurb: 'Start low, build slowly.', curve: [0.25, 0.55] },
@@ -32,7 +33,7 @@ export function quickSet(library, { minutes = 60, vibe = 'journey', first = null
   const pool = library.filter((t) => t.bpm && !(t.duration > 0 && t.duration < 60));
   if (!pool.length) return [];
   const P = setProfile({ event, audience, vibe });
-  const energy = (t) => t.energy ?? 5;
+  const energy = (t) => energyOf(t) ?? 5;
   const out = [];
   const want0 = P.energy(0);
   let cur = first && pool.find((t) => t.id === first.id) ? first
@@ -62,7 +63,7 @@ export function quickSet(library, { minutes = 60, vibe = 'journey', first = null
 export const setMinutes = (items) => Math.round(items.reduce((m, i) => m + trackMinutes(i.track) * PLAYED_SHARE, 0));
 
 /** Compact track details for the AI: no file paths, no audio. */
-export const slimTrack = (t) => ({ id: t.id, title: t.title, artist: t.artist || '', genre: t.genre || '', bpm: t.bpm ? Math.round(t.bpm * 10) / 10 : null, key: t.camelot || null, energy: t.energy ?? null, minutes: t.duration ? Math.round(t.duration / 6) / 10 : null });
+export const slimTrack = (t) => ({ id: t.id, title: t.title, artist: t.artist || '', genre: t.genre || '', bpm: t.bpm ? Math.round(t.bpm * 10) / 10 : null, key: t.camelot || null, energy: energyOf(t), minutes: t.duration ? Math.round(t.duration / 6) / 10 : null });
 
 // ---------- the set list: add, remove, reorder, vote, refine without AI ----------
 // A saved set is { title, story, ai, items: [{ id, why, tip, vote }], played: [] }. Every function here
@@ -149,7 +150,7 @@ export function refineSet(library, set, { vibe = 'journey', minutes = 60, from =
   if (!set) return { set, swapped: 0, dropped: 0 };
   const byId = new Map(library.map((t) => [t.id, t]));
   const pool = from.filter((t) => t.bpm && !(t.duration > 0 && t.duration < 60));
-  const energy = (t) => t.energy ?? 5;
+  const energy = (t) => energyOf(t) ?? 5;
   const used = new Set(set.items.map((i) => i.id)); // never bring back a 👎 track or repeat one
   const items = [];
   let swapped = 0, dropped = 0, elapsed = 0;

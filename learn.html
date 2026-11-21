@@ -731,6 +731,22 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 .prog-grid span { font-size: 10.5px; color: var(--ink-3); line-height: 1.2; }
 .prog-spark { display: flex; align-items: center; gap: 8px; color: var(--ink-3); }
 .prog > button { justify-self: start; }
+
+/* Set energy chart */
+.sp-chart { margin: 2px 0 4px; }
+.echart { display: block; width: 100%; height: auto; overflow: visible; color: var(--ink-2); }
+.ec-axis { font-size: 9px; fill: var(--ink-3); letter-spacing: .05em; text-transform: uppercase; }
+.ec-target { fill: none; stroke: var(--ink-3); stroke-width: 6; stroke-linecap: round; opacity: .18; }
+.ec-line { fill: none; stroke: var(--left); stroke-width: 2; stroke-linejoin: round; }
+.ec-dot circle { fill: var(--left); stroke: var(--card); stroke-width: 1.5; }
+.ec-dot.unknown circle { fill: var(--card); stroke: var(--ink-3); stroke-dasharray: 2 2; }
+.ec-dot.played { opacity: .4; }
+.ec-dot.next circle { fill: var(--right); }
+.ec-dot.warn circle { stroke: var(--warn); stroke-width: 2.5; }
+.ec-dot.hl circle { stroke: var(--ink); stroke-width: 2.5; }
+.ec-warn { font-size: 10px; font-weight: 800; fill: var(--warn); }
+.ec-label { font-size: 9.5px; font-weight: 650; fill: var(--ink-2); }
+.srow.hl { background: var(--card-2); }
 </style>
 </head>
 <body>

@@ -31,6 +31,8 @@ import { icon } from './icons.js';
 import * as stream from './streaming.js';
 import * as lay from './layout.js';
 import { stopsFor, step as tourStep, shouldAutoStart, progressLabel } from './tour.js';
+import { setArc, energyChartSVG } from './setchart.js';
+import { energyFeatures, estimateEnergy } from './energy.js';
 import { newRecorder, feed as feedMix, addToHistory, progressStats, sparkSVG, CLEAN_SCORE } from './mixreport.js';
 
 const THEMES = [
@@ -352,6 +354,10 @@ async function loadTo(side, track) {
     else throw new Error('this track has no audio file');
     if (!track.grid || track.grid.approx || !track.analysed) { const grid = estimateGrid(buffer); lib.saveAnalysis(track, buffer, grid, track.phrases?.length ? null : phrasesFor(buffer, grid)); }
     else if (!track.phrases?.length && track.grid) { track.phrases = phrasesFor(buffer, track.grid); lib.persistAnalysis(track); }
+    if (track.energy == null && track.energyEst == null) { // analysed before energy estimates existed
+      const f = energyFeatures(buffer.getChannelData(0), buffer.sampleRate, { bpm: track.bpm, phrases: track.phrases });
+      if (f) { track.energyEst = estimateEnergy(f); lib.persistAnalysis(track); renderSetPanel(); }
+    }
     const d = decks[side];
     d.stop();
     d.load(track, buffer, null);
@@ -2048,6 +2054,13 @@ function bind() {
   $('#themeBtn').innerHTML = icon('palette', 18); $('#helpBtn').innerHTML = icon('help', 18); $('#searchIcon').innerHTML = icon('search', 15);
   $$('[data-icon]').forEach((x) => { x.outerHTML = icon(x.dataset.icon, 26); });
   bindHelpMenu(); bindTour(); bindReport();
+  // set chart ⇄ set list: hovering a dot highlights its row, and the other way round
+  $('#tutor').addEventListener('pointerover', (e) => {
+    const id = e.target.closest('[data-eid]')?.dataset.eid ?? e.target.closest('.srow')?.dataset.id ?? null;
+    $$('#tutor .hl').forEach((x) => x.classList.remove('hl'));
+    if (id == null) return;
+    $$('#tutor [data-eid], #tutor .srow').filter((x) => (x.dataset.eid ?? x.dataset.id) === id).forEach((x) => x.classList.add('hl'));
+  });
   $('#settingsBtn').innerHTML = icon('gear', 18); $('#menuBtn').innerHTML = icon('menu', 18);
   $('#settingsBtn').addEventListener('click', openSettings);
   $('#settingsList').addEventListener('click', (e) => { const b = e.target.closest('[data-set]'); if (b) runSetting(b.dataset.set); });
@@ -2409,6 +2422,7 @@ function setPanelHTML() {
       <div class="sp-title">${state.set.ai ? '<span class="ai-badge">AI</span>' : ''}<b>${esc(state.set.title)}</b><span class="grow"></span><button class="ghost" data-a="clear-set" title="Clear the whole set">Clear</button></div>
       ${state.set.story ? `<p>${esc(state.set.story)}</p>` : ''}
       <p class="muted">${items.length} track${items.length === 1 ? '' : 's'} · about ${setMinutes(items)} min${votes.up || votes.down ? ` · ${votes.up} kept · ${votes.down} to swap` : ''}</p>
+      <div class="sp-chart">${energyChartSVG(setArc(items.map((i) => ({ track: i.track, played: played.has(i.track.id), next: i === next })), setEvent().usesVibe ? state.setVibe : null), { vibe: setEvent().usesVibe ? state.setVibe : null })}</div>
       ${next ? `<button class="primary sp-next" data-a="load-next" title="Load the next track in the set on the deck the room isn't hearing">Load next: ${esc(next.track.title)}</button>` : ''}
     </div>
     <ol class="sp-list" aria-label="Set list. Drag rows, or press Alt and an arrow key, to reorder.">` + items.map((i) => {
