@@ -20,7 +20,7 @@ export function parseFileName(name) {
 
 /** A library track from a file in a music folder, its tags, and any cached analysis. */
 export function trackFromFile({ name, relPath, size, lastModified }, tags = {}, analysis = null) {
-  if (analysis && !(analysis.grid?.v >= GRID_VERSION)) analysis = null; // analysed by an older, less accurate method
+  if (analysis && !(analysis.grid?.v >= GRID_VERSION) && !analysis.grid?.adjusted) analysis = null; // analysed by an older, less accurate method (grids the DJ fixed are kept)
   const fromName = parseFileName(name);
   const bpm = analysis?.grid?.bpm || tags.bpm || null;
   return {
@@ -98,7 +98,7 @@ export function keyHue(camelot) {
 /** A Learn library track from a My library record (see desktop/libmodel.cjs). */
 export function managedTrack(rec) {
   let grid = rec.grid || null;
-  if (grid?.estimated && !(grid.v >= GRID_VERSION)) grid = null; // worked out by an older, less accurate method
+  if (grid?.estimated && !(grid.v >= GRID_VERSION) && !grid.adjusted) grid = null; // worked out by an older, less accurate method (grids the DJ fixed are kept)
   const bpm = grid?.bpm || rec.bpm || null;
   return {
     id: `lib:${rec.id}`, libId: rec.id, source: 'managed',

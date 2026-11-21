@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { GRID_VERSION as GV } from '../js/beatgrid.js';
 import assert from 'node:assert/strict';
 import { readTags } from '../js/tags.js';
 import { parseFileName, trackFromFile, searchTracks, friendlyMatch, rankNext, keyHue, reconcileBpm, isAudioFile, practiceLibrary } from '../js/musiclib.js';
@@ -54,11 +55,15 @@ test('tracks from files prefer tags, then cached analysis', () => {
   const t = trackFromFile(meta, { bpm: 124, key: 'Am' });
   assert.equal(t.title, 'B'); assert.equal(t.camelot, '8A'); assert.equal(t.bpm, 124);
   assert.equal(t.grid.approx, true); assert.equal(t.analysed, false);
-  const a = trackFromFile(meta, { bpm: 124 }, { grid: { bpm: 123.98, firstDownbeat: 0.2, v: 2 }, duration: 300, phrases: [{ label: 'Intro', start: 0.2, end: 31.2 }] });
+  const a = trackFromFile(meta, { bpm: 124 }, { grid: { bpm: 123.98, firstDownbeat: 0.2, v: GV }, duration: 300, phrases: [{ label: 'Intro', start: 0.2, end: 31.2 }] });
   assert.equal(a.bpm, 123.98); assert.equal(a.analysed, true); assert.equal(a.duration, 300); assert.equal(a.phrases.length, 1);
   // a grid from the old, drift-prone estimator is ignored so the track gets analysed again
   const old = trackFromFile(meta, { bpm: 124 }, { grid: { bpm: 123.9, firstDownbeat: 0.2 }, duration: 300 });
   assert.equal(old.analysed, false); assert.equal(old.bpm, 124);
+  // an older version is analysed again, unless the DJ fixed the grid by hand
+  assert.equal(trackFromFile(meta, {}, { grid: { bpm: 123.9, firstDownbeat: 0.2, v: 2 }, duration: 300 }).analysed, false);
+  assert.equal(trackFromFile(meta, {}, { grid: { bpm: 123.9, firstDownbeat: 0.2, v: 2, adjusted: true }, duration: 300 }).analysed, true);
+  assert.equal(managedTrack({ id: 'm', file: 'm.mp3', grid: { bpm: 120, firstDownbeat: 1, estimated: true, v: 2, adjusted: true } }).analysed, true);
 });
 
 test('tag BPM fixes half/double time from the audio estimate', () => {

@@ -12,7 +12,7 @@ import { saveSetCopy, deleteSavedSet, openSavedSet } from './setbuilder.js';
 import { VIBES, EVENTS, AUDIENCES, quickSet, setMinutes, setSources, tracksFrom, NEW_SET_TITLE, makeSet, inSet, toggleInSet, addToSet, removeFromSet, moveInSet, voteInSet, mergeRefined, refineSet } from './setbuilder.js';
 import { aiStatus, aiSetKey, aiClearKey, buildSetAI, refineSetAI, suggestAI, describeTrackAI } from './coachai.js';
 import { keyRelation } from './library.js';
-import { bandPeaks, barEnergies, phrasesFromEnergy } from './beatgrid.js';
+import { bandPeaks, barEnergies, phrasesFromEnergy, gridUnsure } from './beatgrid.js';
 
 // Colours that read on every theme: hot cue pads and phrase sections.
 const CUE_COLORS = ['#ef4f5c', '#22b573', '#f0a020', '#8b6cf6'];
@@ -247,7 +247,9 @@ function renderDeck(side) {
       <div class="ppads" data-ppads>${[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `<button class="ppad" data-ppad="${i}"></button>`).join('')}</div>
     </div>` : ''}
     <div class="deckfoot"><span class="role" data-live></span>${keys}<span class="grow"></span>
-      <button class="ghost small ${state.prep[side] ? 'on' : ''}" data-a="prep" aria-pressed="${!!state.prep[side]}" title="Fix the beat grid and set cues for this track">${icon('sliders', 14)} Prepare</button>
+      ${gridUnsure(t.grid) && !state.prep[side]
+        ? `<button class="ghost small check-grid" data-a="prep" aria-pressed="false" title="Cue Coach isn't sure about this track's beat grid (no steady kick drum). Check it before you mix.">${icon('sliders', 14)} Check grid</button>`
+        : `<button class="ghost small ${state.prep[side] ? 'on' : ''}" data-a="prep" aria-pressed="${!!state.prep[side]}" title="Fix the beat grid and set cues for this track">${icon('sliders', 14)} Prepare</button>`}
       ${f.barCounter ? '<span class="barcount" data-bar></span>' : ''}
       <button class="ghost small" data-a="breakdown" title="What's in this track and where to mix it">${icon('list', 14)} Breakdown</button>
       <button class="ghost small" data-a="eject" title="Take this track off the deck">${icon('eject', 14)} Eject</button></div>`;
@@ -2091,6 +2093,7 @@ function renderPrep(side) {
   const hot = [0, 1, 2, 3].map((i) => `<span class="prep-hc"><button data-prep="hc${i}" style="--hc:${CUE_COLORS[i % 4]}" title="Set hot cue ${i + 1} here">${i + 1}</button><small>${cues[i] != null ? fmtTime(cues[i]) : '–'}</small>${cues[i] != null ? `<button class="x" data-prep="hx${i}" aria-label="Clear hot cue ${i + 1}">×</button>` : ''}</span>`).join('');
   el.innerHTML = `
     <div class="prep-head"><b>Prepare this track</b><button class="ghost small" data-prep="done">Done</button></div>
+    ${gridUnsure(g) ? '<p class="prep-note">Cue Coach isn\'t sure about this grid: the drums don\'t line up as clearly as usual. Check step 1 and 2 with the click on.</p>' : ''}
     <div class="prep-step"><span class="n">1</span><div><b>Put the 1 on the first beat</b>
       <small>Pause, then turn the jog wheel (or click the waveform) until you're on the first kick drum. Then press the button.</small>
       <div class="prep-row"><button class="primary" data-prep="one">Set the 1 here</button>
