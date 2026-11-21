@@ -8,7 +8,7 @@ const deck = (o = {}) => ({ loaded: false, playing: false, bpm: null, camelot: n
 const mix = (o = {}) => ({ left: deck(o.left), right: deck(o.right), bpmDiff: null, offsetMs: null, barOffset: null, alignedFor: 0, xfader: 0, keyScore: 0, did: new Set(), ...o, ...{ left: deck(o.left), right: deck(o.right) } });
 
 test('the course runs from beginner to novice with unique ids and real steps', () => {
-  assert.deepEqual(TIERS.map((t) => t.id), ['beginner', 'novice']);
+  assert.deepEqual(TIERS.map((t) => t.id), ['beginner', 'novice', 'improver']);
   assert.ok(LESSONS.length >= 10);
   assert.equal(new Set(LESSONS.map((l) => l.id)).size, LESSONS.length);
   for (const l of LESSONS) {
@@ -17,9 +17,9 @@ test('the course runs from beginner to novice with unique ids and real steps', (
     assert.equal(new Set(l.steps.map((s) => s.id)).size, l.steps.length, `${l.id} step ids`);
     for (const st of l.steps) assert.equal(typeof st.done(mix()), 'boolean', `${l.id}/${st.id} on an empty mix`);
   }
-  // beginner lessons all come before novice ones
-  const firstNovice = LESSONS.findIndex((l) => l.tier === 'novice');
-  assert.ok(LESSONS.slice(firstNovice).every((l) => l.tier === 'novice'));
+  // lessons run tier by tier: beginner, then novice, then improver
+  const order = LESSONS.map((l) => TIERS.findIndex((t) => t.id === l.tier));
+  assert.deepEqual(order, [...order].sort((a, b) => a - b));
 });
 
 test('steps tick in order and stay ticked', () => {
@@ -78,4 +78,15 @@ test('quick set: right length, no repeats, starts where asked', () => {
 test('the AI only gets track details, never file paths', () => {
   const s = slimTrack({ id: 'file:House/a.mp3', title: 'A', artist: 'B', bpm: 124.04, camelot: '8A', energy: 6, duration: 312, relPath: 'House/a.mp3', path: '/Users/me/a.mp3' });
   assert.deepEqual(s, { id: 'file:House/a.mp3', title: 'A', artist: 'B', genre: '', bpm: 124, key: '8A', energy: 6, minutes: 5.2 });
+});
+
+test('improver lessons: hot cues, loops, echo out and the mini set', () => {
+  const run = (id, s) => stepIndex(lessonById(id), advanceLesson(lessonById(id), s));
+  assert.equal(run('hot-cues', mix({ left: { loaded: true, playing: true }, did: new Set(['cueSet', 'cueJump']) })), 3);
+  assert.equal(run('loops', mix({ left: { loaded: true, playing: true }, did: new Set(['loopOn']) })), 2);
+  assert.equal(run('echo-out', mix({ left: { playing: true }, right: { playing: true }, did: new Set(['echoOn']), xfader: 1 })), 3);
+  assert.equal(run('mini-set', mix({ mixCount: 2, bestMix: 60 })), 2);
+  assert.equal(run('mini-set', mix({ mixCount: 2, bestMix: 80 })), 3);
+  assert.equal(run('read-track', mix({ left: { loaded: true, playing: true }, did: new Set(['breakdown', 'jumpPart']) })), 3);
+  assert.equal(lessonById('hot-cues').needs, 'hotCues');
 });

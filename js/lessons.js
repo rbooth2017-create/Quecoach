@@ -6,6 +6,8 @@
 //   bpmDiff, offsetMs, barOffset, alignedFor, xfader, keyScore,
 //   did: Set of things the user has done since the lesson started:
 //        'restart' | 'jog' | 'scrub' | 'phraseStart' | 'checkOk' | 'slowBlend' | 'driftOut'
+//        | 'breakdown' | 'jumpPart' | 'cueSet' | 'cueJump' | 'loopOn' | 'loopOff' | 'echoOn'
+//   mixCount, bestMix: mix reports since the lesson started, and the best score among them
 // }
 // Steps are ticked in order and stay ticked ("latched"), so pausing later doesn't undo a step.
 import { STEPS as FIRST_MIX, ALIGN_MS, HOLD_S, TEMPO_OK } from './lesson.js';
@@ -17,6 +19,7 @@ const locked = (s) => both(s) && matched(s) && s.alignedFor >= HOLD_S;
 export const TIERS = [
   { id: 'beginner', name: 'Beginner', blurb: 'Find your way around and get two tracks playing together.' },
   { id: 'novice', name: 'Novice', blurb: 'Make mixes that sound smooth: phrasing, EQ, keys and your ears.' },
+  { id: 'improver', name: 'Improver', blurb: 'Make mixes your own: hot cues, loops, effects and your first mini set.' },
 ];
 
 export const LESSONS = [
@@ -91,6 +94,15 @@ export const LESSONS = [
     needs: 'barCounter',
   },
   {
+    id: 'read-track', tier: 'novice', title: 'Read a track', minutes: 3,
+    why: 'Every track has a map: intro, build, drop, breakdown, outro. Knowing it tells you when to mix.',
+    steps: [
+      { id: 'load', title: 'Load a track on deck A', body: 'Any track will do.', action: 'music', done: (s) => s.left.loaded },
+      { id: 'open', title: 'Open its breakdown', body: 'Press Breakdown under the deck. The Track tab shows each part of the song in colour.', done: (s) => s.did.has('breakdown') },
+      { id: 'jump', title: 'Jump to a part and listen', body: 'Click a part in the list, like the outro, and play it. Hear how it\'s mostly drums?', done: (s) => s.did.has('jumpPart') && s.left.playing },
+    ],
+  },
+  {
     id: 'bass-swap', tier: 'novice', title: 'The bass swap', minutes: 5,
     why: 'Two basslines at once sound muddy. Swap them over in one move and the mix stays clean.',
     needs: 'bassEQ',
@@ -124,6 +136,45 @@ export const LESSONS = [
     steps: [
       { id: 'lock', title: 'Line up both decks', body: 'Crossfader on A, both playing and lined up.', done: (s) => locked(s) && s.xfader <= 0.1 },
       { id: 'blend', title: 'Cross over over 8 bars or more', body: 'Move the crossfader slowly to B. We time it for you.', done: (s) => s.did.has('slowBlend') },
+    ],
+  },
+  {
+    id: 'hot-cues', tier: 'improver', title: 'Hot cues', minutes: 3,
+    why: 'A hot cue is a bookmark in a track. One tap jumps there, on the beat. DJs mark the drop, the vocal and the outro.',
+    needs: 'hotCues',
+    steps: [
+      { id: 'play', title: 'Play deck A', body: 'Let it play up to a part you like.', key: 'Q', done: (s) => s.left.playing },
+      { id: 'set', title: 'Set a hot cue', body: 'In Cues mode, press an empty pad. It lights up: that spot is saved, snapped to the beat.', done: (s) => s.did.has('cueSet') },
+      { id: 'jump', title: 'Jump back to it', body: 'Let the track play on a little, then press the same pad. You land right on your mark.', done: (s) => s.did.has('cueJump') },
+    ],
+  },
+  {
+    id: 'loops', tier: 'improver', title: 'Loops', minutes: 3,
+    why: 'A loop repeats a few beats so a section lasts as long as you need: a longer intro to mix into, or time to find the next track.',
+    needs: 'perfPads',
+    steps: [
+      { id: 'play', title: 'Play deck A', body: 'An intro or outro works best: it\'s just drums.', key: 'Q', done: (s) => s.left.playing },
+      { id: 'on', title: 'Start a loop', body: 'Switch the pads to Loop and press 4. The next 4 beats repeat until you let go of the loop.', done: (s) => s.did.has('loopOn') },
+      { id: 'off', title: 'Let it go on the "1"', body: 'Press the same pad again to carry on. Try to do it right on a "1" so nobody notices.', done: (s) => s.did.has('loopOff') },
+    ],
+  },
+  {
+    id: 'echo-out', tier: 'improver', title: 'Echo out', minutes: 4,
+    why: 'Echo out is the easiest exit there is: the old track fades into echoes while the new one takes over. Great when two tracks don\'t blend.',
+    needs: 'perfPads',
+    steps: [
+      { id: 'both', title: 'Play both decks', body: 'Deck A in the room, deck B lined up and ready.', done: (s) => s.left.playing && s.right.playing },
+      { id: 'echo', title: 'Hold an echo on deck A', body: 'Switch deck A\'s pads to FX 1 and hold the first pad (Echo).', done: (s) => s.did.has('echoOn') },
+      { id: 'cut', title: 'Cut over to B', body: 'While the echo rings out, move the crossfader to B in one quick move.', done: (s) => s.did.has('echoOn') && s.xfader >= 0.95 },
+    ],
+  },
+  {
+    id: 'mini-set', tier: 'improver', title: 'Your first mini set', minutes: 10,
+    why: 'Three tracks, two mixes, no stopping. This is what playing a set feels like. Each mix gets a report.',
+    steps: [
+      { id: 'one', title: 'Mix from A into B', body: 'Use everything you know. When you finish, a mix report shows how it went.', done: (s) => (s.mixCount || 0) >= 1 },
+      { id: 'two', title: 'Keep going: mix in a third track', body: 'Press Mix another track: B moves to deck A and you pick the next one for B.', done: (s) => (s.mixCount || 0) >= 2 },
+      { id: 'clean', title: 'Get one clean mix', body: 'Score 75 or more on any mix. Check the report\'s tips if you\'re not there yet.', done: (s) => (s.bestMix || 0) >= 75 },
     ],
   },
 ];

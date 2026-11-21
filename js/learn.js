@@ -316,6 +316,7 @@ function mixState(dt) {
     offsetMs: bm && bm.both ? (bm.phase * 60000) / L.bpm : null,
     barOffset: bm && bm.both ? bm.barOffsetBeats : null,
     xfader: state.xfader, alignedFor: 0,
+    mixCount: state.lessonMixes?.length || 0, bestMix: Math.max(0, ...(state.lessonMixes || [])),
     keyScore: L.track && R.track ? keyRelation(L.track.camelot, R.track.camelot).score : 0,
     bReady: (() => { const p = currentPlan(); if (!p || p.to !== 'right' || R.playing) return false; return Math.abs(R.position() - p.bStart) < 0.3 && bm && Math.abs(bm.bpmDiff) <= TEMPO_OK; })(),
     did: state.did,
@@ -944,6 +945,7 @@ function startLesson(id) {
   state.lessonId = lessonById(id).id; store.set('lesson', state.lessonId);
   state.ticked = new Set(); state.did = new Set(); state.skippedAny = false; state.lessonDone = false;
   state.played = { left: 0, right: 0 }; state.alignLocked = false; state.coachKey = null; state.blend = null;
+  state.lessonMixes = [];
   renderTutor();
 }
 
@@ -988,7 +990,7 @@ function renderProgress(L, idx) {
   $('#progress').innerHTML = `<span>${esc(L.title)} · ${idx >= L.steps.length ? 'done' : `step ${idx + 1} of ${L.steps.length}`}</span><div class="dots">${L.steps.map((_, i) => `<span class="${i < idx ? 'done' : i === idx ? 'now' : ''}"></span>`).join('')}</div>`;
 }
 
-const NEEDS = { bassEQ: ['the Bass dial', 'improver'], barCounter: ['the bar counter', 'improver'] };
+const NEEDS = { bassEQ: ['the Bass dial', 'improver'], barCounter: ['the bar counter', 'improver'], hotCues: ['hot cues', 'improver'], perfPads: ['the performance pads', 'improver'] };
 function renderTutor() {
   const el = $('#tutor');
   el.classList.toggle('hidden', !state.paneOpen);
@@ -1074,6 +1076,7 @@ function recordMix(s, dt) {
 }
 function onMixReport(r) {
   state.mixHistory = addToHistory(state.mixHistory, r); store.set('mixHistory', state.mixHistory);
+  (state.lessonMixes ||= []).push(r.score);
   // clean mixes count towards the next level (the first-mix lesson counts its own)
   if (r.score >= CLEAN_SCORE && state.lessonId !== 'first-mix') { state.cleanMixes += 1; store.set('cleanMixes', state.cleanMixes); }
   state.report = { ...r, levelUp: r.score >= CLEAN_SCORE ? suggestLevelUp(state.level, state.cleanMixes) : null, fromTitle: decks[r.from].track?.title, toTitle: decks[r.to].track?.title };
@@ -1214,7 +1217,7 @@ function bindHelpMenu() {
 // ---------- track breakdown and the "How songs are built" guide ----------
 const GUIDE_LESSONS = new Set(['counting', 'phrase', 'phrasing', 'timing']);
 const trackSide = () => (state.trackSide === 'right' && decks.right.buffer) || (!decks.left.buffer && decks.right.buffer) ? 'right' : 'left';
-function openTrackTab(side) { state.trackSide = side; state.guideOpen = false; if (!state.paneOpen) setPane(true); setPaneTab('track'); }
+function openTrackTab(side) { state.did.add('breakdown'); state.trackSide = side; state.guideOpen = false; if (!state.paneOpen) setPane(true); setPaneTab('track'); }
 function openGuide() { state.guideReturn = document.activeElement; state.guideOpen = true; if (!state.paneOpen) setPane(true); else renderTutor(); requestAnimationFrame(() => $('#tutor .guide-pane h2')?.focus()); }
 function closeGuide() { state.guideOpen = false; renderTutor(); const back = state.guideReturn; state.guideReturn = null; if (back?.isConnected) back.focus(); else $('#tutor [data-a="guide"]')?.focus(); }
 
@@ -1294,7 +1297,7 @@ function mixAgain() {
   decks.right = makeDeck('right'); applyKeyLock('right');
   state.xfader = 0; applyXfader();
   if (state.f.upNext) state.tab = 'suggested';
-  startLesson(state.lessonId);
+  if (state.lessonId !== 'mini-set') startLesson(state.lessonId); // the mini set carries on across tracks
   renderDecks(); renderMixer(); renderLibrary();
   toast('The track you mixed in moved to deck A. Pick the next one for deck B.');
 }
@@ -1854,7 +1857,7 @@ function padPress(side, i, down, shift = false, mode = decks[side].padMode) {
   if (!d.buffer) return;
   if (mode === 'fx1' || mode === 'fx2') {
     const [id, beats] = PAD_FX[mode][i];
-    if (down) { d.fx.start(id, beats, 0.85); d._fxPad = i; } else if (d._fxPad === i) { d.fx.stop(id); d._fxPad = null; }
+    if (down) { d.fx.start(id, beats, 0.85); d._fxPad = i; if (id === 'echo' && side === 'left') state.did.add('echoOn'); } else if (d._fxPad === i) { d.fx.stop(id); d._fxPad = null; }
     d._padKey = null; return;
   }
   if (!down) return;
@@ -1884,8 +1887,8 @@ function updatePads(side) {
 function snapToBeat(d, t) { const g = d.track?.grid; if (!g) return t; const b = 60 / g.bpm; return g.firstDownbeat + Math.round((t - g.firstDownbeat) / b) * b; }
 function toggleLoop(side, beats) {
   const d = decks[side]; if (!d.buffer) return;
-  if (d.loop && Math.abs(d.loop.beats - beats) < 1e-6) { d.lastLoop = d.loop; d.clearLoop(); return; }
-  d.setLoop(loopAt(d.track.grid, d.position(), beats)); d.lastLoop = d.loop;
+  if (d.loop && Math.abs(d.loop.beats - beats) < 1e-6) { d.lastLoop = d.loop; d.clearLoop(); state.did.add('loopOff'); return; }
+  d.setLoop(loopAt(d.track.grid, d.position(), beats)); d.lastLoop = d.loop; state.did.add('loopOn');
 }
 function loopIn(side) { const d = decks[side]; if (d.buffer) { d._loopIn = snapToBeat(d, d.position()); toast(`Loop in set on deck ${LETTER[side]}. Press Loop out where it should end.`); } }
 function loopOut(side) {
@@ -1910,6 +1913,7 @@ function applyBfx() {
     if (ch !== 'both' && LETTER[side] !== ch) continue;
     if (!decks[side].buffer) continue;
     decks[side].fx.start(id, beats, depth); state.bfxRunning.push({ side, id });
+    if (id === 'echo' && side === 'left') state.did.add('echoOn');
   }
   state.bfxKey = null;
 }
@@ -1936,7 +1940,8 @@ function hotCue(side, i, clear) {
   else if (cur == null) {
     const g = t.grid, p = d.position();
     own[i] = g ? g.firstDownbeat + Math.round((p - g.firstDownbeat) * g.bpm / 60) * 60 / g.bpm : p; // snap to the nearest beat
-  } else { d.seek(cur); return; }
+  } else { d.seek(cur); state.did.add('cueJump'); return; }
+  if (!clear) state.did.add('cueSet');
   store.set('cues', cueStore); renderDeck(side);
 }
 
@@ -2074,7 +2079,7 @@ function bind() {
     if (b.dataset.a === 'guide-back') return closeGuide();
     if (b.dataset.gjump) return seekDeck('left', +b.dataset.gjump);
     if (b.dataset.tside) { state.trackSide = b.dataset.tside; return renderTutor(); }
-    if (b.dataset.tjump) return seekDeck(trackSide(), +b.dataset.tjump);
+    if (b.dataset.tjump) { state.did.add('jumpPart'); return seekDeck(trackSide(), +b.dataset.tjump); }
     if (state.guideOpen || paneTab() === 'track') return;
     if (paneTab() === 'set') { setPanelClick(e); return; }
     if (b.dataset.a === 'last-report') { state.report = store.get('lastReport', null); renderReport(); return; }
