@@ -698,6 +698,39 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 .tour-foot .grow { flex: 1; }
 .tour-foot .ghost { padding-left: 0; }
 @media (prefers-reduced-motion: reduce) { .tour-ring, .tour-card { transition: none; } }
+
+/* Mix report card and progress */
+.mix-report { position: fixed; right: 16px; bottom: 16px; z-index: 50; width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 80px); overflow: auto; background: var(--card); border: 1px solid var(--line-2); border-radius: 16px; padding: 14px; box-shadow: 0 18px 40px rgba(0,0,0,.25); display: grid; gap: 10px; animation: mr-in .3s ease; }
+@keyframes mr-in { from { transform: translateY(12px); opacity: 0; } }
+.workspace:has(#tutor:not(.hidden)) ~ .mix-report { right: 346px; }
+@media (prefers-reduced-motion: reduce) { .mix-report { animation: none; } }
+.mr-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.mr-score { --c: var(--ok); width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--card-2) 0); }
+.mr-score.close { --c: var(--close); } .mr-score.warn { --c: var(--warn); }
+.mr-score b { width: 42px; height: 42px; border-radius: 50%; background: var(--card); display: grid; place-items: center; font-size: 17px; }
+.mr-title { display: grid; min-width: 0; }
+.mr-title h2 { margin: 0; font-size: 16px; }
+.mr-title .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mr-kicker { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.mr-parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.mr-parts li { display: grid; grid-template-columns: 130px 1fr 26px; gap: 8px; align-items: center; color: var(--ink-2); }
+.mr-parts i { height: 6px; border-radius: 9px; background: var(--card-2); overflow: hidden; }
+.mr-parts s { display: block; height: 100%; border-radius: 9px; background: var(--ok); }
+.mr-parts s.close { background: var(--close); } .mr-parts s.warn { background: var(--warn); }
+.mr-parts b { text-align: right; color: var(--ink); }
+.mr-praise { margin: 0; color: var(--ok); font-weight: 600; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+.mr-tip { padding: 8px 10px; border-radius: 10px; background: var(--close-soft); display: grid; gap: 4px; }
+.mr-tip p { margin: 0; font-size: 12px; }
+.mr-tip button { justify-self: start; padding: 2px 6px; margin-left: -6px; color: var(--ink); font-weight: 600; }
+.mr-note { margin: 0; font-size: 12px; color: var(--ink-2); }
+.mr-up { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 10px; background: var(--ok-soft); font-size: 12px; font-weight: 600; }
+.prog { display: grid; gap: 8px; }
+.prog-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.prog-grid div { display: grid; padding: 8px 6px; border-radius: 10px; background: var(--card-2); text-align: center; }
+.prog-grid b { font-size: 17px; }
+.prog-grid span { font-size: 10.5px; color: var(--ink-3); line-height: 1.2; }
+.prog-spark { display: flex; align-items: center; gap: 8px; color: var(--ink-3); }
+.prog > button { justify-self: start; }
 </style>
 </head>
 <body>
@@ -779,6 +812,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
+<section class="mix-report hidden" id="mixReport" role="status" aria-live="polite" aria-label="Mix report"></section>
 <input type="file" id="dirInput" webkitdirectory multiple class="hidden">
 
 <dialog id="levels">

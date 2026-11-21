@@ -31,6 +31,7 @@ import { icon } from './icons.js';
 import * as stream from './streaming.js';
 import * as lay from './layout.js';
 import { stopsFor, step as tourStep, shouldAutoStart, progressLabel } from './tour.js';
+import { newRecorder, feed as feedMix, addToHistory, progressStats, sparkSVG, CLEAN_SCORE } from './mixreport.js';
 
 const THEMES = [
   { id: 'auto', name: 'Match my computer', bg: '#f6f5f1', bg2: '#14161b', left: '#2f7df6', right: '#ff6b4a' },
@@ -81,6 +82,8 @@ const state = {
   ai: { hasKey: false }, aiPicks: null, aiBusy: false,
   // Beat FX: effect index, beat size index, channel, level, on
   bfx: { i: 0, b: 2, ch: 'both', depth: 0.6, on: false }, bfxRunning: [], bfxKey: null,
+  // mix reports: the recorder watching the current transition, past scores, the report on screen
+  mixRec: newRecorder(), mixHistory: store.get('mixHistory', []), report: null,
 };
 state.f = featuresFor(state.level);
 
@@ -1037,6 +1040,10 @@ function renderTutor() {
         </div>
       </div>
       </section>
+      <section class="tutor-sec" data-panel="progress" data-group="lessons">
+      <div class="fold-head">${fold('progress', 'Your mixes')}</div>
+      <div class="prog">${progressHTML()}</div>
+      </section>
       <section class="tutor-sec" data-panel="course" data-group="lessons">
       <div class="fold-head">${fold('course', 'All lessons')}<span class="grow"></span><span class="small muted">${prog.done}/${prog.total}</span></div>
       <div class="bar" title="${prog.done} of ${prog.total} lessons"><i style="width:${(prog.done / prog.total) * 100}%"></i></div>
@@ -1049,6 +1056,69 @@ function renderTutor() {
     </div>`);
   lay.applyLayout(state.layout, el); markDraggable(el);
 }
+// ---------- mix reports ----------
+/** Bars into the current 16-bar phrase (0..16), or null without a grid. */
+function phrasePos(d) {
+  const g = d.track?.grid; if (!g) return null;
+  const b = (d.position() - g.firstDownbeat) / barLen(g);
+  return ((b % 16) + 16) % 16;
+}
+function recordMix(s, dt) {
+  const side = (k) => { const d = decks[k]; return { gain: d.buffer ? d.xf.gain.value * d.vol.gain.value : 0, playing: !!(d.buffer && d.playing), low: d.eq.low, phrasePos: phrasePos(d) }; };
+  const sample = {
+    left: side('left'), right: side('right'), offsetMs: s.offsetMs, barOffset: s.barOffset, keyScore: s.keyScore,
+    bassTool: mixControls(state.f, ctlState.connected.length > 0).low, bpm: decks.left.bpm || decks.right.bpm || 120,
+  };
+  const r = feedMix(state.mixRec, sample, dt);
+  if (r) onMixReport(r);
+}
+function onMixReport(r) {
+  state.mixHistory = addToHistory(state.mixHistory, r); store.set('mixHistory', state.mixHistory);
+  // clean mixes count towards the next level (the first-mix lesson counts its own)
+  if (r.score >= CLEAN_SCORE && state.lessonId !== 'first-mix') { state.cleanMixes += 1; store.set('cleanMixes', state.cleanMixes); }
+  state.report = { ...r, levelUp: r.score >= CLEAN_SCORE ? suggestLevelUp(state.level, state.cleanMixes) : null, fromTitle: decks[r.from].track?.title, toTitle: decks[r.to].track?.title };
+  store.set('lastReport', state.report);
+  renderReport();
+  if (state.paneOpen && paneTab() === 'lessons' && !state.guideOpen) renderTutor();
+}
+function renderReport() {
+  const el = $('#mixReport'), r = state.report;
+  el.classList.toggle('hidden', !r);
+  if (!r) return;
+  const tone = r.score >= 75 ? 'ok' : r.score >= 55 ? 'close' : 'warn';
+  const lessonName = (id) => LESSONS.find((l) => l.id === id)?.title || 'the lesson';
+  el.innerHTML = `<div class="mr-head"><div class="mr-score ${tone}" style="--p:${r.score}"><b>${r.score}</b></div>
+      <div class="mr-title"><span class="mr-kicker">Mix report</span><h2>${esc(r.grade)}</h2><span class="small muted">${esc(r.fromTitle || LETTER[r.from])} → ${esc(r.toTitle || LETTER[r.to])} · ${r.bars} bars</span></div>
+      <button class="icon-btn" data-mr="close" aria-label="Close the mix report">${icon('x', 16)}</button></div>
+    <ul class="mr-parts">${r.parts.map((p) => `<li><span>${esc(p.name)}</span><i><s class="${p.score >= 75 ? 'ok' : p.score >= 55 ? 'close' : 'warn'}" style="width:${p.score}%"></s></i><b>${p.score}</b></li>`).join('')}</ul>
+    ${r.praise ? `<p class="mr-praise">${icon('check', 14)} ${esc(r.praise)}</p>` : ''}
+    ${r.tips.map((t) => `<div class="mr-tip"><p>${esc(t.text)}</p><button class="ghost small" data-mr="lesson" data-lesson="${t.lesson}">Practise: ${esc(lessonName(t.lesson))}</button></div>`).join('')}
+    ${r.notes.map((n) => `<p class="mr-note">${esc(n)}</p>`).join('')}
+    ${r.levelUp ? `<div class="mr-up"><span>That's ${state.cleanMixes} clean mixes. Ready for ${esc(r.levelUp.name)}?</span><button class="primary" data-mr="levelup" data-level="${r.levelUp.id}">Try ${esc(r.levelUp.name)}</button></div>` : ''}`;
+}
+function bindReport() {
+  $('#mixReport').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-mr]'); if (!b) return;
+    const a = b.dataset.mr;
+    if (a === 'lesson') { startLesson(b.dataset.lesson); if (!state.paneOpen) setPane(true); setPaneTab('lessons'); }
+    if (a === 'levelup') { state.cleanMixes = 0; store.set('cleanMixes', 0); setLevel(b.dataset.level); }
+    state.report = null; renderReport();
+  });
+}
+function progressHTML() {
+  const p = progressStats(state.mixHistory);
+  if (!p.count) return `<p class="small muted">Every time you mix from one deck to the other, Cue Coach scores it and gives you a tip. Your scores show up here.</p>`;
+  const trend = p.trend > 2 ? `<span class="chip ok">up ${p.trend}</span>` : p.trend < -2 ? `<span class="chip warn">down ${-p.trend}</span>` : '';
+  return `<div class="prog-grid">
+      <div><b>${p.count}</b><span>mix${p.count === 1 ? '' : 'es'}</span></div>
+      <div><b>${p.recent}</b><span>recent average</span></div>
+      <div><b>${p.best}</b><span>best</span></div>
+      <div><b>${p.streak}</b><span>day streak</span></div>
+    </div>
+    <div class="prog-spark">${sparkSVG(p.last, { width: 200, height: 34 })}${trend}</div>
+    ${state.report ? '' : `<button class="ghost small" data-a="last-report">Show my last mix report</button>`}`;
+}
+
 // ---------- the first-run tour ----------
 const tour = { stops: [], i: 0, back: null };
 const visibleEl = (sel) => $$(sel).find((x) => x.offsetParent !== null && x.getClientRects().length && !x.closest('.hidden'));
@@ -1567,6 +1637,7 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.2, (now - last) / 1000); last = now;
   const s = mixState(dt);
+  recordMix(s, dt);
   const hint = beatHint(s);
   const hel = $('#hint');
   const checking = performance.now() < state.checkUntil;
@@ -1971,7 +2042,7 @@ function bind() {
   mixerEvents();
   $('#themeBtn').innerHTML = icon('palette', 18); $('#helpBtn').innerHTML = icon('help', 18); $('#searchIcon').innerHTML = icon('search', 15);
   $$('[data-icon]').forEach((x) => { x.outerHTML = icon(x.dataset.icon, 26); });
-  bindHelpMenu(); bindTour();
+  bindHelpMenu(); bindTour(); bindReport();
   $('#settingsBtn').innerHTML = icon('gear', 18); $('#menuBtn').innerHTML = icon('menu', 18);
   $('#settingsBtn').addEventListener('click', openSettings);
   $('#settingsList').addEventListener('click', (e) => { const b = e.target.closest('[data-set]'); if (b) runSetting(b.dataset.set); });
@@ -2006,6 +2077,7 @@ function bind() {
     if (b.dataset.tjump) return seekDeck(trackSide(), +b.dataset.tjump);
     if (state.guideOpen || paneTab() === 'track') return;
     if (paneTab() === 'set') { setPanelClick(e); return; }
+    if (b.dataset.a === 'last-report') { state.report = store.get('lastReport', null); renderReport(); return; }
     if (b.dataset.a === 'restart-lesson') startLesson(state.lessonId);
     else if (b.dataset.a === 'need-level') setLevel(b.dataset.level);
     else if (b.dataset.lesson) startLesson(b.dataset.lesson);
