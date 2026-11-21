@@ -7,6 +7,13 @@
       "runtimeArgs": ["-m", "http.server", "8650", "--bind", "127.0.0.1"],
       "port": 8650,
       "autoPort": false
+    },
+    {
+      "name": "web-2",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8651", "--bind", "127.0.0.1"],
+      "port": 8651,
+      "autoPort": false
     }
   ]
 }

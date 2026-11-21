@@ -161,3 +161,12 @@ test('no notes once every step is done', () => {
   const g = stepState(steps, plan, 150, { bPlaying: true, aPlaying: true, volA: 0, volB: 1, eqA: { low: -30 }, eqB: { low: 0 } }, c, new Set(steps.map((s) => s.id)));
   assert.equal(g.current, null); assert.equal(g.note, null);
 });
+
+test('ahead of the plan, the cue counts down to the next step instead of saying done', () => {
+  const c = ctl('improver'), steps = mixSteps(plan, c);
+  const g = stepState(steps, plan, 135, { bPlaying: true, aPlaying: true, volA: 1, volB: 1, eqA: { low: 0 }, eqB: { low: -30 } }, c, new Set(['ready', 'start']));
+  const cue = mixCue(plan, 135, true, 16, g);
+  assert.notEqual(cue.phase, 'done');
+  assert.match(cue.title, /^Next: Swap the bass on bar 145/);
+  assert.equal(cue.big, '10');
+});

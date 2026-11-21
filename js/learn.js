@@ -250,7 +250,8 @@ function renderMixer() {
   };
   const pcol = (side) => `<div class="pc-col" data-pc="${side}">
       <div class="pc-top"><span class="pc-name">${LETTER[side]}</span><span class="pc-beats">${[1, 2, 3, 4].map((n) => `<i>${n}</i>`).join('')}</span></div>
-      <div class="pc-line">Bar <b data-pcbar>–</b><span>/16</span> · Phr <b data-pcphrase>–</b></div>
+      <div class="pc-blocks" title="The 16 bars of the phrase, in four blocks of 4">${[0, 1, 2, 3].map(() => `<i>${'<s></s>'.repeat(4)}</i>`).join('')}</div>
+      <div class="pc-line">Phrase <b data-pcphrase>–</b></div>
     </div>`;
   $('#mixer').innerHTML = `<div class="label">Mixer</div>
     <div class="pcount" data-pcount title="Where each deck is: beat in the bar, bar in the 16-bar phrase, and which phrase">
@@ -1123,7 +1124,8 @@ function updateMixCounter() {
     col.dataset.key = key;
     col.classList.toggle('before', !c);
     $$('.pc-beats i', col).forEach((x, i) => x.classList.toggle('on', !!c && i + 1 === c.beat));
-    $('[data-pcbar]', col).textContent = c ? c.barInPhrase : '–';
+    $$('.pc-blocks i', col).forEach((x, i) => x.classList.toggle('on', !!c && i + 1 === c.block));
+    $$('.pc-blocks s', col).forEach((x, i) => x.classList.toggle('on', !!c && i < c.barInPhrase));
     $('[data-pcphrase]', col).textContent = c ? c.phrase : '–';
   }
   const mover = alignSide(), ref = mover === 'left' ? 'right' : 'left';

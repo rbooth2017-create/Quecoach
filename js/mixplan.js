@@ -199,6 +199,9 @@ export function mixCue(plan, barA, bPlaying, phraseBars = 16, guide = null) {
   const left = plan.startBar - barA; // bars until the mix point
   if (bPlaying && guide && left <= 0.5) {
     const { current: cur, next, toNext, toDeadline, items, note } = guide;
+    if (!cur && next) { // ahead of the plan: count down to the next step instead of calling it done
+      return { phase: note?.tone === 'early' ? 'early' : 'blend', title: `Next: ${next.title}`, detail: next.detail, nextText: `In ${plural(toNext, 'bar')}.`, step: '', big: String(toNext), unit: toNext === 1 ? 'bar' : 'bars' };
+    }
     if (!cur) return { phase: 'done', title: 'Mix done', detail: 'B is the track now. Stop A and load the next one.', big: '✓', unit: '', nextText: '' };
     const n = items.filter((it) => it.status !== 'missed').length, i = items.filter((it) => it.status !== 'missed').indexOf(cur) + 1;
     const nextText = next ? `Next: ${next.short.toLowerCase()} in ${plural(toNext, 'bar')}.` : '';

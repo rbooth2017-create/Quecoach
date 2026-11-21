@@ -119,7 +119,10 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 
 /* ---------- workspace: stage + docked lessons pane ---------- */
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
-.stage { container-type: inline-size; overflow-x: hidden; overflow-y: auto; display: grid; grid-template-rows: auto auto auto minmax(150px, 1fr); gap: 10px; padding: 10px; min-height: 0; }
+.stage { container-type: inline-size; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px; min-height: 0; }
+/* a column: lane, plan and decks keep their full height (never squashed into each other); the library takes what's left, at least 150px, and the stage scrolls if that doesn't fit */
+.stage > * { flex: none; }
+.stage > .library { flex: 1 0 150px; }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; min-width: 0; min-height: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px 0; }
 .panel-title { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
@@ -166,7 +169,7 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 
 /* decks row */
 .decks-row { display: grid; grid-template-columns: minmax(0, 1fr) 236px minmax(0, 1fr); gap: 10px; }
-.deck { display: grid; grid-template-rows: auto auto auto 1fr auto auto; gap: 10px; padding: 12px; position: relative; }
+.deck { display: grid; grid-template-rows: auto auto auto 1fr auto auto; gap: 10px; padding: 12px; position: relative; min-height: min-content; }  /* never squash a deck: its jog and pads would overlap */
 .deck[data-side="left"] { --c: var(--left); --soft: var(--left-soft); }
 .deck[data-side="right"] { --c: var(--right); --soft: var(--right-soft); }
 .deck-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
@@ -204,7 +207,7 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 .bfx-row.seg button { flex: 1; justify-content: center; font-weight: 700; }
 .bfx-row.seg button.on, .bfx-on.on { background: var(--ink); color: var(--card); border-color: var(--ink); }
 .bfx-on { font-weight: 700; }
-.deckbody { display: grid; grid-template-columns: 56px minmax(0, 1fr) 56px; gap: 10px; align-items: center; min-height: 0; }
+.deckbody { display: grid; grid-template-columns: 56px minmax(0, 1fr) 56px; gap: 10px; align-items: center; }  /* no min-height: 0, so the row stays as tall as the jog and the pitch column */
 .transport { display: grid; gap: 10px; justify-items: center; }
 .play { width: 52px; height: 52px; padding: 0; border-radius: 50%; justify-content: center; background: var(--c); border-color: transparent; color: #fff; box-shadow: 0 2px 8px color-mix(in srgb, var(--c) 35%, transparent); }
 .play:hover { background: var(--c); filter: brightness(1.08); }
@@ -215,7 +218,9 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 .jog canvas { width: 100%; height: 100%; display: block; }
 .jog-tip { position: absolute; left: 50%; bottom: -18px; transform: translateX(-50%); font-size: 11px; color: var(--ink-3); white-space: nowrap; pointer-events: none; transition: opacity .3s; }
 .jog.used .jog-tip { opacity: 0; }
+.jog:has(.jog-tip) { margin-bottom: 18px; }  /* room for the tip, so it never sits on the pads */
 .pitch { display: grid; justify-items: center; gap: 4px; }
+.pitch .vfader { height: 96px; }  /* the pitch column sets the deck's height: keep it close to the jog's */
 .pitch .keylock { font-size: 10.5px; font-weight: 650; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink-2); display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
 .pitch .keylock.on { background: var(--c); border-color: var(--c); color: #fff; }
 .pitch .val { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: center; min-height: 15px; }
@@ -256,6 +261,12 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .pc-beats { display: flex; gap: 2px; }
 .pc-beats i { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; font-style: normal; font-size: 10px; font-weight: 750; background: var(--card); color: var(--ink-3); transition: background .05s, color .05s; }
 .pc-beats i.on { background: var(--c); color: #fff; }
+/* the 16 bars of the phrase as four blocks of 4 pips */
+.pc-blocks { display: flex; gap: 2px; }
+.pc-blocks i { width: 18px; height: 14px; border-radius: 4px; display: flex; align-items: center; gap: 1px; padding: 0 2px; background: var(--card); }
+.pc-blocks s { flex: 1; height: 7px; border-radius: 1px; background: var(--line-2); transition: background .05s; }
+.pc-blocks s.on { background: var(--c); }
+.pc-blocks i.on { box-shadow: inset 0 0 0 1.5px var(--c); }
 .pc-line { white-space: nowrap; }
 .pc-line b { font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
 .pc-foot { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 20px; }
@@ -329,7 +340,9 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 /* expanded: the library slides up over the decks, stopping just below their title rows */
 .stage.lib-expanded .library { position: relative; z-index: 5; margin-top: calc(-1 * var(--lib-lift, 0px)); box-shadow: 0 -10px 30px rgba(0,0,0,.16); transition: margin-top .18s ease; }
 /* collapsed: just its header, at the bottom of the window */
-.stage.lib-collapsed .library { align-self: end; grid-template-rows: auto; }
+/* the decks take the room the library gave up; the header stays in view at the bottom */
+.stage.lib-collapsed > .decks-row { flex: 1 0 auto; }
+.stage.lib-collapsed > .library { flex: none; grid-template-rows: auto; position: sticky; bottom: 0; z-index: 6; box-shadow: 0 -6px 16px rgba(0,0,0,.12); }
 .stage.lib-collapsed .library > :not(.lib-head) { display: none; }
 .stage.lib-collapsed .lib-head { border-bottom: none; }
 .library.flash { animation: flash 1.2s ease-out; }
@@ -471,8 +484,9 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 /* smaller windows: let the page scroll instead of squashing */
 @media (max-height: 700px) {
   body { overflow: auto; grid-template-rows: auto auto auto; }
-  .stage { grid-template-rows: auto auto auto 420px; overflow: visible; }
-  .stage.lib-collapsed { grid-template-rows: auto auto auto auto; }
+  .stage { overflow: visible; }
+  .stage > .library { flex: 0 0 420px; }
+  .stage.lib-collapsed > .library { flex: none; }
 }
 /* the stage gets narrower when the lessons pane is open, so respond to its width, not the window's */
 @container (max-width: 900px) {
