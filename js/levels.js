@@ -37,7 +37,8 @@ const ON = {
   phraseMarks:   ['improver', 'confident', 'pro'],     // phrase lines on the waveform
   pitchPercent:  ['confident', 'pro'],                 // speed shown as ±% rather than BPM only
   wideTempo:     ['pro'],                              // ±16 % instead of ±8 %
-  keyLock:       ['improver', 'confident', 'pro'],     // key lock button (Starter: the pitch follows the speed, like a record)
+  keyLock:       ['improver', 'confident', 'pro'],
+  quantise:      ['improver', 'confident', 'pro'],     // hot cues and play wait for the next beat (Starter learns timing by hand)     // key lock button (Starter: the pitch follows the speed, like a record)
 };
 
 export const FEATURES = Object.keys(ON);

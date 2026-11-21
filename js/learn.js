@@ -283,6 +283,7 @@ function renderMixer() {
     </div>
     <div class="strips">${strip('left')}${strip('right')}</div>
     ${hasPhones() ? `<div class="phones" title="Headphones: left is only what you're cueing (Listen), right is what the room hears">${dialHTML({ id: 'hp:mix', label: 'Phones mix', value: hp.mix, min: 0, max: 1, def: 0 })}<span class="small muted">Cue ↔ Room</span></div>` : ''}
+    ${f.quantise ? `<button class="q-btn ${quantiseOn() ? 'on' : ''}" data-quant aria-pressed="${quantiseOn()}" title="Quantise: hot cues, beat jumps and play wait for the next beat, so they land in time">Quantise</button>` : ''}
     <div class="xf"><span style="color:var(--left)">A</span><input type="range" id="xfader" min="0" max="1" step="0.005" value="${state.xfader}" aria-label="Crossfader" title="Crossfader ([ and ])"><span style="color:var(--right)">B</span></div>
     ${f.beatFx ? `<div class="bfx">
       <div class="label">Beat FX</div>
@@ -1775,11 +1776,25 @@ function stepTempo(side, delta) {
   d.setTempo(Math.max(-r, Math.min(r, Math.round((d.tempoPct + delta) * 100) / 100)));
 }
 function nudge(side, dir) { const d = decks[side]; if (d.buffer) d.setBend(dir * 0.04); }
+// ---------- quantise ----------
+const quantiseOn = () => !!state.f.quantise && store.get('quantise', true);
+/** When a jump or start on this deck should happen: the other deck's next beat if it's playing, else this deck's own. */
+function quantWhen(side) {
+  if (!quantiseOn()) return 0;
+  const other = decks[side === 'left' ? 'right' : 'left'], own = decks[side];
+  const wait = (other.playing && other.toNextBeat()) ?? (own.playing ? own.toNextBeat() : null);
+  return wait == null || wait < 0.004 ? 0 : ctx.currentTime + wait;
+}
+function toggleQuantise() {
+  store.set('quantise', !quantiseOn()); renderMixer();
+  toast(quantiseOn() ? 'Quantise on: hot cues, jumps and play wait for the next beat.' : 'Quantise off: everything happens the moment you press it.');
+}
+
 function togglePlay(side) {
   const d = decks[side]; if (!d.buffer) return focusLibrary(side);
   ctx.resume();
   const starting = !d.playing;
-  d.toggle();
+  if (starting) d.play(quantWhen(side)); else d.stop();
   // Started the next track right on the planned mix point (within a beat)?
   const plan = currentPlan();
   if (starting && plan && side === plan.to) {
@@ -1952,7 +1967,7 @@ function padPress(side, i, down, shift = false, mode = decks[side].padMode) {
   if (!down) return;
   if (mode === 'hotcue') return hotCue(side, i, shift);
   if (mode === 'loop') return toggleLoop(side, LOOP_SIZES[i]);
-  if (mode === 'jump') return d.seek(jumpBy(d.track.grid, d.position(), JUMP_SIZES[i]));
+  if (mode === 'jump') return d.jumpAt(jumpBy(d.track.grid, d.position(), JUMP_SIZES[i]), quantWhen(side));
 }
 /** Pad labels and lights for the deck's current mode (only redrawn when something changes). */
 function updatePads(side) {
@@ -2029,7 +2044,7 @@ function hotCue(side, i, clear) {
   else if (cur == null) {
     const g = t.grid, p = d.position();
     own[i] = g ? g.firstDownbeat + Math.round((p - g.firstDownbeat) * g.bpm / 60) * 60 / g.bpm : p; // snap to the nearest beat
-  } else { d.seek(cur); state.did.add('cueJump'); return; }
+  } else { d.jumpAt(cur, quantWhen(side)); state.did.add('cueJump'); return; }
   if (!clear) state.did.add('cueSet');
   store.set('cues', cueStore); renderDeck(side);
 }
@@ -2110,6 +2125,7 @@ function mixerEvents() {
     const [side, band] = id.split(':'); setEQ(side, band, v, false);
   });
   m.addEventListener('click', (e) => {
+    if (e.target.closest('[data-quant]')) return toggleQuantise();
     const b = e.target.closest('[data-bfx]'); const c = e.target.closest('[data-bfxch]');
     if (c) { state.bfx.ch = c.dataset.bfxch; applyBfx(); }
     if (!b) return;

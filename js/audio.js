@@ -120,11 +120,11 @@ export class Deck {
   get rate() { return (1 + this.tempoPct / 100) * (1 + this.bend); }
   get bpm() { return this.track?.grid ? this.track.grid.bpm * (1 + this.tempoPct / 100) : null; }
   /** Where the deck is playing from (track seconds). */
-  playhead() { return this.playing ? wrapInLoop(this.offset + (ctx.currentTime - this.anchor) * this.rate, this.loop) : this.offset; }
+  playhead() { return this.playing ? wrapInLoop(this.offset + Math.max(0, ctx.currentTime - this.anchor) * this.rate, this.loop) : this.offset; }
   /** Where the listener is: the playhead, minus the key lock's delay. Everything on screen follows this. */
   position() {
     if (!this.playing || !this.lag) return this.playhead();
-    const raw = this.offset + (ctx.currentTime - this.anchor) * this.rate;
+    const raw = this.offset + Math.max(0, ctx.currentTime - this.anchor) * this.rate;
     return wrapInLoop(heardPosition({ raw, lag: this.lag, rate: this.rate, since: ctx.currentTime - this.startedAt, startOffset: this.startOffset }), this.loop);
   }
   load(track, buffer, analysis) {
@@ -132,15 +132,26 @@ export class Deck {
     this.peaks = buffer ? computePeaks(buffer) : null;
     this.offset = track.grid?.firstDownbeat || 0;
   }
-  play() {
+  /** Play from the current position, now or at `when` (audio clock seconds, for quantise). */
+  play(when = 0) {
     if (!this.buffer || this.playing) return;
     ctx.resume();
+    const at = Math.max(ctx.currentTime, when || 0);
     const src = ctx.createBufferSource();
     src.buffer = this.buffer; src.playbackRate.value = this.rate; src.connect(this.input);
     if (this.loop) { src.loop = true; src.loopStart = this.loop.start; src.loopEnd = this.loop.end; }
-    src.start(0, Math.max(0, this.offset));
+    src.start(at, Math.max(0, this.offset));
     src.onended = () => { if (this.source === src) { this.playing = false; this.source = null; } };
-    this.source = src; this.anchor = this.startedAt = ctx.currentTime; this.startOffset = this.offset; this.playing = true;
+    this.source = src; this.anchor = this.startedAt = at; this.startOffset = this.offset; this.playing = true;
+  }
+  /** Jump to `t`, at `when` on the audio clock: the track plays on until then (quantise). */
+  jumpAt(t, when) {
+    if (!this.playing || !(when > ctx.currentTime + 0.002)) return this.seek(t);
+    const old = this.source; this.source = null;
+    try { old.stop(when); } catch { /* already stopped */ }
+    this.playing = false; this.offset = Math.max(0, t);
+    if (this.loop && (this.offset < this.loop.start || this.offset >= this.loop.end)) this.loop = null;
+    this.play(when);
   }
   stop() {
     if (this.source) { this.offset = this.playhead(); const s = this.source; this.source = null; try { s.stop(); } catch { /* already stopped */ } }
@@ -204,6 +215,11 @@ export class Deck {
   setEQ(band, db) { this[band].gain.value = db; }
   setVolume(v) { this.vol.gain.value = v; }
   /** Position inside the current beat / bar, 0..1 */
+  /** Seconds until this deck's next beat (null without a grid or when stopped). */
+  toNextBeat() {
+    const ph = this.beatPhase(); if (ph == null || !this.playing) return null;
+    return ((1 - ph) % 1) * (60 / this.bpm) / (1 + this.bend);
+  }
   beatPhase() { const g = this.track?.grid; if (!g) return null; const x = (this.position() - g.firstDownbeat) / beatLen(g); return x - Math.floor(x); }
   barPhase() { const g = this.track?.grid; if (!g) return null; const x = (this.position() - g.firstDownbeat) / barLen(g); return x - Math.floor(x); }
 }
