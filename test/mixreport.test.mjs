@@ -104,3 +104,19 @@ test('history keeps the last 100', () => {
   assert.equal(h.length, 100);
   assert.equal(h[0].at, 20);
 });
+
+test('per-skill progress: weakest skill first, with a lesson to practise', async () => {
+  const { skillStats, levelAdvice } = await import('../js/mixreport.js');
+  let h = [];
+  for (let i = 0; i < 6; i++) h = addToHistory(h, { score: 60, bars: 16, parts: [{ id: 'beats', score: 90 }, { id: 'bass', score: 30 + i * 5 }] }, i);
+  const s = skillStats(h);
+  assert.deepEqual(s.map((x) => x.id), ['bass', 'beats']);
+  assert.equal(s[0].lesson, 'bass-swap');
+  assert.equal(s[1].avg, 90);
+  assert.deepEqual(skillStats([{ score: 50 }]), [], 'old entries without parts are skipped');
+  const low = Array.from({ length: 5 }, () => ({ score: 30 }));
+  assert.deepEqual(levelAdvice(low, 'confident'), { dir: 'down', to: 'improver' });
+  assert.equal(levelAdvice(low, 'starter'), null);
+  assert.equal(levelAdvice(low.slice(0, 4), 'pro'), null);
+  assert.equal(levelAdvice(Array.from({ length: 5 }, () => ({ score: 70 })), 'pro'), null);
+});

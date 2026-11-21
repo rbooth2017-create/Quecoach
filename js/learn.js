@@ -8,6 +8,7 @@ import * as lib from './musiclib.js';
 import { readTags, TAG_BYTES } from './tags.js';
 import { beatHint, updateAligned, fill, HOLD_S, ALIGN_MS, TEMPO_OK } from './lesson.js';
 import { LESSONS, TIERS, lessonById, advanceLesson, stepIndex, nextLesson, courseProgress } from './lessons.js';
+import { saveSetCopy, deleteSavedSet, openSavedSet } from './setbuilder.js';
 import { VIBES, EVENTS, AUDIENCES, quickSet, setMinutes, setSources, tracksFrom, NEW_SET_TITLE, makeSet, inSet, toggleInSet, addToSet, removeFromSet, moveInSet, voteInSet, mergeRefined, refineSet } from './setbuilder.js';
 import { aiStatus, aiSetKey, aiClearKey, buildSetAI, refineSetAI, suggestAI, describeTrackAI } from './coachai.js';
 import { keyRelation } from './library.js';
@@ -35,7 +36,7 @@ import * as lay from './layout.js';
 import { stopsFor, step as tourStep, shouldAutoStart, progressLabel } from './tour.js';
 import { setArc, energyChartSVG } from './setchart.js';
 import { energyFeatures, estimateEnergy } from './energy.js';
-import { newRecorder, feed as feedMix, addToHistory, progressStats, sparkSVG, CLEAN_SCORE } from './mixreport.js';
+import { newRecorder, feed as feedMix, addToHistory, progressStats, sparkSVG, CLEAN_SCORE, skillStats, levelAdvice } from './mixreport.js';
 
 const THEMES = [
   { id: 'auto', name: 'Match my computer', bg: '#f6f5f1', bg2: '#14161b', left: '#2f7df6', right: '#ff6b4a' },
@@ -60,7 +61,7 @@ const store = {
 function loadSavedSet() {
   const s = store.get('set', null);
   if (!s || !Array.isArray(s.items) || !s.items.length) return null;
-  return { title: s.title || NEW_SET_TITLE, story: s.story || '', ai: !!s.ai, items: s.items.filter((i) => i?.id).map((i) => ({ id: i.id, why: i.why || '', tip: i.tip || '', vote: i.vote > 0 ? 1 : i.vote < 0 ? -1 : 0 })), played: Array.isArray(s.played) ? s.played : [] };
+  return { title: s.title || NEW_SET_TITLE, story: s.story || '', ai: !!s.ai, ...(s.savedId ? { savedId: s.savedId } : {}), items: s.items.filter((i) => i?.id).map((i) => ({ id: i.id, why: i.why || '', tip: i.tip || '', vote: i.vote > 0 ? 1 : i.vote < 0 ? -1 : 0 })), played: Array.isArray(s.played) ? s.played : [] };
 }
 const SIDES = ['left', 'right'];
 const FINE = 0.05; // % per tap: about 0.06 BPM, small enough to land inside the lesson's ±0.1 BPM
@@ -88,6 +89,7 @@ const state = {
   bfx: { i: 0, b: 2, ch: 'both', depth: 0.6, on: false }, bfxRunning: [], bfxKey: null,
   // mix reports: the recorder watching the current transition, past scores, the report on screen
   mixRec: newRecorder(), mixHistory: store.get('mixHistory', []), report: null,
+  savedSets: store.get('savedSets', []),
 };
 state.f = featuresFor(state.level);
 
@@ -1154,6 +1156,15 @@ function bindReport() {
     state.report = null; renderReport();
   });
 }
+function skillsHTML() {
+  const sk = skillStats(state.mixHistory); if (!sk.length) return '';
+  const tone = (v) => (v >= 75 ? 'ok' : v >= 55 ? 'close' : 'warn');
+  const weak = sk[0].avg < 75 ? sk[0] : null;
+  const down = levelAdvice(state.mixHistory, state.level, LEVELS.map((l) => l.id));
+  return `<ul class="mr-parts skills" aria-label="Your skills, from your last 10 mixes">${sk.map((x) => `<li><span>${esc(x.name)}</span><i><s class="${tone(x.avg)}" style="width:${x.avg}%"></s></i><b>${x.avg}</b></li>`).join('')}</ul>
+    ${weak ? `<div class="mr-tip"><p>Work on: <b>${esc(weak.name.toLowerCase())}</b>. It's your lowest score lately.</p><button class="ghost small" data-lesson="${weak.lesson}">Practise: ${esc(LESSONS.find((l) => l.id === weak.lesson)?.title || 'lesson')}</button></div>` : ''}
+    ${down ? `<div class="notice">Mixes feel tough at the moment? ${esc(LEVELS.find((l) => l.id === down.to).name)} brings back more help. No shame in it: pros practise the basics too.<button data-a="need-level" data-level="${down.to}">Switch to ${esc(LEVELS.find((l) => l.id === down.to).name)}</button></div>` : ''}`;
+}
 function progressHTML() {
   const p = progressStats(state.mixHistory);
   if (!p.count) return `<p class="small muted">Every time you mix from one deck to the other, Cue Coach scores it and gives you a tip. Your scores show up here.</p>`;
@@ -1165,6 +1176,7 @@ function progressHTML() {
       <div><b>${p.streak}</b><span>day streak</span></div>
     </div>
     <div class="prog-spark">${sparkSVG(p.last, { width: 200, height: 34 })}${trend}</div>
+    ${skillsHTML()}
     ${state.report ? '' : `<button class="ghost small" data-a="last-report">Show my last mix report</button>`}`;
 }
 
@@ -2492,11 +2504,11 @@ function setPanelHTML() {
     ${decks.left.track && !has ? `<span class="small muted">Generate starts from deck A: ${esc(decks.left.track.title)}</span>` : ''}
   </section>`;
   if (!has) {
-    return form + `<section class="sp-sec" data-panel="setlist" data-group="set"><div class="fold-head">${fold('setlist', 'Set list')}</div><div class="empty sp-empty">${icon('list', 30)}<b>Plan a set</b><span>Press Generate for a set that flows, or add tracks yourself with the <b class="plus-chip">+</b> button on any track in the library.</span></div></section>`;
+    return form + `<section class="sp-sec" data-panel="setlist" data-group="set"><div class="fold-head">${fold('setlist', 'Set list')}</div><div class="empty sp-empty">${icon('list', 30)}<b>Plan a set</b><span>Press Generate for a set that flows, or add tracks yourself with the <b class="plus-chip">+</b> button on any track in the library.</span></div></section>` + savedSetsHTML();
   }
   const votes = items.reduce((c, i) => (c[i.vote > 0 ? 'up' : i.vote < 0 ? 'down' : 'none']++, c), { up: 0, down: 0, none: 0 });
   return form + `<section class="sp-sec" data-panel="setlist" data-group="set"><div class="fold-head">${fold('setlist', 'Set list')}<span class="grow"></span><span class="small muted">${items.length} track${items.length === 1 ? '' : 's'}</span></div><div class="sp-head">
-      <div class="sp-title">${state.set.ai ? '<span class="ai-badge">AI</span>' : ''}<b>${esc(state.set.title)}</b><span class="grow"></span><button class="ghost" data-a="clear-set" title="Clear the whole set">Clear</button></div>
+      <div class="sp-title">${state.set.ai ? '<span class="ai-badge">AI</span>' : ''}<b>${esc(state.set.title)}</b><span class="grow"></span><button class="ghost" data-a="save-set" title="Keep this set in My sets, to play again another time">${state.set.savedId && state.savedSets.some((x) => x.id === state.set.savedId) ? 'Update saved' : 'Save'}</button><button class="ghost" data-a="clear-set" title="Clear the whole set">Clear</button></div>
       ${state.set.story ? `<p>${esc(state.set.story)}</p>` : ''}
       <p class="muted">${items.length} track${items.length === 1 ? '' : 's'} · about ${setMinutes(items)} min${votes.up || votes.down ? ` · ${votes.up} kept · ${votes.down} to swap` : ''}</p>
       <div class="sp-chart">${energyChartSVG(setArc(items.map((i) => ({ track: i.track, played: played.has(i.track.id), next: i === next })), setEvent().usesVibe ? state.setVibe : null), { vibe: setEvent().usesVibe ? state.setVibe : null })}</div>
@@ -2519,7 +2531,13 @@ function setPanelHTML() {
         </span>
         <span class="acts"><button class="l" data-load="left" title="Load on deck A">A</button><button class="r" data-load="right" title="Load on deck B">B</button><button class="rm" data-a="remove" title="Take out of the set" aria-label="Take ${esc(t.title)} out of the set">${icon('x', 12)}</button></span>
       </li>`;
-    }).join('') + '</ol></section>';
+    }).join('') + '</ol></section>' + savedSetsHTML();
+}
+function savedSetsHTML() {
+  if (!state.savedSets.length) return '';
+  const when = (ms) => new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return `<section class="sp-sec" data-panel="savedsets" data-group="set"><div class="fold-head">${fold('savedsets', 'My sets')}<span class="grow"></span><span class="small muted">${state.savedSets.length}</span></div>
+    <ul class="saved-sets">${state.savedSets.map((s) => `<li class="${state.set?.savedId === s.id ? 'on' : ''}"><button class="ss-open" data-saved="${esc(s.id)}" title="Open this set"><b>${esc(s.title)}</b><small>${s.count} tracks · ${when(s.savedAt)}</small></button><button class="icon-btn" data-saved-del="${esc(s.id)}" aria-label="Delete ${esc(s.title)}" title="Delete this saved set">${icon('trash', 14)}</button></li>`).join('')}</ul></section>`;
 }
 
 /** Re-render the panel without losing the text box the DJ is typing in. */
@@ -2625,6 +2643,9 @@ function setPanelClick(e) {
   if (a === 'load-next') { loadNextFromSet(); return true; }
   if (a === 'ai-settings') { openAI(); return true; }
   if (a === 'clear-set') { if (confirm('Clear the whole set?')) commitSet(null); return true; }
+  if (a === 'save-set') { const r = saveSetCopy(state.savedSets, state.set); state.savedSets = r.list; store.set('savedSets', r.list); if (r.id) { commitSet({ ...state.set, savedId: r.id }); toast(`Saved "${state.set.title}" in My sets.`); } return true; }
+  if (b.dataset.saved) { const s = openSavedSet(state.savedSets, b.dataset.saved); if (s) { commitSet(s); toast(`Opened "${s.title}".`); } return true; }
+  if (b.dataset.savedDel) { const s = state.savedSets.find((x) => x.id === b.dataset.savedDel); if (s && confirm(`Delete the saved set "${s.title}"?`)) { state.savedSets = deleteSavedSet(state.savedSets, s.id); store.set('savedSets', state.savedSets); renderSetPanel(); } return true; }
   if (a === 'remove' && id) { commitSet(removeFromSet(state.set, id)); return true; }
   if (b.dataset.vote && id) { commitSet(voteInSet(state.set, id, +b.dataset.vote)); return true; }
   if (b.dataset.load && id) { const t = state.tracks.find((x) => x.id === id); if (t) loadTo(b.dataset.load, t); return true; }

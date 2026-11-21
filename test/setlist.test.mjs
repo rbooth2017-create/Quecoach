@@ -200,3 +200,18 @@ test('a wedding set reaches for the songs people know', () => {
   const club = quickSet(lib, { minutes: 45, event: 'club', audience: 'heads', vibe: 'journey' });
   assert.ok(loved(wed) > loved(club), `${loved(wed)} vs ${loved(club)}`);
 });
+
+test('saved sets: save, update in place, open fresh, delete', async () => {
+  const { saveSetCopy, deleteSavedSet, openSavedSet } = await import('../js/setbuilder.js');
+  const set = { title: 'Friday', items: [{ id: 'a' }, { id: 'b' }], played: ['a'] };
+  let { list, id } = saveSetCopy([], set, 1000);
+  assert.equal(list.length, 1); assert.equal(list[0].count, 2); assert.deepEqual(list[0].set.played, []);
+  ({ list } = saveSetCopy(list, { ...set, savedId: id, title: 'Friday v2' }, 2000));
+  assert.equal(list.length, 1); assert.equal(list[0].title, 'Friday v2');
+  ({ list } = saveSetCopy(list, { title: 'Other', items: [{ id: 'c' }] }, 3000));
+  assert.deepEqual(list.map((x) => x.title), ['Other', 'Friday v2']);
+  assert.equal(openSavedSet(list, id).savedId, id);
+  assert.equal(openSavedSet(list, 'nope'), null);
+  assert.equal(deleteSavedSet(list, id).length, 1);
+  assert.equal(saveSetCopy(list, { items: [] }).id, null);
+});

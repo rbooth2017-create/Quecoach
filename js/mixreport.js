@@ -122,7 +122,36 @@ const dayOf = (ms) => Math.floor((ms - new Date(ms).getTimezoneOffset() * 60000)
 
 /** Keep the last 100 mixes, small: { at, score, bars }. */
 export function addToHistory(history = [], report, at = Date.now()) {
-  return [...history, { at, score: report.score, bars: report.bars }].slice(-100);
+  const parts = Object.fromEntries((report.parts || []).map((p) => [p.id, p.score]));
+  return [...history, { at, score: report.score, bars: report.bars, parts }].slice(-100);
+}
+
+/**
+ * Each skill's average over the last `n` mixes that scored it, weakest first:
+ * [{ id, name, lesson, avg, count, trend }] (trend: this window vs the one before).
+ */
+export function skillStats(history = [], n = 10) {
+  const out = [];
+  for (const [id, info] of Object.entries(PARTS)) {
+    const vals = history.map((h) => h.parts?.[id]).filter((v) => Number.isFinite(v));
+    if (!vals.length) continue;
+    const last = vals.slice(-n), prev = vals.slice(-2 * n, -n);
+    const avg = (a) => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
+    out.push({ id, name: info.name, lesson: info.lesson, avg: avg(last), count: vals.length, trend: prev.length ? avg(last) - avg(prev) : 0 });
+  }
+  return out.sort((a, b) => a.avg - b.avg);
+}
+
+/**
+ * Should the level change? Up after CLEAN_SCORE mixes are the norm (the app's clean-mix count handles that);
+ * down when the last 5 mixes average under 45, so the coaching comes back. levels: ordered ids.
+ * Returns { dir: 'down', to } or null.
+ */
+export function levelAdvice(history = [], level, levels = ['starter', 'improver', 'confident', 'pro']) {
+  const i = levels.indexOf(level), last = history.slice(-5);
+  if (i <= 0 || last.length < 5) return null;
+  const avg = last.reduce((s, h) => s + h.score, 0) / last.length;
+  return avg < 45 ? { dir: 'down', to: levels[i - 1] } : null;
 }
 
 /** Totals for the progress card. streak: days in a row with at least one mix, ending today or yesterday. */

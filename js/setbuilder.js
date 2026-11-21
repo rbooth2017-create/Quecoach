@@ -293,3 +293,16 @@ export function setProfile({ event = 'club', audience = 'mixed', vibe = 'journey
 
 /** What the AI should know about the event and the crowd. */
 export const eventBrief = ({ event, audience } = {}) => `${pick(EVENTS, event).ai} ${pick(AUDIENCES, audience).ai}`;
+
+// ---------- saved sets ----------
+/** Saved sets are copies of a set, newest first: [{ id, title, savedAt, set }]. Saving a set that came from the list updates it. */
+export function saveSetCopy(list = [], set, now = Date.now()) {
+  if (!set?.items?.length) return { list, id: null };
+  const id = set.savedId || `set-${now.toString(36)}`;
+  const copy = { ...set, savedId: id, played: [] };
+  const entry = { id, title: set.title || NEW_SET_TITLE, savedAt: now, count: set.items.length, set: copy };
+  return { list: [entry, ...list.filter((x) => x.id !== id)].slice(0, 50), id };
+}
+export const deleteSavedSet = (list = [], id) => list.filter((x) => x.id !== id);
+/** Open a saved set as the current set (fresh played marks). */
+export const openSavedSet = (list = [], id) => { const e = list.find((x) => x.id === id); return e ? { ...e.set, savedId: e.id, played: [] } : null; };
