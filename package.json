@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/dev-app-name.mjs",
     "test": "node --test \"test/*.test.mjs\"",
     "start": "python3 -m http.server 8642",
     "helper": ".venv/bin/python helper/rekordbox_helper.py",

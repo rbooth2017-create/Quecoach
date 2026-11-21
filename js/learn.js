@@ -6,8 +6,8 @@ import * as lib from './musiclib.js';
 import { readTags, TAG_BYTES } from './tags.js';
 import { beatHint, updateAligned, fill, HOLD_S, ALIGN_MS, TEMPO_OK } from './lesson.js';
 import { LESSONS, TIERS, lessonById, advanceLesson, stepIndex, nextLesson, courseProgress } from './lessons.js';
-import { VIBES, quickSet, setMinutes } from './setbuilder.js';
-import { aiStatus, aiSetKey, aiClearKey, buildSetAI, suggestAI } from './coachai.js';
+import { VIBES, EVENTS, AUDIENCES, quickSet, setMinutes, setSources, tracksFrom, NEW_SET_TITLE, makeSet, inSet, toggleInSet, addToSet, removeFromSet, moveInSet, voteInSet, mergeRefined, refineSet } from './setbuilder.js';
+import { aiStatus, aiSetKey, aiClearKey, buildSetAI, refineSetAI, suggestAI } from './coachai.js';
 import { keyRelation } from './library.js';
 import { bandPeaks, barEnergies, phrasesFromEnergy } from './beatgrid.js';
 
@@ -29,6 +29,8 @@ const beatsLabel = (b) => (b < 1 ? `1/${Math.round(1 / b)}` : String(b));
 import { midiToAction, KEEPALIVE, describeAction, hexBytes, flx4Lights, flx4Meters, JOG_STEPS_PER_TURN } from './learnmidi.js';
 import { detectController, emptyController } from './controller.js';
 import { icon } from './icons.js';
+import * as stream from './streaming.js';
+import * as lay from './layout.js';
 
 const THEMES = [
   { id: 'auto', name: 'Match my computer', bg: '#f6f5f1', bg2: '#14161b', left: '#2f7df6', right: '#ff6b4a' },
@@ -49,6 +51,12 @@ const store = {
 };
 
 // ---------- state ----------
+/** The saved set, with a vote on every item (sets saved before votes existed have none). */
+function loadSavedSet() {
+  const s = store.get('set', null);
+  if (!s || !Array.isArray(s.items) || !s.items.length) return null;
+  return { title: s.title || NEW_SET_TITLE, story: s.story || '', ai: !!s.ai, items: s.items.filter((i) => i?.id).map((i) => ({ id: i.id, why: i.why || '', tip: i.tip || '', vote: i.vote > 0 ? 1 : i.vote < 0 ? -1 : 0 })), played: Array.isArray(s.played) ? s.played : [] };
+}
 const SIDES = ['left', 'right'];
 const FINE = 0.05; // % per tap: about 0.06 BPM, small enough to land inside the lesson's ±0.1 BPM
 const LETTER = { left: 'A', right: 'B' };
@@ -56,6 +64,7 @@ const state = {
   welcome: false, source: store.get('source', null), sourceName: '', tracks: [],
   query: '', tab: 'all', target: null, menuOpen: false,
   // My library (desktop app): crates, the open crate, an import in progress, the panel's size, selected rows
+  layout: lay.normalize(store.get('layout', null)),
   crates: [], crate: store.get('crate', null), importing: null, importMenu: false, editCrate: null,
   libView: store.get('libView', 'normal'), libSel: new Set(),
   analysing: null, scanToken: 0, loading: {},
@@ -65,8 +74,10 @@ const state = {
   lessonId: store.get('lesson', 'decks'), completed: store.get('completed', []), paneOpen: store.get('paneOpen', true),
   ticked: new Set(), did: new Set(), skippedAny: false, lessonDone: false, played: { left: 0, right: 0 }, blend: null,
   mixDir: null, mixStartBar: null, mixDone: new Set(), // the next-mix guide: direction, where B really started, steps ticked
-  // set builder + AI
-  set: null, setMinutes: store.get('setMinutes', 60), setVibe: store.get('setVibe', 'journey'), setIdea: '', setBusy: false,
+  // side panel tab (null: the level decides), set list + AI
+  paneTab: store.get('paneTab', null), refineText: '', setFrom: store.get('setFrom', 'all'),
+  setEvent: store.get('setEvent', 'club'), setAudience: store.get('setAudience', 'mixed'),
+  set: loadSavedSet(), setMinutes: store.get('setMinutes', 60), setVibe: store.get('setVibe', 'journey'), setIdea: '', setBusy: false,
   ai: { hasKey: false }, aiPicks: null, aiBusy: false,
   // Beat FX: effect index, beat size index, channel, level, on
   bfx: { i: 0, b: 2, ch: 'both', depth: 0.6, on: false }, bfxRunning: [], bfxKey: null,
@@ -397,6 +408,7 @@ async function useSource(kind, { fromGesture = true } = {}) {
       if (state.crate && !crates.some((c) => c.id === state.crate)) state.crate = null;
       setTracks(tracks, 'My library', 'managed');
       analyse(tracks, token);
+      resolveWanted(tracks);
     } else if (kind === 'folder') {
       if (!lib.canPickFolder()) { $('#dirInput').click(); return false; }
       let handle;
@@ -473,6 +485,7 @@ function renderSource() {
       ${state.importMenu ? `<div class="menu import-menu" role="menu">
         <button data-import="files">${icon('music', 16)}<span>Files…<small>Pick audio files to copy in</small></span></button>
         <button data-import="folder">${icon('folder', 16)}<span>Folder…<small>Copy every track in a folder</small></span></button>
+        <hr><button data-a="import-playlist">${icon('list', 16)}<span>Playlist from Spotify or Apple Music…<small>Make a crate, see which tracks you still need</small></span></button>
       </div>` : ''}` : ''}
     <button data-a="menu" aria-haspopup="menu" aria-expanded="${state.menuOpen}">${icon(SOURCE_ICON[state.source] || 'sparkle', 15)} ${esc(state.sourceName || 'Choose music')} ${icon('chevron', 14)}</button>
     ${state.menuOpen ? `<div class="menu" role="menu">
@@ -492,12 +505,12 @@ function renderLibrary() {
   $('#libBanner').innerHTML = banner.join(' ');
   renderCrates();
   renderList();
+  renderSetPanel();
 }
 
 const MAX_ROWS = 400;
 function renderList() {
   const el = $('#list'), ref = decks.left.track, f = state.f;
-  if (state.tab === 'set') { renderSet(el); return markLibSel(); }
   const crate = currentCrate();
   const base = state.source === 'managed' ? lib.tracksInCrate(state.tracks, crate) : state.tracks;
   if (state.source === 'managed' && !state.tracks.length) {
@@ -506,7 +519,8 @@ function renderList() {
     return;
   }
   if (!state.tracks.length) { el.innerHTML = `<div class="empty">${icon('music', 30)}<b>No music yet</b><span>Choose where your music comes from with the button above.</span></div>`; return; }
-  if (crate && !base.length) { el.innerHTML = `<div class="empty">${icon('crate', 30)}<b>${esc(crate.name)} is empty</b><span>Open All tracks and drag tracks onto this crate.</span></div>`; return; }
+  const wanted = crate && state.tab !== 'suggested' ? wantedRows(crate) : [];
+  if (crate && !base.length && !crate.wanted?.length) { el.innerHTML = `<div class="empty">${icon('crate', 30)}<b>${esc(crate.name)} is empty</b><span>Open All tracks and drag tracks onto this crate.</span></div>`; return; }
   let rows;
   if (state.tab === 'suggested') {
     if (!ref) { el.innerHTML = `<div class="empty">${icon('sparkle', 30)}<b>Suggestions appear here</b><span>Load a track on deck A and Cue Coach will rank what mixes well after it.</span></div>`; return; }
@@ -514,9 +528,10 @@ function renderList() {
   } else {
     rows = lib.searchTracks(base, state.query).map((t) => ({ track: t, match: ref && t.id !== ref.id ? lib.friendlyMatch(ref, t) : null }));
   }
-  if (!rows.length) { el.innerHTML = `<div class="empty">${icon('search', 30)}<b>Nothing matches "${esc(state.query)}"</b></div>`; return; }
+  if (!rows.length && !wanted.length) { el.innerHTML = crate && !base.length && state.tab === 'suggested' ? `<div class="empty">${icon('crate', 30)}<b>Nothing in ${esc(crate.name)} yet</b><span>Its tracks are still to get. Open All to see them.</span></div>` : `<div class="empty">${icon('search', 30)}<b>Nothing matches "${esc(state.query)}"</b><span>Not in your music yet? Buy a copy, import it, and it's yours to mix.</span>${buyButton('primary')}</div>`; return; }
   const loaded = new Map(SIDES.map((s) => [decks[s].track?.id, s]));
   const canAdd = lib.hasManaged() && state.source !== 'managed';
+  const setIds = new Set(state.set?.items.map((i) => i.id) || []);
   const head = `<div class="trow head"><span>Key</span><span>Track</span><span class="wide">Artist</span><span>BPM</span><span class="wide">Time</span><span class="wide">${ref ? 'With deck A' : ''}</span><span></span></div>`;
   let aiTop = '';
   if (state.tab === 'suggested') {
@@ -529,19 +544,22 @@ function renderList() {
         <span class="acts" style="opacity:1"><button class="l" data-load="left">A</button><button class="r" data-load="right">B</button></span></div>`).join('') : '');
     rows = rows.filter((r) => !picks?.picks.some((p) => p.track.id === r.track.id));
   }
-  el.innerHTML = aiTop + head + rows.slice(0, MAX_ROWS).map(({ track: t, match: m }) => {
+  el.innerHTML = aiTop + (rows.length ? head : '') + rows.slice(0, MAX_ROWS).map(({ track: t, match: m }) => {
     const matchCell = !m ? '' : f.matchLabels
       ? `<span class="match ${m.level}">${m.label}</span>${f.matchReasons ? ` <span class="why">${esc(m.why.join(' · '))}</span>` : ''}`
       : `<span class="why">${m.pitch.pct != null ? `${m.pitch.pct >= 0 ? '+' : ''}${m.pitch.pct.toFixed(1)}%` : ''}</span>`;
     const bpm = t.bpm ? `${t.bpm.toFixed(1)}${t.analysed ? '' : '<span class="muted"> ~</span>'}` : '<span class="muted">…</span>';
-    const on = loaded.get(t.id);
+    const on = loaded.get(t.id), inS = setIds.has(t.id);
     const extra = crate ? `<button data-row="uncrate" title="Remove from ${esc(crate.name)} (the track stays in My library)" aria-label="Remove from crate">${icon('x', 12)}</button>`
-      : canAdd && lib.canImport(t) ? `<button data-row="import" title="Copy into My library" aria-label="Copy into My library">${icon('plus', 12)}</button>` : '';
+      : canAdd && lib.canImport(t) ? `<button data-row="import" title="Copy into My library" aria-label="Copy into My library">${icon('upload', 12)}</button>` : '';
+    const linkBtn = `<button class="add" data-row="links" aria-haspopup="menu" title="Listen on Spotify or Apple Music, or buy it" aria-label="Listen or buy">${icon('external', 12)}</button>`;
+    const setBtn = `<button class="add ${inS ? 'on' : ''}" data-row="set" aria-pressed="${inS}" title="${inS ? 'In your set. Press to take it out.' : 'Add to the end of your set'}" aria-label="${inS ? 'Take out of set' : 'Add to set'}">${icon(inS ? 'check' : 'plus', 12)}</button>`;
     return `<div class="trow ${on ? 'loaded' : ''}" data-id="${esc(t.id)}" draggable="true" title="Double-click to load. Drag onto a deck or a crate.">${keyBadge(t)}
       <span class="t">${on ? `<span style="color:var(--${on})">● </span>` : ''}${esc(t.title)}</span><span class="a wide">${esc(t.artist)}</span>
-      <span class="n">${bpm}</span><span class="n wide muted">${duration(t)}</span><span class="wide" style="display:flex;gap:6px;min-width:0;align-items:center">${matchCell}</span>
-      <span class="acts">${extra}<button class="l" data-load="left" title="Load on deck A">A</button><button class="r" data-load="right" title="Load on deck B">B</button></span></div>`;
-  }).join('') + (rows.length > MAX_ROWS ? `<div class="empty small">Showing ${MAX_ROWS} of ${rows.length}. Search to narrow it down.</div>` : '');
+      <span class="n">${bpm}</span><span class="n wide muted">${duration(t)}</span><span class="wide mcell">${matchCell}</span>
+      <span class="acts">${extra}${linkBtn}${setBtn}<button class="l" data-load="left" title="Load on deck A">A</button><button class="r" data-load="right" title="Load on deck B">B</button></span></div>`;
+  }).join('') + (rows.length > MAX_ROWS ? `<div class="empty small">Showing ${MAX_ROWS} of ${rows.length}. Search to narrow it down.</div>` : '')
+    + wantedHTML(crate, wanted) + buyBar();
   markLibSel();
 }
 
@@ -563,7 +581,7 @@ function renderCrates() {
     ${state.crates.length ? '<div class="crates-title">Crates</div>' : ''}
     ${state.crates.map((c) => state.editCrate === c.id
       ? `<div class="crate editing">${icon('crate', 15)}<input type="text" class="crate-edit" data-crate-edit="${esc(c.id)}" value="${esc(c.name)}" maxlength="80" aria-label="Crate name"></div>`
-      : `<div class="crate ${cur?.id === c.id ? 'on' : ''}" data-crate="${esc(c.id)}" role="button" tabindex="0" title="Double-click to rename">${icon('crate', 15)}<span class="name">${esc(c.name)}</span><span class="count">${count(c)}</span>
+      : `<div class="crate ${cur?.id === c.id ? 'on' : ''}" data-crate="${esc(c.id)}" role="button" tabindex="0" title="Double-click to rename">${icon('crate', 15)}<span class="name">${esc(c.name)}</span><span class="count" ${c.wanted?.length ? `title="${c.wanted.length} still to get"` : ''}>${count(c)}${c.wanted?.length ? `<span class="want">+${c.wanted.length}</span>` : ''}</span>
         <span class="cacts"><button data-crate-a="rename" title="Rename" aria-label="Rename ${esc(c.name)}">${icon('pencil', 12)}</button><button data-crate-a="delete" title="Delete crate" aria-label="Delete ${esc(c.name)}">${icon('trash', 12)}</button></span></div>`).join('')}
     <button class="crate new" data-crate-a="new" title="New crate (you can also drop tracks here)">${icon('plus', 15)}<span class="name">New crate</span></button>`;
   const input = $('[data-crate-edit]', el);
@@ -579,7 +597,6 @@ async function crateOp(op, args) {
 }
 async function openCrate(id) {
   state.crate = id || null; store.set('crate', state.crate); state.libSel = new Set();
-  if (state.tab === 'set') state.tab = 'all';
   if (state.source !== 'managed') await useSource('managed'); else renderLibrary();
 }
 async function newCrate(trackIds = []) {
@@ -622,6 +639,7 @@ async function importToLibrary(run, { crateId = null } = {}) {
 async function refreshManaged(view) {
   const { tracks, crates } = view ? lib.fromManaged(view) : await lib.loadManaged();
   state.crates = crates;
+  resolveWanted(tracks);
   if (state.source === 'managed') {
     // keep the objects of tracks already open, so decks and background analysis keep working
     const old = new Map(state.tracks.map((t) => [t.id, t]));
@@ -641,6 +659,127 @@ if (desktop?.library) desktop.library.onProgress((p) => {
   im.done = im.base + p.done; im.total = Math.max(im.total, im.base + p.total); im.current = p.current;
   if (!im.queued) { im.queued = true; requestAnimationFrame(() => { im.queued = false; if (state.importing === im) renderSource(); }); }
 });
+
+// ---------- Spotify and Apple Music: playlists in, links out ----------
+/** Searching for a track you don't own: offer the stores. */
+const buyButton = (cls = '') => (state.query.trim() ? `<button class="${cls}" data-buy aria-haspopup="menu" title="Buy it on Beatport, Juno, Traxsource, Bandcamp or Amazon">${icon('external', 14)} Buy "${esc(state.query.trim())}"</button>` : '');
+const buyBar = () => (state.query.trim() ? `<div class="buy-bar"><span>Don't have the one you're after?</span>${buyButton()}</div>` : '');
+
+/** The crate's tracks still to get that match the search, with their place in the crate's list. */
+function wantedRows(crate) {
+  const words = state.query.toLowerCase().split(/\s+/).filter(Boolean);
+  return (crate.wanted || []).map((w, i) => ({ w, i }))
+    .filter(({ w }) => words.every((x) => `${w.title} ${w.artist} ${w.album || ''}`.toLowerCase().includes(x)));
+}
+function wantedHTML(crate, rows) {
+  if (!crate?.wanted?.length || state.tab === 'suggested') return '';
+  const n = crate.wanted.length;
+  return `<div class="wanted-head"><b>Still to get · ${n}</b><span>Not in My library yet. Get a copy, import it, and it moves into this crate.</span></div>`
+    + rows.map(({ w, i }) => `<div class="trow wanted" data-w="${i}"><span></span><span class="t">${esc(w.title)}</span><span class="a wide">${esc(w.artist)}</span>
+      <span></span><span class="n wide muted">${duration(w)}</span><span class="wide why">${esc(w.album || '')}</span>
+      <span class="acts"><button class="find" data-w-a="find" aria-haspopup="menu" title="Listen on Spotify or Apple Music, or buy it">${icon('search', 12)} Find</button><button data-w-a="remove" title="Take off the list" aria-label="Take ${esc(w.title)} off the list">${icon('x', 12)}</button></span></div>`).join('');
+}
+function wantedAction(btn, i) {
+  const c = currentCrate(), w = c?.wanted?.[i]; if (!w) return;
+  if (btn.dataset.wA === 'find') return openLinkMenu(btn, w);
+  if (btn.dataset.wA === 'remove') return crateOp('wanted', { id: c.id, wanted: c.wanted.filter((_, j) => j !== i) });
+}
+
+/** Tracks still to get that are now in My library move into their crates. */
+let resolving = false;
+async function resolveWanted(tracks) {
+  if (resolving || !lib.hasManaged()) return;
+  resolving = true;
+  try {
+    const moved = [];
+    for (const c of state.crates) {
+      if (!c.wanted?.length) continue;
+      const m = stream.matchPlaylist(c.wanted, tracks);
+      const ids = m.filter((x) => x.track).map((x) => x.track.libId);
+      if (!ids.length) continue;
+      if (await crateOp('add', { id: c.id, trackIds: ids, wanted: m.filter((x) => !x.track).map((x) => x.item) })) moved.push(`${ids.length} into ${c.name}`);
+    }
+    if (moved.length) toast(`Tracks you were after are here: moved ${moved.join(', ')}.`);
+  } finally { resolving = false; }
+}
+
+/** Listen or buy: a small menu by the button. */
+function openLinkMenu(btn, t, buyFirst = false) {
+  const m = $('#linkMenu'), links = stream.trackLinks(t);
+  const item = (l) => `<button data-url="${esc(l.url)}" role="menuitem">${icon('external', 14)}<span>${l.kind === 'listen' ? 'Listen on' : 'Buy on'} ${esc(l.label)}</span></button>`;
+  const listen = links.filter((l) => l.kind === 'listen').map(item).join(''), buy = links.filter((l) => l.kind === 'buy').map(item).join('');
+  m.innerHTML = `<div class="menu-title">${esc([t.artist, t.title].filter(Boolean).join(' – '))}</div>${buyFirst ? `${buy}<hr>${listen}` : `${listen}<hr>${buy}`}`;
+  m.classList.remove('hidden');
+  const r = btn.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+  const x = Math.max(8, Math.min(r.right - w, innerWidth - w - 8));
+  const y = r.bottom + 4 + h > innerHeight - 8 ? Math.max(8, r.top - h - 4) : r.bottom + 4;
+  m.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  m.querySelector('button')?.focus();
+}
+const closeLinkMenu = () => $('#linkMenu').classList.add('hidden');
+
+function openPlaylistDlg() {
+  if (!lib.hasManaged()) return toast('Playlists become crates in My library, in the Cue Coach desktop app.');
+  state.importMenu = false; state.menuOpen = false; renderSource();
+  state.playlist = null; $('#plText').value = ''; $('#plInput').value = '';
+  // match against My library even when another music source is open
+  state.plTracks = state.source === 'managed' ? state.tracks : [];
+  if (state.source !== 'managed') lib.loadManaged().then((v) => { state.plTracks = v.tracks; if (state.playlist) readPlaylist(state.playlist.text, state.playlist.fileName); }).catch(() => {});
+  const link = (s, url) => (url ? esc(s).replace(new URL(url).host, `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(new URL(url).host)}</a>`) : esc(s));
+  $('#plHow').innerHTML = Object.values(stream.EXPORT_HELP).map((h) => `<div><b>${esc(h.label)}</b><ol>${h.steps.map((s) => `<li>${link(s, h.url)}</li>`).join('')}</ol></div>`).join('');
+  renderPlaylistPreview();
+  $('#plDlg').showModal();
+}
+function readPlaylist(text, fileName = '') {
+  const p = stream.parsePlaylist(text, fileName);
+  state.playlist = { ...p, text, fileName, matches: stream.matchPlaylist(p.items, state.plTracks || []) };
+  renderPlaylistPreview();
+}
+function renderPlaylistPreview() {
+  const p = state.playlist, el = $('#plPreview');
+  $('#plCreate').disabled = !p?.items.length;
+  if (!p) { el.innerHTML = ''; return; }
+  if (!p.items.length) {
+    el.innerHTML = `<div class="err">${p.links ? 'Those are links only, with no track names in them. Export the playlist to a file instead (see above).' : 'No tracks found there. Use a playlist export, or one track per line: Artist - Title.'}</div>`;
+    return;
+  }
+  const MAX = 200, more = p.matches.length - MAX;
+  el.innerHTML = `<div class="pl-sum">${esc(stream.playlistSummary(p.matches))}</div>
+    <div class="field" style="margin:0"><label for="plName" class="small muted">Crate name</label><input id="plName" type="text" maxlength="80" value="${esc(p.name)}" style="font:inherit"></div>
+    <div class="pl-list">${p.matches.slice(0, MAX).map((m) => `<div class="pl-row ${m.track ? 'have' : ''}">${icon(m.track ? 'check' : 'circle', 13)}<span class="t">${esc(m.item.title)}</span><span class="a">${esc(m.item.artist)}</span><span class="small muted">${m.track ? (m.exact ? 'in My library' : 'another mix in My library') : 'to get'}</span></div>`).join('')}
+      ${more > 0 ? `<div class="pl-row"><span></span><span class="muted">and ${more} more</span></div>` : ''}</div>`;
+}
+async function createPlaylistCrate() {
+  const p = state.playlist; if (!p?.items.length) return;
+  const name = $('#plName')?.value.trim() || p.name;
+  const trackIds = [...new Set(p.matches.filter((m) => m.track).map((m) => m.track.libId))];
+  const wanted = p.matches.filter((m) => !m.track).map((m) => m.item);
+  $('#plCreate').disabled = true;
+  const r = await crateOp('create', { name, trackIds, wanted });
+  if (!r?.created) { $('#plCreate').disabled = false; return; }
+  $('#plDlg').close(); state.playlist = null;
+  await openCrate(r.created.id);
+  toast(`Made the crate ${r.created.name}: ${stream.playlistSummary(p.matches)}.`);
+}
+function bindStreaming() {
+  $('#plFile').addEventListener('click', () => $('#plInput').click());
+  $('#plInput').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    if (f.size > 20e6) return toast('That file is too big to be a playlist.');
+    $('#plText').value = '';
+    readPlaylist(stream.decodeText(new Uint8Array(await f.arrayBuffer())), f.name);
+  });
+  let typing = 0;
+  $('#plText').addEventListener('input', (e) => { clearTimeout(typing); typing = setTimeout(() => readPlaylist(e.target.value), 250); });
+  $('#plCancel').addEventListener('click', () => $('#plDlg').close());
+  $('#plCreate').addEventListener('click', createPlaylistCrate);
+  const m = $('#linkMenu');
+  m.addEventListener('click', (e) => { const b = e.target.closest('[data-url]'); if (!b) return; window.open(b.dataset.url, '_blank', 'noopener'); closeLinkMenu(); });
+  m.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeLinkMenu(); } });
+  document.addEventListener('pointerdown', (e) => { if (!m.classList.contains('hidden') && !m.contains(e.target) && !e.target.closest('[data-row="links"], [data-w-a="find"], [data-buy]')) closeLinkMenu(); });
+  $('#list').addEventListener('scroll', closeLinkMenu, { passive: true });
+  window.addEventListener('resize', closeLinkMenu);
+}
 
 async function deleteFromLibrary(ids) {
   const tracks = state.tracks.filter((t) => ids.includes(t.id) && t.libId); if (!tracks.length) return;
@@ -688,11 +827,12 @@ function applyLibView() {
   const st = $('.stage'), v = state.libView;
   st.classList.toggle('lib-expanded', v === 'expanded');
   st.classList.toggle('lib-collapsed', v === 'collapsed');
-  const ex = $('#libExpand'), co = $('#libCollapse');
+  const ex = $('#libExpand'), fold = $('#libFold');
   ex.innerHTML = icon(v === 'expanded' ? 'restore' : 'expand', 16);
   ex.title = v === 'expanded' ? 'Back to normal size' : 'Make the library bigger'; ex.setAttribute('aria-pressed', v === 'expanded');
-  co.innerHTML = icon(v === 'collapsed' ? 'restore' : 'collapse', 16);
-  co.title = v === 'collapsed' ? 'Show the library' : 'Shrink the library to its header'; co.setAttribute('aria-pressed', v === 'collapsed');
+  fold.innerHTML = `<span class="fold-ic">${icon('chevron', 14)}</span>`;
+  fold.setAttribute('aria-expanded', String(v !== 'collapsed'));
+  fold.title = v === 'collapsed' ? 'Show the library' : 'Collapse the library to its header';
   measureLibLift();
 }
 /** How far the expanded library reaches up: to just below the decks' title rows. */
@@ -700,9 +840,96 @@ function measureLibLift() {
   if (state.libView !== 'expanded') return;
   const row = $('.decks-row'), heads = $$('.decks-row .deck-head');
   if (!row || !heads.length) return;
+  // only reach over the decks when they're open and sit right above the library
+  const shown = lay.groupOrder(state.layout, 'stage').filter((id) => !state.layout.hidden[id] && !$(`[data-panel="${id}"]`).classList.contains('hidden'));
+  if (state.layout.folded.decks || shown[shown.indexOf('library') - 1] !== 'decks') { $('.stage').style.setProperty('--lib-lift', '0px'); return; }
   const rowBottom = row.getBoundingClientRect().bottom, headBottom = Math.max(...heads.map((h) => h.getBoundingClientRect().bottom));
   const gap = parseFloat(getComputedStyle($('.stage')).rowGap) || 10;
   $('.stage').style.setProperty('--lib-lift', `${Math.max(0, Math.round(rowBottom + gap - headBottom - 8))}px`);
+}
+
+// ---------- your layout: collapse, move and hide sections (js/layout.js) ----------
+const isFolded = (id) => (id === 'library' ? state.libView === 'collapsed' : !!state.layout.folded[id]);
+function setLayout(next) {
+  state.layout = next; store.set('layout', next);
+  lay.applyLayout(next);
+  measureLibLift();
+  for (const s of SIDES) decks[s]._wave = null; // the decks' waveforms redraw at their new size
+  if ($('#layoutDlg').open) renderLayoutDlg();
+}
+function setFolded(id, on) {
+  if (id === 'library') { setLibView(on ? 'collapsed' : 'normal'); if ($('#layoutDlg').open) renderLayoutDlg(); return; }
+  setLayout(lay.setFlag(state.layout, 'folded', id, on));
+}
+function renderLayoutDlg() {
+  const L = state.layout, levelOff = { lane: $('#lanePanel').classList.contains('hidden'), mixplan: !state.f.mixGuide };
+  $('#layoutList').innerHTML = lay.GROUPS.map((g) => {
+    const ids = g.id === 'top' ? ['coach'] : lay.groupOrder(L, g.id);
+    return `<div><h3>${esc(g.name)}</h3>${ids.map((id, i) => {
+      const p = lay.PANELS.find((x) => x.id === id), shown = !L.hidden[id], folded = isFolded(id);
+      const note = levelOff[id] ? 'Not shown at your level' : p.note || '';
+      return `<div class="lay-row ${shown ? '' : 'off'}" data-lay="${id}">
+        <label><input type="checkbox" data-lay-show ${shown ? 'checked' : ''} aria-label="Show ${esc(p.name)}"><span><b>${esc(p.name)}</b>${note ? `<small>${esc(note)}</small>` : ''}</span></label>
+        ${p.noFold ? '<span></span>' : `<button type="button" class="ghost lay-fold" data-lay-fold aria-pressed="${folded}" ${shown ? '' : 'disabled'}>${folded ? 'Expand' : 'Collapse'}</button>`}
+        ${p.fixed ? '<span></span><span></span>' : `<button type="button" class="icon-btn" data-lay-move="-1" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move ${esc(p.name)} up">${icon('chevron', 15, 'style="transform:rotate(180deg)"')}</button>
+        <button type="button" class="icon-btn" data-lay-move="1" ${i === ids.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move ${esc(p.name)} down">${icon('chevron', 15)}</button>`}
+      </div>`;
+    }).join('')}</div>`;
+  }).join('');
+}
+function openLayout() { renderLayoutDlg(); $('#layoutDlg').showModal(); }
+function bindLayout() {
+  for (const x of $$('.fold-ic')) x.innerHTML = icon('chevron', 14);
+  // a section's arrow collapses it; capture, so the panes' own click handlers never see it
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest?.('[data-fold]'); if (!b) return;
+    e.stopPropagation();
+    setFolded(b.dataset.fold, !isFolded(b.dataset.fold));
+  }, true);
+  $('#libFold').addEventListener('click', () => setLibView(state.libView === 'collapsed' ? 'normal' : 'collapsed'));
+  $('#layoutList').addEventListener('change', (e) => {
+    const id = e.target.closest('[data-lay]')?.dataset.lay;
+    if (id && e.target.matches('[data-lay-show]')) setLayout(lay.setFlag(state.layout, 'hidden', id, !e.target.checked));
+  });
+  $('#layoutList').addEventListener('click', (e) => {
+    const b = e.target.closest('button'), id = b?.closest('[data-lay]')?.dataset.lay; if (!id) return;
+    if (b.matches('[data-lay-fold]')) setFolded(id, !isFolded(id));
+    if (b.dataset.layMove) {
+      setLayout(lay.move(state.layout, id, +b.dataset.layMove));
+      const again = $(`[data-lay="${id}"] [data-lay-move="${b.dataset.layMove}"]`, $('#layoutList'));
+      (again && !again.disabled ? again : $(`[data-lay="${id}"] [data-lay-show]`, $('#layoutList')))?.focus();
+    }
+  });
+  $('#layoutReset').addEventListener('click', () => { setLibView('normal'); setLayout(lay.emptyLayout()); });
+  $('#layoutDone').addEventListener('click', () => $('#layoutDlg').close());
+  // drag a section by its header to move it within its area (the lessons and set panes are redrawn, so delegate)
+  let dragging = null;
+  const panelOf = (el) => el?.closest?.('[data-panel][data-group]');
+  document.addEventListener('dragstart', (e) => {
+    const head = e.target.closest?.('.fold-head'), p = panelOf(head);
+    if (!head || !p || e.target !== head || head.parentElement !== p) return;
+    dragging = p; p.classList.add('lay-drag');
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-cue-panel', p.dataset.panel);
+  });
+  document.addEventListener('dragover', (e) => {
+    if (!dragging) return;
+    const p = panelOf(e.target);
+    for (const x of $$('.lay-drop')) if (x !== p) x.classList.remove('lay-drop');
+    if (!p || p === dragging || p.dataset.group !== dragging.dataset.group) return;
+    e.preventDefault(); p.classList.add('lay-drop');
+  });
+  document.addEventListener('drop', (e) => {
+    if (!dragging) return;
+    const p = panelOf(e.target);
+    if (p && p !== dragging && p.dataset.group === dragging.dataset.group) { e.preventDefault(); setLayout(lay.moveBefore(state.layout, dragging.dataset.panel, p.dataset.panel)); }
+  });
+  document.addEventListener('dragend', () => { dragging?.classList.remove('lay-drag'); dragging = null; for (const x of $$('.lay-drop')) x.classList.remove('lay-drop'); });
+  markDraggable();
+  lay.applyLayout(state.layout);
+}
+/** Section headers you can drag (called again whenever a pane is redrawn). */
+function markDraggable(root = document) {
+  for (const h of $$('[data-panel][data-group] > .fold-head', root)) h.draggable = true;
 }
 
 // ---------- lessons ----------
@@ -736,7 +963,7 @@ function renderCoach(s) {
   if (key === state.coachKey) return;
   state.coachKey = key;
   renderProgress(L, idx);
-  renderTutor();
+  if (paneTab() === 'lessons') renderTutor();
   if (idx >= L.steps.length) {
     const next = nextLesson(L.id, state.completed);
     const up = L.id === 'first-mix' ? suggestLevelUp(state.level, state.cleanMixes) : null;
@@ -762,6 +989,18 @@ function renderTutor() {
   el.classList.toggle('hidden', !state.paneOpen);
   $('#lessonsBtn').setAttribute('aria-pressed', state.paneOpen); $('#lessonsBtn').classList.toggle('on', state.paneOpen);
   if (!state.paneOpen) return;
+  const tab = paneTab();
+  el.setAttribute('aria-label', tab === 'set' ? 'Set list' : 'Lessons');
+  const tabBtn = (id, ic, name) => `<button data-ptab="${id}" role="tab" aria-selected="${tab === id}" class="${tab === id ? 'active' : ''}">${icon(ic, 14)} ${name}</button>`;
+  const head = (note) => `<div class="tutor-head"><div class="tabs pane-tabs" role="tablist" aria-label="Side panel">${tabBtn('lessons', 'book', 'Lessons')}${tabBtn('set', 'list', 'Set')}</div>
+      <span class="grow"></span><span class="small muted">${note}</span>
+      <button class="icon-btn" data-a="close" title="Hide the side panel (L)" aria-label="Hide the side panel">${icon('x', 16)}</button></div>`;
+  if (tab === 'set') {
+    const n = setItems().length;
+    keepFocus(el, head(n ? `${n} track${n === 1 ? '' : 's'}` : '') + `<div class="tutor-body set-pane">${setPanelHTML()}</div>`);
+    lay.applyLayout(state.layout, el); markDraggable(el);
+    return;
+  }
   const L = lesson(), idx = state.lessonDone ? L.steps.length : stepIndex(L, state.ticked), prog = courseProgress(state.completed);
   const need = L.needs && !state.f[L.needs] && NEEDS[L.needs];
   const next = nextLesson(L.id, state.completed);
@@ -769,11 +1008,10 @@ function renderTutor() {
     const cls = i < idx ? 'done' : i === idx ? 'now' : '';
     return `<li class="${cls}">${icon(i < idx ? 'check' : i === idx ? 'dot' : 'circle', 16)}<div><b>${esc(st.title)}</b>${i === idx ? `<p>${esc(st.body)}</p>` : ''}</div></li>`;
   };
-  el.innerHTML = `
-    <div class="tutor-head">${icon('book', 17)}<b>Lessons</b><span class="grow"></span><span class="small muted">${prog.done} of ${prog.total} done</span>
-      <button class="icon-btn" data-a="close" title="Hide lessons (L)" aria-label="Hide lessons">${icon('x', 16)}</button></div>
+  keepFocus(el, `${head(`${prog.done} of ${prog.total} done`)}
     <div class="tutor-body">
-      <div class="bar" title="${prog.done} of ${prog.total} lessons"><i style="width:${(prog.done / prog.total) * 100}%"></i></div>
+      <section class="tutor-sec" data-panel="lesson" data-group="lessons">
+      <div class="fold-head">${fold('lesson', 'Current lesson')}</div>
       <div class="lesson-card">
         <span class="tier-tag">${esc(TIERS.find((t) => t.id === L.tier).name)} · ${L.minutes} min</span>
         <h3>${esc(L.title)}</h3>
@@ -786,13 +1024,20 @@ function renderTutor() {
           <button class="ghost" data-a="restart-lesson">${idx > 0 ? 'Start over' : 'Restart'}</button>
         </div>
       </div>
+      </section>
+      <section class="tutor-sec" data-panel="course" data-group="lessons">
+      <div class="fold-head">${fold('course', 'All lessons')}<span class="grow"></span><span class="small muted">${prog.done}/${prog.total}</span></div>
+      <div class="bar" title="${prog.done} of ${prog.total} lessons"><i style="width:${(prog.done / prog.total) * 100}%"></i></div>
       ${TIERS.map((t, ti) => `<div class="course"><h4><span>${esc(t.name)}</span><span>${prog.tiers[ti].done}/${prog.tiers[ti].total}</span></h4>
         ${LESSONS.filter((l) => l.tier === t.id).map((l) => {
           const done = state.completed.includes(l.id);
           return `<button class="${l.id === L.id ? 'active' : ''} ${done ? 'done' : ''}" data-lesson="${l.id}">${icon(done ? 'check' : l.id === L.id ? 'dot' : 'circle', 15)}<span>${esc(l.title)}</span><small>${l.minutes} min</small></button>`;
         }).join('')}</div>`).join('')}
-    </div>`;
+      </section>
+    </div>`);
+  lay.applyLayout(state.layout, el); markDraggable(el);
 }
+const fold = (id, label) => lay.foldButton(id, esc(label), `<span class="fold-ic">${icon('chevron', 14)}</span>`);
 
 function setPane(open) { state.paneOpen = open; store.set('paneOpen', open); state.coachKey = null; renderTutor(); for (const s of SIDES) decks[s]._wave = null; }
 
@@ -1549,6 +1794,7 @@ function mixerEvents() {
 }
 
 function bind() {
+  bindStreaming();
   SIDES.forEach(deckEvents);
   mixerEvents();
   $('#themeBtn').innerHTML = icon('palette', 18); $('#helpBtn').innerHTML = icon('help', 18); $('#searchIcon').innerHTML = icon('search', 15);
@@ -1575,10 +1821,14 @@ function bind() {
   $('#ctlBtn').addEventListener('click', openCtl);
   $('#sinkSel').addEventListener('change', (e) => useSink(e.target.value));
   navigator.mediaDevices?.addEventListener?.('devicechange', () => { if ($('#ctlDlg').open) listSinks(); });
+  bindSetPanel($('#tutor'));
+  bindLayout();
   $('#tutor').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
-    if (b.dataset.a === 'close') setPane(false);
-    else if (b.dataset.a === 'restart-lesson') startLesson(state.lessonId);
+    if (b.dataset.ptab) return setPaneTab(b.dataset.ptab);
+    if (b.dataset.a === 'close') return setPane(false);
+    if (paneTab() === 'set') { setPanelClick(e); return; }
+    if (b.dataset.a === 'restart-lesson') startLesson(state.lessonId);
     else if (b.dataset.a === 'need-level') setLevel(b.dataset.level);
     else if (b.dataset.lesson) startLesson(b.dataset.lesson);
   });
@@ -1609,6 +1859,7 @@ function bind() {
     const a = e.target.closest('[data-a]')?.dataset.a;
     if (a === 'menu') { state.menuOpen = !state.menuOpen; state.importMenu = false; renderSource(); return; }
     if (a === 'import-menu') { state.importMenu = !state.importMenu; state.menuOpen = false; renderSource(); return; }
+    if (a === 'import-playlist') return openPlaylistDlg();
     if (a === 'cancel-import') { state.importCancelled = true; desktop?.library?.cancelImport(); return; }
     if (a === 'copy-all') { state.menuOpen = false; renderSource(); return importLibTracks(state.tracks.filter(lib.canImport)); }
     const imp = e.target.closest('[data-import]'); if (imp) return importDialog(imp.dataset.import);
@@ -1619,7 +1870,6 @@ function bind() {
   });
   // library panel size
   $('#libExpand').addEventListener('click', () => setLibView(state.libView === 'expanded' ? 'normal' : 'expanded'));
-  $('#libCollapse').addEventListener('click', () => setLibView(state.libView === 'collapsed' ? 'normal' : 'collapsed'));
   new ResizeObserver(() => measureLibLift()).observe($('.decks-row'));
   applyLibView();
   // crates
@@ -1685,25 +1935,21 @@ function bind() {
     $('#welcomeView').classList.add('hidden');
   });
   $('#search').addEventListener('input', (e) => { state.query = e.target.value; renderList(); });
-  $('#list').addEventListener('change', (e) => {
-    if (e.target.id === 'setMinutes') { state.setMinutes = +e.target.value; store.set('setMinutes', state.setMinutes); }
-    if (e.target.id === 'setVibe') { state.setVibe = e.target.value; store.set('setVibe', state.setVibe); }
-  });
-  $('#list').addEventListener('input', (e) => { if (e.target.id === 'setIdea') state.setIdea = e.target.value; });
   const rowTrack = (e) => { const row = e.target.closest('.trow[data-id]'); return row && state.tracks.find((x) => x.id === row.dataset.id); };
   $('#list').addEventListener('click', (e) => {
     const a = e.target.closest('[data-a]')?.dataset.a;
     if (a === 'ask-ai') return askAICoach();
-    if (a === 'build-ai') return buildSet(true);
-    if (a === 'build-quick') return buildSet(false);
-    if (a === 'load-next') return loadNextFromSet();
-    if (a === 'clear-set') { state.set = null; store.set('set', null); return renderList(); }
     if (a === 'ai-settings') return openAI();
     const imp = e.target.closest('[data-import]'); if (imp) return importDialog(imp.dataset.import);
+    const buy = e.target.closest('[data-buy]'); if (buy) return openLinkMenu(buy, { title: state.query.trim() }, true);
+    const wrow = e.target.closest('[data-w]');
+    if (wrow) { const wb = e.target.closest('[data-w-a]'); if (wb) wantedAction(wb, +wrow.dataset.w); return; }
     const rb = e.target.closest('[data-row]');
     if (rb) {
       const t = rowTrack(e); if (!t) return;
+      if (rb.dataset.row === 'links') return openLinkMenu(rb, t);
       if (rb.dataset.row === 'import') return importLibTracks([t]);
+      if (rb.dataset.row === 'set') { const had = inSet(state.set, t.id); commitSet(toggleInSet(state.set, t.id)); return toast(had ? `Took "${t.title}" out of your set.` : `Added "${t.title}" to your set.`); }
       if (rb.dataset.row === 'uncrate' && currentCrate()) return crateOp('remove', { id: currentCrate().id, trackIds: [t.libId] });
       return;
     }
@@ -1732,6 +1978,7 @@ function runCommand(cmd) {
     'source-rekordbox': () => useSource('rekordbox'),
     'source-managed': () => useSource('managed'),
     'library-import': () => importDialog('files'),
+    'library-import-playlist': () => openPlaylistDlg(),
     'play-left': () => togglePlay('left'),
     'play-right': () => togglePlay('right'),
     search: () => focusLibrary(null),
@@ -1740,17 +1987,17 @@ function runCommand(cmd) {
     help: () => $('#help').showModal(),
     'restart-lesson': () => startLesson(state.lessonId),
     'toggle-lessons': () => setPane(!state.paneOpen),
-    'build-set': () => focusLibrary(null, 'set'),
+    'build-set': () => { if (!state.paneOpen) setPane(true); setPaneTab('set'); },
     ai: openAI,
     controller: openCtl,
   }[cmd] || (() => {}))();
 }
 
 function onKey(e) {
-  const typing = !!e.target?.matches?.('input[type=search], input[type=text]');
+  const typing = !!e.target?.matches?.('input[type=search], input[type=text], textarea');
   if (e.key === 'Escape') { if (typing) e.target.blur(); if (state.target) { state.target = null; renderLibrary(); } return; }
   if (typing || e.metaKey || e.ctrlKey || e.altKey || !$('#welcomeView').classList.contains('hidden')) return;
-  if ((e.key === 'Delete' || e.key === 'Backspace') && state.source === 'managed' && state.tab !== 'set' && !e.target?.matches?.('input, textarea, select')) {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && state.source === 'managed' && !e.target?.closest?.('#tutor') && !e.target?.matches?.('input, textarea, select')) {
     const ids = state.libSel.size ? [...state.libSel] : state.libSelId ? [state.libSelId] : [];
     if (!ids.length) return;
     e.preventDefault();
@@ -1779,32 +2026,70 @@ function onKey(e) {
   e.preventDefault(); act();
 }
 
-// ---------- set builder ----------
+// ---------- set list (side panel) ----------
 function setItems() {
   if (!state.set) return [];
   const byId = new Map(state.tracks.map((t) => [t.id, t]));
-  return state.set.items.map((i) => ({ ...i, track: byId.get(i.id) })).filter((i) => i.track);
+  return state.set.items.map((i, n) => ({ ...i, n, track: byId.get(i.id) })).filter((i) => i.track);
 }
-function saveSet(set) {
-  state.set = set && { title: set.title, story: set.story, ai: !!set.ai, items: set.items.map((i) => ({ id: i.track.id, why: i.why, tip: i.tip || '' })), played: [] };
+/** Save a new version of the set and redraw everything that shows it. */
+function commitSet(next) {
+  state.set = next && next.items.length ? next : null;
   store.set('set', state.set);
+  renderSetPanel(); renderList();
+}
+const setEvent = () => EVENTS.find((e) => e.id === state.setEvent) || EVENTS[0];
+/** The vibe only counts for events that follow one (club, festival); the others have their own shape. */
+const vibeName = () => (setEvent().usesVibe ? VIBES.find((v) => v.id === state.setVibe)?.name || 'Journey' : '');
+const crowd = () => ({ event: state.setEvent, audience: state.setAudience });
+
+/** "Build from": the choices for this library, and the one picked (All music if it has gone away). */
+function setFromChoice() {
+  const all = setSources(state.tracks, lib.hasManaged() && state.source === 'managed' ? state.crates : []);
+  return { all, cur: all.find((s) => s.id === state.setFrom) || all[0] };
+}
+const setPool = () => tracksFrom(state.tracks, state.crates, setFromChoice().cur.id);
+
+async function generateSet() {
+  if (!state.tracks.length) return toast('Add some music first.');
+  const from = setFromChoice().cur, pool = setPool();
+  if (!pool.length) return toast(`${from.name} has no tracks yet.`);
+  const first = decks.left.track && pool.some((t) => t.id === decks.left.track.id) ? decks.left.track : null;
+  const where = from.kind === 'all' ? 'your library' : from.name;
+  if (!state.ai.hasKey) {
+    const items = quickSet(pool, { minutes: state.setMinutes, vibe: state.setVibe, first, ...crowd() });
+    if (!items.length) return toast('None of these tracks have a known speed yet. Try again in a moment.');
+    const ev = setEvent(), name = ev.usesVibe ? `${vibeName()} set` : `${ev.name} set`;
+    commitSet(makeSet({ title: `${name}${from.kind === 'all' ? '' : ` from ${from.name}`}`, story: `Built from ${where}. ${ev.story}`, items }));
+    return toast('Quick build done. Connect the AI coach for sets that follow your description.');
+  }
+  state.setBusy = 'generate'; renderSetPanel();
+  try {
+    const r = await buildSetAI({ library: pool, minutes: state.setMinutes, vibe: vibeName(), idea: state.setIdea, level: state.level, first, ...crowd() });
+    commitSet(makeSet({ ...r, ai: true }));
+  } catch (err) { toast(err.message); if (err.noKey) openAI(); }
+  finally { state.setBusy = false; renderSetPanel(); }
 }
 
-async function buildSet(useAI) {
-  if (!state.tracks.length) return toast('Add some music first.');
-  const first = decks.left.track || null;
-  if (!useAI) {
-    const items = quickSet(state.tracks, { minutes: state.setMinutes, vibe: state.setVibe, first });
-    saveSet({ title: `${VIBES.find((v) => v.id === state.setVibe).name} set`, story: `Built from your library: neighbouring keys, small speed changes and an energy shape that fits the vibe.`, items });
-    return renderList();
+async function refineCurrentSet() {
+  const s = state.set; if (!s?.items.length) return toast('Make a set first: press Generate, or add tracks with + in the library.');
+  const downs = s.items.filter((i) => i.vote < 0).length;
+  if (!state.ai.hasKey) {
+    if (!downs) return toast(state.refineText ? 'Following an instruction needs the AI coach. Without it, Refine swaps the tracks you gave a thumbs down.' : 'Give a thumbs down to the tracks you want swapped, then press Refine.');
+    const r = refineSet(state.tracks, s, { vibe: state.setVibe, minutes: state.setMinutes, from: setPool(), ...crowd() });
+    commitSet(r.set);
+    return toast(`Swapped ${r.swapped} track${r.swapped === 1 ? '' : 's'}${r.dropped ? `; ${r.dropped} had nothing left to swap in, so ${r.dropped === 1 ? 'it was' : 'they were'} taken out` : ''}.`);
   }
-  if (!state.ai.hasKey) { toast('Connect the AI coach first.'); return openAI(); }
-  state.setBusy = true; renderList();
+  state.setBusy = 'refine'; renderSetPanel();
   try {
-    const r = await buildSetAI({ library: state.tracks, minutes: state.setMinutes, vibe: VIBES.find((v) => v.id === state.setVibe).name, idea: state.setIdea, level: state.level, first });
-    saveSet({ ...r, ai: true });
+    const r = await refineSetAI({ library: state.tracks, from: setPool(), set: s, instruction: state.refineText.trim(), vibe: vibeName(), minutes: state.setMinutes, level: state.level, ...crowd() });
+    if (state.set !== s) return; // changed while the AI was thinking: keep the DJ's edits
+    const merged = mergeRefined(s, r.items, new Set(state.tracks.map((t) => t.id)));
+    commitSet({ ...merged, title: s.title === NEW_SET_TITLE ? s.title : r.title || s.title, story: r.story || s.story, ai: true });
+    state.refineText = ''; renderSetPanel();
+    toast('Set refined. Your thumbs-up tracks stayed where they were.');
   } catch (err) { toast(err.message); if (err.noKey) openAI(); }
-  finally { state.setBusy = false; renderList(); }
+  finally { state.setBusy = false; renderSetPanel(); }
 }
 
 function nextSetItem() {
@@ -1816,36 +2101,185 @@ function loadNextFromSet() {
   const n = nextSetItem(); if (!n) return toast('That\'s the end of the set.');
   // Load on whichever deck the room isn't hearing.
   const side = !decks.left.buffer ? 'left' : !decks.right.buffer ? 'right' : state.xfader < 0.5 ? 'right' : 'left';
-  const old = decks[side].track?.id; if (old && !state.set.played.includes(old)) { state.set.played.push(old); store.set('set', state.set); }
+  const old = decks[side].track?.id;
+  if (old && inSet(state.set, old) && !state.set.played.includes(old)) { state.set = { ...state.set, played: [...state.set.played, old] }; store.set('set', state.set); }
   loadTo(side, n.track);
 }
 
-function renderSet(el) {
+const paneTab = () => state.paneTab || (state.f.setFirst ? 'set' : 'lessons');
+function setPaneTab(tab) { state.paneTab = tab; store.set('paneTab', tab); renderTutor(); }
+function renderSetPanel() { if (state.paneOpen && paneTab() === 'set') renderTutor(); }
+
+/** The three questions the set builder asks: where the music comes from, what the event is, who's coming. */
+function setQuestionsHTML() {
+  const { all, cur } = setFromChoice(), ev = setEvent(), au = AUDIENCES.find((a) => a.id === state.setAudience) || AUDIENCES[0];
+  const q = (id, label, opts, note) => `<label class="sp-q" for="${id}"><span>${label}</span><select id="${id}">${opts}</select>${note ? `<small>${esc(note)}</small>` : ''}</label>`;
+  const opt = (id, name, on, extra = '') => `<option value="${esc(id)}" ${on ? 'selected' : ''}>${esc(name)}${extra}</option>`;
+  return `<div class="sp-qs">
+    ${q('setFrom', 'Which music?', all.map((s) => opt(s.id, `${s.kind === 'crate' ? 'Crate: ' : s.kind === 'folder' ? 'Folder: ' : ''}${s.name}`, s.id === cur.id, ` (${s.count})`)).join(''), all.length > 1 ? '' : 'Your crates and folders show up here.')}
+    ${q('setEvent', 'What\'s the event?', EVENTS.map((e) => opt(e.id, e.name, e.id === ev.id)).join(''), ev.blurb)}
+    ${q('setAudience', 'Who\'s the crowd?', AUDIENCES.map((a) => opt(a.id, a.name, a.id === au.id)).join(''), au.blurb)}
+  </div>`;
+}
+
+function setPanelHTML() {
   const items = setItems(), next = nextSetItem(), played = new Set(state.set?.played || []);
   const loaded = new Map(SIDES.map((s) => [decks[s].track?.id, s]));
-  const form = `<div class="set-form">
-    <label>Length <select id="setMinutes">${[30, 45, 60, 90, 120].map((m) => `<option value="${m}" ${m === state.setMinutes ? 'selected' : ''}>${m} min</option>`).join('')}</select></label>
-    <label>Vibe <select id="setVibe">${VIBES.map((v) => `<option value="${v.id}" ${v.id === state.setVibe ? 'selected' : ''} title="${esc(v.blurb)}">${esc(v.name)}</option>`).join('')}</select></label>
-    <input type="text" id="setIdea" placeholder="Describe the night (optional): sunset rooftop, deep and warm…" value="${esc(state.setIdea)}">
-    ${state.setBusy ? '<span class="status"><span class="spinner"></span> Building your set…</span>' : `<button class="primary" data-a="build-ai" title="${state.ai.hasKey ? 'Claude plans the set from your library' : 'Connect the AI coach first'}">${icon('wand', 15)} Build with AI</button>
-    <button data-a="build-quick" title="Instant, no internet needed">Quick build</button>`}
-    ${decks.left.track ? `<span class="small muted">Starts from deck A: ${esc(decks.left.track.title)}</span>` : ''}
-  </div>`;
-  if (!items.length) {
-    el.innerHTML = form + `<div class="empty">${icon('list', 30)}<b>Plan a set</b><span>Pick a length and a vibe. The AI coach orders your tracks into a set that flows, with a tip for every mix.${state.ai.hasKey ? '' : ' <button class="ghost" data-a="ai-settings">Connect the AI coach</button> or use Quick build.'}</span></div>`;
-    return;
+  const busy = state.setBusy, has = items.length > 0, ai = state.ai.hasKey;
+  const genTitle = ai ? 'The AI coach plans a new set from your library, using the length, vibe and description' : 'Quick build: a new set from your library, no internet needed. Connect the AI coach to use the description too.';
+  const form = `<section class="sp-form" data-panel="setopts" data-group="set">
+    <div class="fold-head">${fold('setopts', 'Set options')}</div>
+    <div class="sp-main fold-keep">
+      <button class="primary" data-a="generate" ${busy ? 'disabled' : ''} title="${genTitle}">${busy === 'generate' ? '<span class="spinner"></span> Building…' : `${icon('wand', 15)} Generate`}</button>
+      <button data-a="refine" ${busy || !has ? 'disabled' : ''} title="Keep the thumbs-up tracks where they are and swap the thumbs-down ones${ai ? ', following what you type below' : ''}">${busy === 'refine' ? '<span class="spinner"></span> Refining…' : `${icon('refresh', 15)} Refine`}</button>
+      ${ai ? '' : `<button class="ghost sp-ai" data-a="ai-settings" title="Connect the AI coach">${icon('key', 14)} No AI</button>`}
+    </div>
+    ${setQuestionsHTML()}
+    <div class="sp-opts">
+      <label>Length <select id="setMinutes">${[30, 45, 60, 90, 120, 180, 240].map((m) => `<option value="${m}" ${m === state.setMinutes ? 'selected' : ''}>${m < 120 ? `${m} min` : `${m / 60} hours`}</option>`).join('')}</select></label>
+      ${setEvent().usesVibe ? `<label>Vibe <select id="setVibe">${VIBES.map((v) => `<option value="${v.id}" ${v.id === state.setVibe ? 'selected' : ''} title="${esc(v.blurb)}">${esc(v.name)}</option>`).join('')}</select></label>` : ''}
+    </div>
+    <input type="text" id="setIdea" placeholder="Describe the night: sunset rooftop, deep and warm…" value="${esc(state.setIdea)}" aria-label="Describe the night (for Generate)">
+    ${has ? `<input type="text" id="refineText" placeholder="${ai ? 'Tell Refine what to change: more vocals in the middle…' : 'Instructions for Refine need the AI coach'}" value="${esc(state.refineText)}" aria-label="What Refine should change" ${ai ? '' : 'disabled'}>` : ''}
+    ${decks.left.track && !has ? `<span class="small muted">Generate starts from deck A: ${esc(decks.left.track.title)}</span>` : ''}
+  </section>`;
+  if (!has) {
+    return form + `<section class="sp-sec" data-panel="setlist" data-group="set"><div class="fold-head">${fold('setlist', 'Set list')}</div><div class="empty sp-empty">${icon('list', 30)}<b>Plan a set</b><span>Press Generate for a set that flows, or add tracks yourself with the <b class="plus-chip">+</b> button on any track in the library.</span></div></section>`;
   }
-  el.innerHTML = form + `<div class="set-head">${state.set.ai ? '<span class="ai-badge">AI</span>' : icon('list', 16)}<div style="min-width:0;flex:1"><b>${esc(state.set.title)}</b><p>${esc(state.set.story)} · ${items.length} tracks · about ${setMinutes(items)} min</p></div>
-      ${next ? `<button class="primary" data-a="load-next">Load next: ${esc(next.track.title)}</button>` : ''}<button class="ghost" data-a="clear-set">Clear</button></div>`
-    + items.map((i, n) => {
-      const on = loaded.get(i.track.id);
-      return `<div class="srow ${i === next ? 'next' : ''} ${played.has(i.track.id) ? 'played' : ''}" data-id="${esc(i.track.id)}">
-        <span class="num">${n + 1}</span>${keyBadge(i.track)}
-        <span style="min-width:0"><span class="t" style="display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${on ? `<span style="color:var(--${on})">● </span>` : ''}${esc(i.track.title)}</span><span class="a" style="display:block;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(i.track.artist)}</span></span>
-        <span class="n" style="font-variant-numeric:tabular-nums">${fmtBpm(i.track.bpm)}</span>
-        <span class="tip"><b>${esc(i.why)}</b>${i.tip ? `<br>${esc(i.tip)}` : ''}</span>
-        <span class="acts" style="display:flex;gap:4px;justify-content:flex-end"><button class="l" data-load="left" style="padding:1px 8px;font-size:11px;font-weight:700;color:var(--left)">A</button><button class="r" data-load="right" style="padding:1px 8px;font-size:11px;font-weight:700;color:var(--right)">B</button></span></div>`;
-    }).join('');
+  const votes = items.reduce((c, i) => (c[i.vote > 0 ? 'up' : i.vote < 0 ? 'down' : 'none']++, c), { up: 0, down: 0, none: 0 });
+  return form + `<section class="sp-sec" data-panel="setlist" data-group="set"><div class="fold-head">${fold('setlist', 'Set list')}<span class="grow"></span><span class="small muted">${items.length} track${items.length === 1 ? '' : 's'}</span></div><div class="sp-head">
+      <div class="sp-title">${state.set.ai ? '<span class="ai-badge">AI</span>' : ''}<b>${esc(state.set.title)}</b><span class="grow"></span><button class="ghost" data-a="clear-set" title="Clear the whole set">Clear</button></div>
+      ${state.set.story ? `<p>${esc(state.set.story)}</p>` : ''}
+      <p class="muted">${items.length} track${items.length === 1 ? '' : 's'} · about ${setMinutes(items)} min${votes.up || votes.down ? ` · ${votes.up} kept · ${votes.down} to swap` : ''}</p>
+      ${next ? `<button class="primary sp-next" data-a="load-next" title="Load the next track in the set on the deck the room isn't hearing">Load next: ${esc(next.track.title)}</button>` : ''}
+    </div>
+    <ol class="sp-list" aria-label="Set list. Drag rows, or press Alt and an arrow key, to reorder.">` + items.map((i) => {
+      const on = loaded.get(i.track.id), t = i.track;
+      const cls = [i === next && 'next', played.has(t.id) && 'played', i.vote < 0 && 'down', i.vote > 0 && 'up'].filter(Boolean).join(' ');
+      return `<li class="srow ${cls}" data-id="${esc(t.id)}" data-n="${i.n}" draggable="true" tabindex="0" aria-label="${i.n + 1}. ${esc(t.title)}${i.vote > 0 ? ', kept' : i.vote < 0 ? ', to swap' : ''}">
+        <span class="grip" title="Drag to move">${icon('grip', 14)}</span>
+        <span class="num">${i.n + 1}</span>
+        <span class="body">
+          <span class="t">${on ? `<span style="color:var(--${on})" title="On deck ${LETTER[on]}">● </span>` : ''}${esc(t.title)}</span>
+          <span class="meta">${keyBadge(t)}<span class="n">${fmtBpm(t.bpm)}</span><span class="a">${esc(t.artist)}</span></span>
+          ${i.why || i.tip ? `<span class="tip">${i.why ? `<b>${esc(i.why)}</b>` : ''}${i.tip ? ` ${esc(i.tip)}` : ''}</span>` : ''}
+        </span>
+        <span class="votes">
+          <button class="vote up ${i.vote > 0 ? 'on' : ''}" data-vote="1" aria-pressed="${i.vote > 0}" title="Keep it: Refine leaves this track where it is" aria-label="Keep ${esc(t.title)}">${icon('thumb', 15)}</button>
+          <button class="vote down ${i.vote < 0 ? 'on' : ''}" data-vote="-1" aria-pressed="${i.vote < 0}" title="Swap it out: Refine replaces this track" aria-label="Swap out ${esc(t.title)}">${icon('thumb', 15, 'style="transform:scale(1,-1)"')}</button>
+        </span>
+        <span class="acts"><button class="l" data-load="left" title="Load on deck A">A</button><button class="r" data-load="right" title="Load on deck B">B</button><button class="rm" data-a="remove" title="Take out of the set" aria-label="Take ${esc(t.title)} out of the set">${icon('x', 12)}</button></span>
+      </li>`;
+    }).join('') + '</ol></section>';
+}
+
+/** Re-render the panel without losing the text box the DJ is typing in. */
+function keepFocus(el, html) {
+  const a = el.contains(document.activeElement) ? document.activeElement : null;
+  const id = a?.id || null, row = a?.closest?.('.srow')?.dataset.id ?? null;
+  const attr = a && ['data-vote', 'data-a', 'data-load', 'data-ptab', 'data-lesson'].find((k) => a.hasAttribute(k));
+  const sel = id && a.selectionStart != null ? [a.selectionStart, a.selectionEnd] : null;
+  const scroll = $('.tutor-body', el)?.scrollTop;
+  el.innerHTML = html;
+  if (scroll != null && $('.tutor-body', el)) $('.tutor-body', el).scrollTop = scroll;
+  const scope = row != null ? $$('.srow', el).find((r) => r.dataset.id === row) : el;
+  const f = id ? $(`#${id}`, el)
+    : attr && scope ? $$(`[${attr}]`, scope).find((x) => x.getAttribute(attr) === a.getAttribute(attr)) || (row != null ? scope : null)
+    : row != null ? scope : null;
+  if (f) { f.focus({ preventScroll: true }); if (sel) try { f.setSelectionRange(...sel); } catch { /* not a text box */ } }
+}
+
+function bindSetPanel(el) {
+  el.addEventListener('change', (e) => {
+    if (e.target.id === 'setMinutes') { state.setMinutes = +e.target.value; store.set('setMinutes', state.setMinutes); }
+    if (e.target.id === 'setVibe') { state.setVibe = e.target.value; store.set('setVibe', state.setVibe); }
+    if (e.target.id === 'setFrom') { state.setFrom = e.target.value; store.set('setFrom', state.setFrom); }
+    if (e.target.id === 'setEvent') { state.setEvent = e.target.value; store.set('setEvent', state.setEvent); renderSetPanel(); }
+    if (e.target.id === 'setAudience') { state.setAudience = e.target.value; store.set('setAudience', state.setAudience); renderSetPanel(); }
+  });
+  el.addEventListener('input', (e) => {
+    if (e.target.id === 'setIdea') state.setIdea = e.target.value;
+    if (e.target.id === 'refineText') state.refineText = e.target.value;
+  });
+  el.addEventListener('keydown', (e) => {
+    if (e.target.id === 'setIdea' && e.key === 'Enter') { e.preventDefault(); generateSet(); }
+    if (e.target.id === 'refineText' && e.key === 'Enter') { e.preventDefault(); refineCurrentSet(); }
+    const row = e.target.classList?.contains('srow') ? e.target : null;
+    if (!row) return;
+    const n = +row.dataset.n;
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault(); e.stopPropagation();
+      commitSet(moveInSet(state.set, n, n + (e.key === 'ArrowUp' ? -1 : 1)));
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault(); e.stopPropagation();
+      const rows = $$('.srow', el), i = rows.indexOf(row) + (e.key === 'ArrowUp' ? -1 : 1);
+      rows[i]?.focus();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault(); e.stopPropagation();
+      const rows = $$('.srow', el), i = rows.indexOf(row);
+      commitSet(removeFromSet(state.set, row.dataset.id));
+      $$('.srow', el)[Math.min(i, $$('.srow', el).length - 1)]?.focus();
+    } else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); loadSetRow(row.dataset.id); }
+  });
+  // drag to reorder; library tracks dropped here join the set
+  let dragN = null;
+  const ROW_MIME = 'application/x-cuecoach-setrow';
+  el.addEventListener('dragstart', (e) => {
+    const row = e.target.closest?.('.srow'); if (!row) return;
+    dragN = +row.dataset.n; row.classList.add('dragging');
+    e.dataTransfer.setData(ROW_MIME, row.dataset.n); e.dataTransfer.effectAllowed = 'move';
+  });
+  el.addEventListener('dragend', () => { dragN = null; $$('.srow', el).forEach((r) => r.classList.remove('dragging', 'drop-before', 'drop-after')); el.classList.remove('lib-drop'); });
+  const dropSpot = (e) => {
+    const rows = $$('.srow', el);
+    for (const r of rows) { const b = r.getBoundingClientRect(); if (e.clientY < b.top + b.height / 2) return { row: r, before: true }; }
+    return rows.length ? { row: rows[rows.length - 1], before: false } : null;
+  };
+  el.addEventListener('dragover', (e) => {
+    const mine = [...e.dataTransfer.types].includes(ROW_MIME), lib = hasTracks(e);
+    if (!mine && !lib) return;
+    if (paneTab() !== 'set') return;
+    e.preventDefault(); e.dataTransfer.dropEffect = mine ? 'move' : 'copy';
+    $$('.srow', el).forEach((r) => r.classList.remove('drop-before', 'drop-after'));
+    if (mine) { const s = dropSpot(e); if (s) s.row.classList.add(s.before ? 'drop-before' : 'drop-after'); }
+    else el.classList.add('lib-drop');
+  });
+  el.addEventListener('dragleave', (e) => { if (!el.contains(e.relatedTarget)) { el.classList.remove('lib-drop'); $$('.srow', el).forEach((r) => r.classList.remove('drop-before', 'drop-after')); } });
+  el.addEventListener('drop', (e) => {
+    el.classList.remove('lib-drop');
+    if ([...e.dataTransfer.types].includes(ROW_MIME) && dragN != null) {
+      e.preventDefault();
+      const s = dropSpot(e); if (!s) return;
+      let to = +s.row.dataset.n + (s.before ? 0 : 1);
+      if (to > dragN) to -= 1;
+      // data-n is the index in the saved list; rows for missing tracks are hidden, so this is exact for visible rows
+      commitSet(moveInSet(state.set, dragN, to));
+    } else if (hasTracks(e)) {
+      e.preventDefault();
+      let s = state.set; for (const id of draggedIds(e)) s = addToSet(s, id);
+      commitSet(s);
+    }
+  });
+}
+function loadSetRow(id) {
+  const t = state.tracks.find((x) => x.id === id); if (!t) return;
+  const side = !decks.left.buffer ? 'left' : !decks.right.buffer ? 'right' : state.xfader < 0.5 ? 'right' : 'left';
+  loadTo(side, t);
+}
+/** Clicks inside the set tab. Returns true if it handled the click. */
+function setPanelClick(e) {
+  const b = e.target.closest('button'); if (!b) return false;
+  const row = b.closest('.srow'), id = row?.dataset.id;
+  const a = b.dataset.a;
+  if (a === 'generate') { generateSet(); return true; }
+  if (a === 'refine') { refineCurrentSet(); return true; }
+  if (a === 'load-next') { loadNextFromSet(); return true; }
+  if (a === 'ai-settings') { openAI(); return true; }
+  if (a === 'clear-set') { if (confirm('Clear the whole set?')) commitSet(null); return true; }
+  if (a === 'remove' && id) { commitSet(removeFromSet(state.set, id)); return true; }
+  if (b.dataset.vote && id) { commitSet(voteInSet(state.set, id, +b.dataset.vote)); return true; }
+  if (b.dataset.load && id) { const t = state.tracks.find((x) => x.id === id); if (t) loadTo(b.dataset.load, t); return true; }
+  return false;
 }
 
 // ---------- AI coach ----------
@@ -1859,7 +2293,8 @@ function renderAI() {
     ? `Your key is encrypted with your computer's secure storage${a.secure ? '' : ' (not available on this computer)'} and never leaves the app except to talk to Anthropic.`
     : 'In this browser the key is stored on this computer only. The desktop app keeps it encrypted instead.';
   $('#aiBtn').classList.toggle('on', !!a.hasKey);
-  if (state.tab === 'set' || state.tab === 'suggested') renderList();
+  if (state.tab === 'suggested') renderList();
+  renderSetPanel();
 }
 
 async function askAICoach() {
@@ -1948,7 +2383,7 @@ function onControllerMessage(profile, ctl, data) {
     case 'trim': return d.setTrim(a.db);
     case 'filter': return d.setFilter(a.value);
     case 'browse': return moveLibSel(a.steps);
-    case 'browsePress': { const tabs = ['suggested', 'all', 'set'].filter((t) => t !== 'suggested' || state.f.upNext); state.tab = tabs[(tabs.indexOf(state.tab) + 1) % tabs.length]; return renderLibrary(); }
+    case 'browsePress': { const tabs = ['suggested', 'all'].filter((t) => t !== 'suggested' || state.f.upNext); state.tab = tabs[(tabs.indexOf(state.tab) + 1) % tabs.length]; return renderLibrary(); }
     case 'load': return loadSelected(a.side);
     case 'tempo': if (d.buffer) d.setTempo(a.pct); return;
     case 'eq': return setEQ(a.side, a.band, a.db);
@@ -2028,7 +2463,7 @@ function lightsOff() {
 window.addEventListener('beforeunload', lightsOff);
 
 // ---------- library selection from the controller's browse knob ----------
-const LIB_ROWS = '#list .trow[data-id], #list .srow[data-id]';
+const LIB_ROWS = '#list .trow[data-id]';
 function moveLibSel(steps) {
   const rows = $$(LIB_ROWS); if (!rows.length || !steps) return;
   const cur = rows.findIndex((r) => r.dataset.id === state.libSelId);
@@ -2117,6 +2552,7 @@ const SETTINGS = [
   ['theme', 'palette', 'Appearance', 'Light, dark and colour themes'],
   ['level', 'level', 'Your level', 'How much help and how many controls you see'],
   ['lessons', 'book', 'Lessons', 'Show or hide the lessons pane'],
+  ['layout', 'layout', 'Layout', 'Collapse, move or hide sections to suit you'],
   ['help', 'help', 'Keyboard shortcuts', 'Every key Cue Coach listens to'],
 ];
 function openSettings() {
@@ -2127,6 +2563,7 @@ function runSetting(id) {
   $('#settingsDlg').close();
   if (id === 'music') { state.menuOpen = true; renderSource(); $('#library').scrollIntoView({ block: 'nearest' }); return; }
   if (id === 'lessons') return setPane(!state.paneOpen);
+  if (id === 'layout') return openLayout();
   runCommand({ controller: 'controller', ai: 'ai', theme: 'theme', level: 'level', help: 'help' }[id]);
 }
 

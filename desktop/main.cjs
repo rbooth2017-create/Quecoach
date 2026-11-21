@@ -236,6 +236,7 @@ function buildMenu() {
         cmd('Use rekordbox Library', 'source-rekordbox'),
         cmd('Use My Library', 'source-managed'),
         cmd('Import Music to My Library…', 'library-import', 'CmdOrCtrl+I'),
+        cmd('Import Playlist from Spotify or Apple Music…', 'library-import-playlist'),
         { type: 'separator' },
         cmd('Find Music…', 'search', 'CmdOrCtrl+F'),
         { type: 'separator' },
@@ -370,14 +371,15 @@ ipcMain.handle('library-update-analysis', async (e, id, data) => {
 });
 ipcMain.handle('library-crate', async (e, op, args) => {
   if (!fromLearn(e)) return null;
-  const a = plain(args, 1e6), ids = Array.isArray(a.trackIds) ? a.trackIds.map(String) : [];
+  const a = plain(args, 3e6), ids = Array.isArray(a.trackIds) ? a.trackIds.map(String) : [];
   let created = null;
   const lib = await store().update((l) => {
     switch (op) {
-      case 'create': { const r = libModel.createCrate(l, require('node:crypto').randomUUID(), a.name); created = r.crate; return ids.length ? libModel.addToCrate(r.lib, r.crate.id, ids) : r.lib; }
+      case 'create': { const r = libModel.createCrate(l, require('node:crypto').randomUUID(), a.name, a.wanted); created = r.crate; return ids.length ? libModel.addToCrate(r.lib, r.crate.id, ids) : r.lib; }
+      case 'wanted': return libModel.setWanted(l, String(a.id), a.wanted);
       case 'rename': return libModel.renameCrate(l, String(a.id), a.name);
       case 'delete': return libModel.deleteCrate(l, String(a.id));
-      case 'add': return libModel.addToCrate(l, String(a.id), ids);
+      case 'add': { const added = libModel.addToCrate(l, String(a.id), ids); return Array.isArray(a.wanted) ? libModel.setWanted(added, String(a.id), a.wanted) : added; }
       case 'remove': return libModel.removeFromCrate(l, String(a.id), ids);
       default: return l;
     }

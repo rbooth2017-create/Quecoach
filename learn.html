@@ -108,6 +108,43 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 .settings-list small { display: block; color: var(--ink-2); font-size: 12px; }
 .pill-btn { border-color: transparent; background: var(--card-2); font-weight: 600; font-size: 12px; padding: 4px 10px; }
 
+/* ---------- your layout: collapse, move and hide sections ---------- */
+.lay-hidden { display: none !important; }
+.fold-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fold-btn { display: inline-flex; align-items: center; gap: 4px; border: none; background: transparent; padding: 2px 6px 2px 0; border-radius: 6px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); cursor: pointer; flex: none; }
+.fold-btn:hover { color: var(--ink); background: transparent; }
+.fold-btn .panel-title { color: inherit; }
+.fold-ic { display: inline-grid; place-items: center; width: 16px; height: 16px; transition: transform .15s ease; }
+.folded .fold-btn .fold-ic, .fold-btn[aria-expanded="false"] .fold-ic { transform: rotate(-90deg); }
+[data-panel].folded > :not(.fold-head):not(.fold-keep) { display: none !important; }
+[data-panel] > .fold-head[draggable="true"] { cursor: grab; }
+[data-panel].lay-drag { opacity: .45; }
+[data-panel].lay-drop { box-shadow: 0 -3px 0 var(--left); }
+.mixplan > .mp-head { grid-column: 1 / -1; margin-bottom: -6px; }
+.mixplan.folded { padding-bottom: 6px; }
+.mixplan.folded > .mp-head { margin-bottom: 0; }
+.decks-area { display: grid; gap: 4px; }
+.decks-head { padding: 0 4px; }
+.lane-panel.folded { padding-bottom: 6px; }
+.lib-fold { padding-right: 0; }
+.tutor-sec { display: grid; gap: 8px; }
+.tutor-sec + .tutor-sec { margin-top: 2px; }
+.sp-sec { display: grid; }
+.sp-sec > .fold-head { padding: 10px 14px 0; }
+.sp-sec.folded > .fold-head { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.sp-form.folded { gap: 8px; }
+.layout-list { display: grid; gap: 14px; margin-bottom: 14px; max-height: 60vh; overflow: auto; }
+.layout-list h3 { margin: 0 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.lay-row { display: grid; grid-template-columns: minmax(0, 1fr) 78px 28px 28px; align-items: center; gap: 6px; padding: 5px 4px; border-bottom: 1px solid var(--line); }
+.lay-row:last-child { border-bottom: none; }
+.lay-row label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lay-row label span { display: grid; min-width: 0; }
+.lay-row small { color: var(--ink-3); font-size: 11px; }
+.lay-row.off label b { color: var(--ink-3); font-weight: 500; }
+.lay-row .icon-btn { width: 28px; height: 28px; }
+.lay-row .icon-btn[disabled] { opacity: .3; }
+.lay-row .lay-fold { font-size: 11px; padding: 3px 8px; }
+
 /* ---------- coach strip ---------- */
 .coach { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--card); }
 .coach .num { width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: var(--card); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
@@ -127,9 +164,8 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px 0; }
 .panel-title { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 
-.lane-panel { grid-row: 1; } .mixplan { grid-row: 2; } .decks-row { grid-row: 3; } .library { grid-row: 4; }
 /* never squash these (the lane's canvas would spill over the next panel); the library gives way, then the stage scrolls */
-.lane-panel, .mixplan, .decks-row { min-height: min-content; }
+.lane-panel, .mixplan, .decks-area { min-height: min-content; }
 /* next mix: countdown, cue, timeline */
 .mixplan { display: grid; grid-template-columns: 58px minmax(0, 1.1fr) minmax(0, 1.5fr) auto; gap: 12px; align-items: center; padding: 8px 12px; }
 .mp-count { width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; align-content: center; background: var(--card-2); color: var(--ink-2); transition: background .15s, color .15s, transform .1s; }
@@ -341,7 +377,7 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .stage.lib-expanded .library { position: relative; z-index: 5; margin-top: calc(-1 * var(--lib-lift, 0px)); box-shadow: 0 -10px 30px rgba(0,0,0,.16); transition: margin-top .18s ease; }
 /* collapsed: just its header, at the bottom of the window */
 /* the decks take the room the library gave up; the header stays in view at the bottom */
-.stage.lib-collapsed > .decks-row { flex: 1 0 auto; }
+.stage.lib-collapsed > .decks-area:not(.folded) { flex: 1 0 auto; }
 .stage.lib-collapsed > .library { flex: none; grid-template-rows: auto; position: sticky; bottom: 0; z-index: 6; box-shadow: 0 -6px 16px rgba(0,0,0,.12); }
 .stage.lib-collapsed .library > :not(.lib-head) { display: none; }
 .stage.lib-collapsed .lib-head { border-bottom: none; }
@@ -367,7 +403,7 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .lib-banner { display: flex; align-items: center; gap: 10px; padding: 6px 12px; font-size: 12px; background: var(--card-2); border-bottom: 1px solid var(--line); }
 .lib-banner:empty { display: none; }
 .table { overflow: auto; }
-.trow { display: grid; grid-template-columns: 40px minmax(0, 2.2fr) minmax(0, 1.2fr) 64px 50px minmax(0, 1.6fr) 118px; gap: 10px; align-items: center; padding: 0 12px; height: 34px; border-bottom: 1px solid var(--line); }
+.trow { display: grid; grid-template-columns: 40px minmax(0, 2.2fr) minmax(0, 1.2fr) 64px 50px minmax(0, 1.6fr) 172px; gap: 10px; align-items: center; padding: 0 12px; height: 34px; border-bottom: 1px solid var(--line); }
 .trow:hover { background: var(--card-2); }
 .trow.head { position: sticky; top: 0; z-index: 1; height: 28px; background: var(--card); color: var(--ink-3); font-size: 11px; font-weight: 650; }
 .trow.head:hover { background: var(--card); }
@@ -376,10 +412,16 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .trow .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trow .a, .trow .why { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trow .n { font-variant-numeric: tabular-nums; }
+.trow .mcell { display: flex; gap: 6px; min-width: 0; align-items: center; }
 .trow .acts { display: flex; gap: 4px; justify-content: flex-end; opacity: .0; }
 .trow:hover .acts, .trow:focus-within .acts { opacity: 1; }
 .trow .acts button { padding: 1px 8px; font-size: 11px; font-weight: 700; }
 .trow .acts .l { color: var(--left); } .trow .acts .r { color: var(--right); }
+.trow .acts .add { padding: 1px 6px; color: var(--ink-2); }
+.trow .acts .add.on { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.trow:has(.add.on) .acts { opacity: 1; }
+.trow:has(.add.on) .acts button:not(.add) { opacity: 0; }
+.trow:hover .acts button, .trow:focus-within .acts button { opacity: 1 !important; }
 .match { font-size: 11px; font-weight: 650; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
 .match.great { background: var(--ok-soft); color: var(--ok); }
 .match.good { background: var(--close-soft); color: var(--close); }
@@ -406,6 +448,9 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .tutor { width: 330px; border-left: 1px solid var(--line); background: var(--card); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
 .tutor-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); }
 .tutor-head b { font-size: 14px; }
+.pane-tabs button { display: inline-flex; gap: 5px; }
+.pane-tabs button .ic { color: var(--ink-3); }
+.pane-tabs button.active .ic { color: var(--left); }
 .tutor-head .grow { flex: 1; }
 .tutor-body { overflow: auto; padding: 14px 16px 24px; display: grid; align-content: start; gap: 16px; }
 .lesson-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 10px; background: var(--bg); }
@@ -433,6 +478,64 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .course + .course { margin-top: 4px; }
 .bar { height: 6px; border-radius: 99px; background: var(--card-2); overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--ok); border-radius: 99px; }
+
+/* set list in the side panel */
+.set-pane { padding: 0 0 24px; gap: 0; }
+.set-pane.lib-drop, .tutor.lib-drop .set-pane { box-shadow: inset 0 0 0 2px var(--left); }
+.sp-form { display: grid; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--card); }
+.sp-main { display: flex; gap: 6px; align-items: center; }
+.sp-main button[data-a="generate"], .sp-main button[data-a="refine"] { flex: 1; justify-content: center; }
+.sp-main button[disabled] { opacity: .5; transform: none; }
+.sp-main .sp-ai { padding: 5px 8px; font-size: 12px; }
+.sp-qs { display: grid; gap: 8px; }
+.sp-form .sp-q { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 2px 8px; }
+.sp-q > span { color: var(--ink); font-weight: 600; font-size: 12px; }
+.sp-q select { width: 100%; }
+.sp-q small { grid-column: 2; color: var(--ink-3); font-size: 11px; line-height: 1.35; }
+.sp-opts { display: flex; gap: 10px; flex-wrap: wrap; }
+.sp-form label { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
+.sp-form select, .sp-form input[type=text] { padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--card-2); min-width: 0; }
+.sp-form input[type=text] { width: 100%; }
+.sp-form input[disabled] { opacity: .6; }
+.sp-empty { height: auto; padding: 36px 24px; }
+.plus-chip { display: inline-block; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 6px; font-size: 11px; color: var(--ink); }
+.sp-head { display: grid; gap: 4px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.sp-title { display: flex; align-items: center; gap: 8px; }
+.sp-title b { font-size: 14px; }
+.sp-title .grow { flex: 1; }
+.sp-head p { margin: 0; color: var(--ink-2); font-size: 12px; }
+.sp-next { margin-top: 6px; justify-content: center; min-width: 0; }
+.sp-list { list-style: none; margin: 0; padding: 0; }
+.sp-list .srow { grid-template-columns: 14px 18px minmax(0, 1fr) auto; gap: 6px; padding: 8px 10px 8px 6px; align-items: start; position: relative; outline: none; }
+.sp-list .srow:focus-visible { box-shadow: inset 0 0 0 2px var(--left); }
+.sp-list .srow:hover { background: var(--card-2); }
+.sp-list .grip { color: var(--ink-3); cursor: grab; padding-top: 2px; opacity: .6; }
+.sp-list .srow:hover .grip { opacity: 1; }
+.sp-list .num { padding-top: 1px; font-size: 12px; }
+.sp-list .body { display: grid; gap: 3px; min-width: 0; }
+.sp-list .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-list .meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink-2); }
+.sp-list .meta .keybadge { transform: scale(.9); transform-origin: left center; }
+.sp-list .meta .n { font-variant-numeric: tabular-nums; }
+.sp-list .meta .a { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-list .tip { font-size: 12px; line-height: 1.35; }
+.sp-list .votes { display: flex; gap: 2px; }
+.sp-list .vote { width: 28px; height: 26px; padding: 0; justify-content: center; border-color: transparent; background: transparent; color: var(--ink-3); }
+.sp-list .vote:hover { background: var(--card); color: var(--ink); border-color: var(--line-2); }
+.sp-list .vote.up.on { color: var(--ok); background: var(--ok-soft); border-color: var(--ok); }
+.sp-list .vote.down.on { color: var(--warn); background: var(--warn-soft); border-color: var(--warn); }
+.sp-list .acts { grid-column: 3 / -1; display: flex; gap: 4px; justify-content: flex-end; height: 0; overflow: hidden; opacity: 0; }
+.sp-list .srow:hover .acts, .sp-list .srow:focus-within .acts, .sp-list .srow:focus .acts { height: auto; opacity: 1; overflow: visible; }
+.sp-list .acts button { padding: 1px 8px; font-size: 11px; font-weight: 700; }
+.sp-list .acts .l { color: var(--left); } .sp-list .acts .r { color: var(--right); }
+.sp-list .acts .rm { padding: 1px 6px; color: var(--ink-2); }
+.sp-list .srow.down > :not(.votes):not(.acts) { opacity: .45; }
+.sp-list .srow.down .t { text-decoration: line-through; text-decoration-color: var(--warn); }
+.sp-list .srow.played { opacity: .55; }
+.sp-list .srow.next { background: color-mix(in srgb, var(--ok) 9%, transparent); }
+.sp-list .srow.dragging { opacity: .35; }
+.sp-list .srow.drop-before { box-shadow: inset 0 2px 0 var(--left); }
+.sp-list .srow.drop-after { box-shadow: inset 0 -2px 0 var(--left); }
 
 /* set builder */
 .set-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; }
@@ -469,6 +572,36 @@ dialog p { margin: 0 0 14px; color: var(--ink-2); }
 dialog table { width: 100%; border-collapse: collapse; }
 dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:first-child { width: 120px; }
 .dlg-foot { margin-top: 16px; display: flex; justify-content: flex-end; }
+/* Spotify and Apple Music: tracks still to get, the find/listen menu, the playlist import dialog */
+.wanted-head { display: flex; gap: 10px; align-items: baseline; padding: 14px 12px 6px; border-bottom: 1px solid var(--line); }
+.wanted-head b { font-size: 12px; }
+.wanted-head span { color: var(--ink-3); font-size: 11px; }
+.trow.wanted .t { font-weight: 500; color: var(--ink-2); }
+.trow.wanted .acts { opacity: 1; }
+.buy-bar { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 14px 12px; color: var(--ink-3); font-size: 12px; }
+.buy-bar button, .empty [data-buy] { display: inline-flex; gap: 6px; align-items: center; }
+.trow.wanted .acts .find { color: var(--ink); display: inline-flex; gap: 4px; align-items: center; }
+.crate .want { color: var(--ink-3); font-size: 10px; margin-left: 2px; }
+.menu.link-menu { position: fixed; top: 0; left: 0; right: auto; min-width: 210px; z-index: 60; }
+.link-menu .menu-title { padding: 5px 10px 4px; font-size: 11px; color: var(--ink-3); max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#plDlg { width: min(560px, 92vw); }
+.pl-how { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+.pl-how > div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--card-2); font-size: 12px; }
+.pl-how ol { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); display: grid; gap: 3px; }
+.pl-how a { color: var(--left); }
+#plText { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card-2); color: var(--ink); font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; resize: vertical; min-height: 60px; }
+.pl-pick { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pl-sum { font-weight: 650; margin: 4px 0 8px; }
+.pl-list { max-height: 190px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
+.pl-row { display: grid; grid-template-columns: 16px minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.pl-row:last-child { border-bottom: none; }
+.pl-row .t, .pl-row .a { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-row .a { color: var(--ink-2); }
+.pl-row .ic { color: var(--ink-3); }
+.pl-row.have .ic { color: var(--ok, #1f9d55); }
+.dlg-foot.two { gap: 8px; }
+@media (max-width: 560px) { .pl-how { grid-template-columns: 1fr; } }
+
 .levels { display: grid; gap: 6px; }
 .level { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; text-align: left; border-radius: 10px; padding: 10px 12px; }
 .level .ic { grid-row: 1 / 3; align-self: center; color: var(--ink-3); }
@@ -492,7 +625,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 @container (max-width: 900px) {
   .decks-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .mixer { grid-column: 1 / -1; grid-row: 2; }
-  .trow { grid-template-columns: 40px minmax(0, 2fr) 60px 118px; }
+  .trow { grid-template-columns: 40px minmax(0, 2fr) 60px 146px; }
   .trow .wide { display: none; }
   .library.with-crates .lib-body { grid-template-columns: 140px minmax(0, 1fr); }
 }
@@ -507,25 +640,26 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <button class="ctl-chip" id="ctlBtn" title="Controller and sound output"></button>
     <button class="pill-btn" id="levelBtn" title="Your level"></button>
     <button class="icon-btn" id="aiBtn" title="AI coach settings" aria-label="AI coach settings"></button>
-    <button class="icon-btn" id="lessonsBtn" title="Show or hide lessons (L)" aria-label="Lessons" aria-pressed="false"></button>
+    <button class="icon-btn" id="lessonsBtn" title="Show or hide lessons and your set (L)" aria-label="Lessons and set" aria-pressed="false"></button>
     <button class="icon-btn" id="themeBtn" title="Appearance" aria-label="Appearance"></button>
     <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings"></button>
     <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"></button>
   </div>
 </header>
 
-<div class="coach" id="coach"></div>
+<div class="coach" id="coach" data-panel="coach"></div>
 
 <div class="workspace">
 <main class="stage">
-  <section class="panel lane-panel" id="lanePanel">
-    <div class="panel-head"><span class="panel-title" id="laneTitle">Beat lane</span><span class="hint" id="hint">Play both decks to compare beats</span></div>
+  <section class="panel lane-panel" id="lanePanel" data-panel="lane" data-group="stage">
+    <div class="panel-head fold-head"><button type="button" class="fold-btn" data-fold="lane"><span class="fold-ic"></span><span class="panel-title" id="laneTitle">Beat lane</span></button><span class="hint" id="hint">Play both decks to compare beats</span></div>
     <div class="lane-wrap"><canvas id="lane"></canvas>
       <div class="lane-cover hidden" id="laneCover"><div><b>Beatmatch by ear</b><div class="muted small">Listen for the kick drums. When you think they're together, check.</div></div><button class="primary" id="checkBtn">Check my beats <kbd>C</kbd></button></div>
     </div>
   </section>
 
-  <section class="panel mixplan hidden" id="mixPlan" aria-live="polite">
+  <section class="panel mixplan hidden" id="mixPlan" aria-live="polite" data-panel="mixplan" data-group="stage">
+    <div class="fold-head mp-head"><button type="button" class="fold-btn" data-fold="mixplan"><span class="fold-ic"></span>When to mix</button></div>
     <div class="mp-count"><b data-mp-big>–</b><span data-mp-unit></span></div>
     <div class="mp-text"><b data-mp-title></b><span data-mp-detail></span><span class="mp-note" data-mp-note hidden></span><span class="mp-part" data-mp-part></span></div>
     <canvas class="mp-time" data-mp-time title="Deck A's parts, where to start B, and how B's intro lines up"></canvas>
@@ -533,18 +667,22 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <ol class="mp-steps" data-mp-steps aria-label="Mix steps"></ol>
   </section>
 
-  <section class="decks-row">
-    <div class="panel deck" data-side="left" id="deck-left"></div>
-    <div class="panel mixer" id="mixer"></div>
-    <div class="panel deck" data-side="right" id="deck-right"></div>
+  <section class="decks-area" data-panel="decks" data-group="stage">
+    <div class="fold-head decks-head"><button type="button" class="fold-btn" data-fold="decks"><span class="fold-ic"></span>Decks and mixer</button></div>
+    <div class="decks-row">
+      <div class="panel deck" data-side="left" id="deck-left"></div>
+      <div class="panel mixer" id="mixer"></div>
+      <div class="panel deck" data-side="right" id="deck-right"></div>
+    </div>
   </section>
 
-  <section class="panel library" id="library">
+  <section class="panel library" id="library" data-panel="library" data-group="stage">
     <div class="lib-head">
-      <div class="tabs" id="libTabs"><button data-tab="suggested">Suggested</button><button data-tab="all">All music</button><button data-tab="set">Set</button></div>
+      <button type="button" class="fold-btn lib-fold" id="libFold" aria-label="Collapse the library"></button>
+      <div class="tabs" id="libTabs"><button data-tab="suggested">Suggested</button><button data-tab="all">All music</button></div>
       <label class="search"><span id="searchIcon"></span><input id="search" type="search" placeholder="Search title, artist, genre or key" autocomplete="off" spellcheck="false"></label>
       <div class="lib-source" id="source"></div>
-      <div class="lib-size"><button class="icon-btn" id="libExpand" aria-pressed="false"></button><button class="icon-btn" id="libCollapse" aria-pressed="false"></button></div>
+      <div class="lib-size"><button class="icon-btn" id="libExpand" aria-pressed="false"></button></div>
     </div>
     <div class="lib-banner" id="libBanner"></div>
     <div class="lib-body"><nav class="crates" id="crates" aria-label="My library and crates"></nav><div class="table" id="list"></div></div>
@@ -623,10 +761,31 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
   <form method="dialog" class="dlg-foot"><button>Done</button></form>
 </dialog>
 
+<dialog id="layoutDlg">
+  <h2>Layout</h2>
+  <p>Collapse any section with the arrow on its header. Here you can also move sections, or hide the ones you don't use. You can drag a section's header to move it too.</p>
+  <div class="layout-list" id="layoutList"></div>
+  <div class="dlg-foot two"><button type="button" class="ghost" id="layoutReset">Reset layout</button><button type="button" class="primary" id="layoutDone">Done</button></div>
+</dialog>
+
 <dialog id="settingsDlg">
   <h2>Settings</h2>
   <div class="settings-list" id="settingsList"></div>
   <form method="dialog" class="dlg-foot"><button>Done</button></form>
+</dialog>
+
+<dialog id="plDlg">
+  <h2>Import a playlist</h2>
+  <p>Bring a playlist in from Spotify or Apple Music. It becomes a crate: tracks you already have go in, and the rest are listed as still to get, with links to find them. Streamed music can't play on the decks, so you'll need your own copy of each track.</p>
+  <div class="pl-how" id="plHow"></div>
+  <div class="field">
+    <div class="pl-pick"><button type="button" id="plFile" class="primary">Choose export file…</button><span class="small muted">.csv, .txt or .m3u</span></div>
+    <input type="file" id="plInput" accept=".csv,.txt,.tsv,.m3u,.m3u8,text/csv,text/plain" hidden>
+    <label for="plText" class="small muted">Or paste a list, one track per line: Artist - Title</label>
+    <textarea id="plText" rows="3" spellcheck="false" placeholder="Kora Vale - Night Drive&#10;Mono Atlas - Glasshouse"></textarea>
+  </div>
+  <div id="plPreview"></div>
+  <div class="dlg-foot two"><button type="button" class="ghost" id="plCancel">Cancel</button><button type="button" class="primary" id="plCreate" disabled>Create crate</button></div>
 </dialog>
 
 <dialog id="help">
@@ -640,11 +799,12 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
     <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Crossfader</td></tr>
     <tr><td><kbd>C</kbd></td><td>Check your beats (Confident level)</td></tr>
     <tr><td><kbd>/</kbd></td><td>Search your music</td></tr>
-    <tr><td><kbd>L</kbd></td><td>Show or hide lessons</td></tr>
+    <tr><td><kbd>L</kbd></td><td>Show or hide lessons and your set</td></tr>
   </table>
   <form method="dialog" class="dlg-foot"><button class="primary">Got it</button></form>
 </dialog>
 
+<div id="linkMenu" class="menu link-menu hidden" role="menu"></div>
 <script type="module" src="js/learn.js"></script>
 </body>
 </html>

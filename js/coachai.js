@@ -1,7 +1,7 @@
 // AI set builder and track suggestions for the Learn app (Claude).
 // Desktop app: requests go through the main process, which holds the API key (encrypted).
 // Plain browser (development): the key is kept in this browser and requests go straight to the API.
-import { slimTrack } from './setbuilder.js';
+import { slimTrack, eventBrief } from './setbuilder.js';
 import { friendlyMatch } from './musiclib.js';
 
 const desktop = window.cueDesktop?.ai || null;
@@ -94,14 +94,15 @@ function candidatesFor(library, first, max = 160) {
   return Array.from({ length: max }, (_, i) => usable[Math.floor(i * step)]);
 }
 
-export async function buildSetAI({ library, minutes, vibe, idea, level, first }) {
+export async function buildSetAI({ library, minutes, vibe, idea, level, first, event, audience }) {
   const cands = candidatesFor(library, first);
   const byId = new Map(cands.map((t) => [t.id, t]));
-  const prompt = `Plan a ${minutes}-minute DJ set. Vibe: ${vibe}.${idea ? ` The DJ says: "${idea}".` : ''}
+  const prompt = `Plan a ${minutes}-minute DJ set.${vibe ? ` Vibe: ${vibe}.` : ''}
+${eventBrief({ event, audience })}${idea ? `\nThe DJ says: "${idea}".` : ''}
 The DJ is ${LEVEL_NOTE[level] || LEVEL_NOTE.starter}.
 ${first ? `Start with this track: ${first.id}.` : 'Pick a good opener.'}
 Count about three quarters of each track's minutes as played time, and stop when the set is long enough.
-Prefer neighbouring keys (Camelot) and small BPM steps, and shape the energy to the vibe.
+Shape the energy to the event and crowd. Prefer neighbouring keys (Camelot) and small BPM steps where the event calls for smooth blends. Make each mixing tip fit the event.
 
 Tracks (JSON lines):
 ${cands.map((t) => JSON.stringify(slimTrack(t))).join('\n')}`;
@@ -110,6 +111,39 @@ ${cands.map((t) => JSON.stringify(slimTrack(t))).join('\n')}`;
   const items = data.tracks.filter((x) => byId.has(x.id) && !seen.has(x.id) && seen.add(x.id)).map((x) => ({ track: byId.get(x.id), why: x.why, tip: x.tip, ai: true }));
   if (!items.length) throw new Error('The AI didn\'t pick any tracks from your library. Try again.');
   return { title: data.title, story: data.story, items };
+}
+
+/**
+ * Rework a set the DJ has voted on: keep every 👍 track where it is, replace every 👎 track, follow the
+ * DJ's instruction. `set` is the saved set ({ items: [{ id, why, tip, vote }] }). Returns proposed items
+ * [{ id, why, tip }] in order plus a title and story; mergeRefined() then puts the 👍 tracks back on their
+ * exact slots and drops anything that breaks the rules.
+ */
+export async function refineSetAI({ library, set, instruction, vibe, minutes, level, from = library, event, audience }) {
+  const byId = new Map(library.map((t) => [t.id, t]));
+  const inSet = set.items.map((i) => byId.get(i.id)).filter(Boolean);
+  const cands = candidatesFor(from, inSet[0] || null).filter((t) => !set.items.some((i) => i.id === t.id));
+  const verdict = (v) => (v > 0 ? 'KEEP' : v < 0 ? 'SWAP' : 'open');
+  const prompt = `Refine this ${minutes}-minute DJ set.${vibe ? ` Vibe: ${vibe}.` : ''}
+${eventBrief({ event, audience })}${instruction ? `\nThe DJ asks: "${instruction}".` : ''}
+The DJ is ${LEVEL_NOTE[level] || LEVEL_NOTE.starter}.
+
+The DJ has voted on the current set. Rules:
+- KEEP tracks must stay at exactly the same position (1-based) with the same id.
+- SWAP tracks must be left out and replaced with different tracks from the library list.
+- open tracks may stay, move or be replaced.
+- Use each track once. Count about three quarters of each track's minutes as played time.
+Return the whole new set in order, with a why and a mixing tip for every track.
+
+Current set, in order (JSON lines):
+${set.items.map((i, n) => { const t = byId.get(i.id); return t ? JSON.stringify({ position: n + 1, verdict: verdict(i.vote), ...slimTrack(t) }) : ''; }).filter(Boolean).join('\n')}
+
+Other tracks in the library (JSON lines):
+${cands.map((t) => JSON.stringify(slimTrack(t))).join('\n')}`;
+  const data = await ask({ system: SYSTEM, prompt, schema: SET_SCHEMA, effort: 'medium' });
+  const tracks = data.tracks.filter((x) => byId.has(x.id));
+  if (!tracks.length) throw new Error('The AI didn\'t pick any tracks from your library. Try again.');
+  return { title: data.title, story: data.story, items: tracks.map((x) => ({ id: x.id, why: x.why, tip: x.tip })) };
 }
 
 // ---------- next-track suggestions ----------

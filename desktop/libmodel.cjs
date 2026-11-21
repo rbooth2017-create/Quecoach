@@ -1,6 +1,7 @@
 // My library: the pure part (no Electron, no file system), so it can be unit-tested.
-// The library is one JSON object: { version, tracks: [record], crates: [{ id, name, trackIds }] }.
+// The library is one JSON object: { version, tracks: [record], crates: [{ id, name, trackIds, wanted? }] }.
 // Crates are playlists: a track can be in several, and deleting a crate never deletes music.
+// `wanted` lists tracks from an imported Spotify or Apple Music playlist that aren't in the library yet.
 // Every function returns a new library object and leaves the one passed in untouched.
 
 const VERSION = 1;
@@ -12,7 +13,7 @@ function normalise(lib) {
   return {
     version: VERSION,
     tracks: Array.isArray(l.tracks) ? l.tracks.filter((t) => t && t.id && t.file) : [],
-    crates: Array.isArray(l.crates) ? l.crates.filter((c) => c && c.id).map((c) => ({ id: c.id, name: String(c.name || 'Crate'), trackIds: Array.isArray(c.trackIds) ? c.trackIds : [] })) : [],
+    crates: Array.isArray(l.crates) ? l.crates.filter((c) => c && c.id).map((c) => withWanted({ id: c.id, name: String(c.name || 'Crate'), trackIds: Array.isArray(c.trackIds) ? c.trackIds : [] }, c.wanted)) : [],
   };
 }
 
@@ -137,8 +138,35 @@ function uniqueCrateName(lib, wanted, exceptId = null) {
   for (let i = 2; ; i++) if (!taken.has(`${wanted} ${i}`.toLowerCase())) return `${wanted} ${i}`;
 }
 
-function createCrate(lib, id, name = 'New crate') {
-  const crate = { id, name: uniqueCrateName(lib, cleanName(name) || 'New crate'), trackIds: [] };
+// ---------- tracks still to get (from an imported playlist) ----------
+const MAX_WANTED = 5000;
+const short = (v, n = 300) => str(v).slice(0, n);
+/** Only the fields we know, trimmed; items without a title are dropped. */
+function cleanWanted(items) {
+  if (!Array.isArray(items)) return [];
+  const out = [];
+  for (const it of items.slice(0, MAX_WANTED)) {
+    if (!it || typeof it !== 'object' || !short(it.title)) continue;
+    const w = { title: short(it.title), artist: short(it.artist) };
+    for (const k of ['album', 'isrc', 'spotify']) if (short(it[k], 200)) w[k] = short(it[k], 200);
+    if (num(it.duration)) w.duration = Math.round(num(it.duration));
+    out.push(w);
+  }
+  return out;
+}
+/** The crate with its `wanted` list, which is left off when empty. */
+function withWanted(crate, items) {
+  const { wanted: _old, ...rest } = crate;
+  const w = cleanWanted(items);
+  return w.length ? { ...rest, wanted: w } : rest;
+}
+/** Replace a crate's list of tracks still to get. */
+function setWanted(lib, id, items) {
+  return { ...lib, crates: lib.crates.map((c) => (c.id === id ? withWanted(c, items) : c)) };
+}
+
+function createCrate(lib, id, name = 'New crate', wanted = []) {
+  const crate = withWanted({ id, name: uniqueCrateName(lib, cleanName(name) || 'New crate'), trackIds: [] }, wanted);
   return { lib: { ...lib, crates: [...lib.crates, crate] }, crate };
 }
 
@@ -175,4 +203,5 @@ module.exports = {
   safeFileName, uniqueFileName, parseFileName, libraryFileName,
   recordFrom, findDuplicate, addTrack, updateAnalysis, removeTracks,
   createCrate, renameCrate, deleteCrate, addToCrate, removeFromCrate,
+  cleanWanted, setWanted,
 };
