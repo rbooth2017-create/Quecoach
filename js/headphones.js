@@ -29,7 +29,11 @@ export function cueRoute({ maxChannels = 2, outputs = [], mainId = '', choice = 
   const four = n >= 4;
   const channels = { mode: 'channels', channels: 4, master: [0, 1], cue: [2, 3], deviceId: null, why: 'Speakers on outputs 1-2, headphones on outputs 3-4 of the same sound card.' };
   const speakers = (why) => ({ mode: 'speakers', channels: 2, master: [0, 1], cue: null, deviceId: null, why });
-  const device = (id, label) => ({ mode: 'device', channels: 2, master: [0, 1], cue: null, deviceId: id, why: `Headphones play from ${label || 'the chosen output'}.` });
+  // A controller as a second output: its headphone socket is outputs 3-4 (audio.js falls back to 1-2 if it has only 2).
+  const device = (id, label) => (looksLikeController(label) && !looksLikeHeadphones(label)
+    ? { mode: 'device', channels: 4, master: [0, 1], cue: [2, 3], deviceId: id, why: `Headphones in ${label}'s headphone socket. The room hears ${mainName()}.` }
+    : { mode: 'device', channels: 2, master: [0, 1], cue: [0, 1], deviceId: id, why: `Headphones play from ${label || 'the chosen output'}.` });
+  const mainName = () => outputs.find((o) => o.id === mainId)?.label || 'the computer\'s default output';
 
   if (choice === 'speakers') return speakers('You chose to use Listen through the speakers.');
   if (choice === 'channels') return four ? channels : speakers('This sound output only has 2 channels, so there\'s no headphone socket on it.');
@@ -43,6 +47,9 @@ export function cueRoute({ maxChannels = 2, outputs = [], mainId = '', choice = 
   const hp = outputs.find((o) => o.id !== mainId && looksLikeHeadphones(o.label));
   if (hp) return device(hp.id, hp.label);
   const main = outputs.find((o) => o.id === mainId);
+  // Room sound on the laptop (or other speakers), controller plugged in: its headphone socket still works.
+  const ctl = !looksLikeController(main?.label) && outputs.find((o) => o.id !== mainId && looksLikeController(o.label));
+  if (ctl) return device(ctl.id, ctl.label);
   if (main && looksLikeController(main.label)) return speakers('Your controller only shows 2 outputs to this computer, so headphones can\'t be separate yet. See the tip below.');
   return speakers('Plug in a DJ controller and choose it as the sound output to use its headphone socket.');
 }

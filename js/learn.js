@@ -21,7 +21,7 @@ const PHRASE_NAMES = { Up: 'Build', Down: 'Breakdown' };
 import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex, eqBands } from './levels.js';
 import { JogWheel, jogHTML, dialHTML, setDial, bindDials } from './controls.js';
 import { beatCount, phraseOffset, LOOP_SIZES, JUMP_SIZES, loopAt, jumpBy, scaleLoop } from './deckmath.js';
-import { planMix, mixCue, partInfo, mixControls, mixSteps, shiftPlan, stepState } from './mixplan.js';
+import { planMix, mixCue, partInfo, mixControls, mixSteps, prepSteps, PREP_STEPS, shiftPlan, stepState } from './mixplan.js';
 import { FxRack, FX, PAD_FX, padFxLabel } from './fx.js';
 import { SAMPLES, playSample, stopSample, samplePlaying } from './sampler.js';
 
@@ -76,7 +76,7 @@ const state = {
   // My library (desktop app): crates, the open crate, an import in progress, the panel's size, selected rows
   layout: lay.normalize(store.get('layout', null)),
   crates: [], crate: store.get('crate', null), importing: null, importMenu: false, editCrate: null,
-  libView: store.get('libView', 'normal'), libSel: new Set(),
+  libView: store.get('libDrawer', 'collapsed'), libSel: new Set(),
   analysing: null, scanToken: 0, loading: {},
   level: store.get('level', 'starter'), f: null,
   aligned: 0, alignLocked: false, cleanMixes: store.get('cleanMixes', 0), checkUntil: 0, xfader: 0, jogUsed: false,
@@ -259,7 +259,7 @@ function renderDeck(side) {
   });
   d._wave = null; // rebuild waveform columns for the new canvas
   if (state.prep[side]) renderPrep(side);
-  requestAnimationFrame(measureLibLift);
+  scheduleFit();
 }
 
 // ---------- mixer ----------
@@ -851,7 +851,7 @@ async function dropOnCrate(target, e) {
 // ---------- library panel size: normal, expanded (over the decks, below their titles) or collapsed ----------
 function setLibView(v) {
   state.libView = ['expanded', 'collapsed'].includes(v) ? v : 'normal';
-  store.set('libView', state.libView);
+  store.set('libDrawer', state.libView);
   applyLibView();
 }
 function applyLibView() {
@@ -864,19 +864,45 @@ function applyLibView() {
   fold.innerHTML = `<span class="fold-ic">${icon('chevron', 14)}</span>`;
   fold.setAttribute('aria-expanded', String(v !== 'collapsed'));
   fold.title = v === 'collapsed' ? 'Show the library' : 'Collapse the library to its header';
-  measureLibLift();
+  fitStage();
 }
-/** How far the expanded library reaches up: to just below the decks' title rows. */
-function measureLibLift() {
-  if (state.libView !== 'expanded') return;
-  const row = $('.decks-row'), heads = $$('.decks-row .deck-head');
-  if (!row || !heads.length) return;
-  // only reach over the decks when they're open and sit right above the library
-  const shown = lay.groupOrder(state.layout, 'stage').filter((id) => !state.layout.hidden[id] && !$(`[data-panel="${id}"]`).classList.contains('hidden'));
-  if (state.layout.folded.decks || shown[shown.indexOf('library') - 1] !== 'decks') { $('.stage').style.setProperty('--lib-lift', '0px'); return; }
-  const rowBottom = row.getBoundingClientRect().bottom, headBottom = Math.max(...heads.map((h) => h.getBoundingClientRect().bottom));
-  const gap = parseFloat(getComputedStyle($('.stage')).rowGap) || 10;
-  $('.stage').style.setProperty('--lib-lift', `${Math.max(0, Math.round(rowBottom + gap - headBottom - 8))}px`);
+
+// ---------- fit to the window: lane, plan and decks zoom down so they always fit above the library's header ----------
+const FIT_MIN = 0.5; // below this the stage scrolls instead: the controls would be too small to use
+let fitQueued = false;
+function scheduleFit() {
+  if (fitQueued) return;
+  fitQueued = true;
+  requestAnimationFrame(() => { fitQueued = false; fitStage(); });
+}
+function fitStage() {
+  const st = $('.stage'), lib = $('#library'); if (!st || !lib) return;
+  const cs = getComputedStyle(st), gap = parseFloat(cs.rowGap) || 0;
+  const inner = st.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  const head = $('.lib-head', lib).offsetHeight;
+  // natural heights, at zoom 1 and without the decks stretching
+  st.classList.add('fit-measure');
+  const items = [...st.children].filter((el) => el !== lib && el.getClientRects().length);
+  const natural = items.reduce((sum, el) => sum + el.getBoundingClientRect().height, 0);
+  st.classList.remove('fit-measure');
+  const room = inner - head - gap * items.length;
+  const fit = natural > 0 ? Math.max(FIT_MIN, Math.min(1, room / natural)) : 1;
+  const old = parseFloat(st.style.getPropertyValue('--fit')) || 1;
+  if (Math.abs(old - fit) > 0.002) {
+    st.style.setProperty('--fit', fit.toFixed(3));
+    for (const s of SIDES) if (decks[s]) decks[s]._wave = null; // waveforms redraw at their new size
+  }
+  st.classList.toggle('fit-full', fit >= 1);
+  // the open drawer: half the stage, or when expanded up to just below the decks' title rows
+  st.style.setProperty('--lib-head', `${head}px`);
+  let h = Math.round(inner * 0.5);
+  if (state.libView === 'expanded') {
+    const heads = $$('.decks-row .deck-head').filter((x) => x.getClientRects().length);
+    const top = st.getBoundingClientRect().top + parseFloat(cs.paddingTop);
+    const reach = heads.length ? Math.max(...heads.map((x) => x.getBoundingClientRect().bottom)) + 8 - top : inner * 0.15;
+    h = Math.round(inner - Math.max(0, Math.min(reach, inner * 0.5)));
+  }
+  st.style.setProperty('--lib-h', `${Math.max(head, h)}px`);
 }
 
 // ---------- your layout: collapse, move and hide sections (js/layout.js) ----------
@@ -884,7 +910,7 @@ const isFolded = (id) => (id === 'library' ? state.libView === 'collapsed' : !!s
 function setLayout(next) {
   state.layout = next; store.set('layout', next);
   lay.applyLayout(next);
-  measureLibLift();
+  scheduleFit();
   for (const s of SIDES) decks[s]._wave = null; // the decks' waveforms redraw at their new size
   if ($('#layoutDlg').open) renderLayoutDlg();
 }
@@ -902,7 +928,7 @@ function renderLayoutDlg() {
       return `<div class="lay-row ${shown ? '' : 'off'}" data-lay="${id}">
         <label><input type="checkbox" data-lay-show ${shown ? 'checked' : ''} aria-label="Show ${esc(p.name)}"><span><b>${esc(p.name)}</b>${note ? `<small>${esc(note)}</small>` : ''}</span></label>
         ${p.noFold ? '<span></span>' : `<button type="button" class="ghost lay-fold" data-lay-fold aria-pressed="${folded}" ${shown ? '' : 'disabled'}>${folded ? 'Expand' : 'Collapse'}</button>`}
-        ${p.fixed ? '<span></span><span></span>' : `<button type="button" class="icon-btn" data-lay-move="-1" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move ${esc(p.name)} up">${icon('chevron', 15, 'style="transform:rotate(180deg)"')}</button>
+        ${p.fixed || id === 'library' ? '<span></span><span></span>' : `<button type="button" class="icon-btn" data-lay-move="-1" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move ${esc(p.name)} up">${icon('chevron', 15, 'style="transform:rotate(180deg)"')}</button>
         <button type="button" class="icon-btn" data-lay-move="1" ${i === ids.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move ${esc(p.name)} down">${icon('chevron', 15)}</button>`}
       </div>`;
     }).join('')}</div>`;
@@ -1856,12 +1882,12 @@ function currentPlan() {
   const to = from === 'left' ? 'right' : 'left';
   const F = decks[from], T = decks[to];
   if (!F.buffer || !T.buffer || !F.track?.grid || !T.track?.grid) return null;
-  const key = `${F.track.id}|${T.track.id}|${F.track.grid.firstDownbeat}|${T.track.grid.firstDownbeat}|${F.track.phrases?.length}|${T.track.phrases?.length}`;
+  const key = `${F.track.id}|${T.track.id}|${F.track.grid.firstDownbeat}|${T.track.grid.firstDownbeat}|${F.track.phrases?.length}|${T.track.phrases?.length}|${state.level}`; // a new level asks for different moves
   if (state.planKey !== key) { state.planKey = key; state.mixStartBar = null; state.mixDone = new Set(); state.plan = planMix({ ...F.track, duration: F.buffer.duration }, { ...T.track, duration: T.buffer.duration }); }
   return state.plan ? { ...state.plan, from, to } : null;
 }
 
-const STEP_PRAISE = { start: 'Right on the 1.', fade: 'Nice, smooth fade-in.', highs: 'Highs in.', mids: 'Mids in.', swap: 'Clean bass swap.', out: 'Mix done: nice and smooth.' };
+const STEP_PRAISE = { match: 'Speeds matched.', start: 'Right on the 1.', fade: 'Nice, smooth fade-in.', highs: 'Highs in.', mids: 'Mids in.', swap: 'Clean bass swap.', out: 'Mix done: nice and smooth.' };
 
 /** The guide's steps for this plan, where the DJ is in them, and how the mixer looks right now. */
 function mixGuideNow(plan, bar) {
@@ -1871,10 +1897,12 @@ function mixGuideNow(plan, bar) {
   // the steps follow when B was really started (a late start, or a beat off); a start well before the plan keeps the "started early" tip
   const p = T.playing && state.mixStartBar != null && state.mixStartBar >= plan.startBar - 1 ? shiftPlan(plan, state.mixStartBar) : plan;
   const controls = mixControls(state.f, ctlState.connected.length > 0);
-  const steps = mixSteps(p, controls, { a: LETTER[plan.from], b: LETTER[plan.to] });
+  const steps = mixSteps(p, controls, { a: LETTER[plan.from], b: LETTER[plan.to] }, state.f.mixDetail);
   const toB = plan.to === 'right' ? state.xfader : 1 - state.xfader;
+  const bMatched = !!T.buffer && Math.abs((F.bpm || 0) - (T.bpm || 0)) < 0.1;
+  const bCued = !!T.buffer && !T.playing && Math.abs(T.position() - plan.bStart) < 60 / (T.bpm || 120);
   const snap = {
-    bReady: !!T.buffer && !T.playing && Math.abs(T.position() - plan.bStart) < 60 / (T.bpm || 120) && Math.abs((F.bpm || 0) - (T.bpm || 0)) < 0.1,
+    bReady: bCued && bMatched, bLoaded: !!T.buffer, bMatched, bCued,
     bPlaying: T.playing, aPlaying: F.playing, xf: toB, volA: F.vol.gain.value, volB: T.vol.gain.value, eqA: F.eq, eqB: T.eq,
   };
   const g = stepState(steps, p, bar, snap, controls, state.mixDone);
@@ -1886,10 +1914,39 @@ function mixGuideNow(plan, bar) {
   return { plan: p, guide: g };
 }
 
+/** Starter and Improver: one deck playing and the other empty, so the guide starts at "pick the next track". */
+function waitingForNext() {
+  if (!state.f.mixGuide || !state.f.mixDetail) return null;
+  const L = decks.left, R = decks.right;
+  const from = L.playing && !R.buffer ? 'left' : R.playing && !L.buffer ? 'right' : null;
+  return from && { from, to: from === 'left' ? 'right' : 'left' };
+}
+
+function showWaitingGuide(el, w) {
+  const names = { a: LETTER[w.from], b: LETTER[w.to] };
+  const items = prepSteps(mixControls(state.f, ctlState.connected.length > 0), names).map((s, i) => ({ ...s, status: i === 0 ? 'now' : 'todo' }));
+  const cur = items[0];
+  const key = `wait|${w.from}|${items.map((it) => it.short).join()}`;
+  if (el.dataset.key === key) return;
+  el.dataset.key = key; el.dataset.phase = 'prep';
+  $('[data-mp-big]', el).textContent = '1'; $('[data-mp-unit]', el).textContent = 'step';
+  $('[data-mp-title]', el).textContent = cur.title;
+  $('[data-mp-detail]', el).textContent = cur.detail;
+  const nt = $('[data-mp-note]', el); nt.hidden = true;
+  $('[data-mp-part]', el).hidden = true;
+  $('[data-mp-time]', el).style.display = 'none';
+  $('[data-a="cue-b"]', el).style.display = 'none';
+  $('[data-mp-steps]', el).innerHTML = items.map((it, i) => `<li class="${it.status}${it === cur ? ' current' : ''}" title="${esc(it.title)}. ${esc(it.detail)}"><b>${i + 1}</b>${esc(it.short)}</li>`).join('');
+}
+
 function updateMixPlan() {
   const el = $('#mixPlan'), plan = state.f.mixGuide ? currentPlan() : null;
-  el.classList.toggle('hidden', !plan);
+  const waiting = plan ? null : waitingForNext();
+  el.classList.toggle('hidden', !plan && !waiting);
+  if (waiting) return showWaitingGuide(el, waiting);
   if (!plan) return;
+  $('[data-mp-time]', el).style.display = '';
+  $('[data-a="cue-b"]', el).style.display = '';
   const F = decks[plan.from], T = decks[plan.to], g = F.track.grid;
   const bar = (F.position() - g.firstDownbeat) / barLen(g) + 1;
   const { plan: p, guide } = mixGuideNow(plan, bar);
@@ -1897,7 +1954,7 @@ function updateMixPlan() {
   let cue = F.playing ? mixCue(p, bar, T.playing, 16, guide) : { phase: 'prep', title: `Plan: start ${LETTER[plan.to]} at ${LETTER[plan.from]}'s bar ${plan.startBar}`, detail: `Play deck ${LETTER[plan.from]} and the countdown starts. ${plan.why}`, big: '▶', unit: '' };
   if (cue.nextText != null && !full) cue = { ...cue, detail: cue.nextText };
   // before B starts, say exactly how to get it ready (bass cut, volume down) for this level's controls
-  else if (!T.playing && guide.current?.id === 'ready' && (cue.phase === 'prep' || cue.phase === 'soon')) cue = { ...cue, detail: guide.current.detail };
+  else if (!T.playing && PREP_STEPS.has(guide.current?.id) && (cue.phase === 'prep' || cue.phase === 'soon')) cue = { ...cue, detail: guide.current.id === 'ready' ? guide.current.detail : `Now: ${guide.current.title}. ${guide.current.detail}`, named: true }; // already uses the real deck letters
   const ph = F.track.phrases?.find((x) => F.position() >= x.start && F.position() < x.end);
   const part = ph ? partInfo(ph.label) : null;
   const note = guide.note;
@@ -1907,11 +1964,11 @@ function updateMixPlan() {
     el.dataset.key = key; el.dataset.phase = cue.phase;
     $('[data-mp-big]', el).textContent = cue.big; $('[data-mp-unit]', el).textContent = cue.unit;
     $('[data-mp-title]', el).textContent = cue.title.replace(/deck B/g, `deck ${LETTER[plan.to]}`);
-    $('[data-mp-detail]', el).textContent = cue.nextText != null ? cue.detail : cue.detail.replace(/\bA's\b|\bB\b/g, (m) => (m === 'B' ? LETTER[plan.to] : `${LETTER[plan.from]}'s`)); // one pass, so a swapped letter isn't swapped back
+    $('[data-mp-detail]', el).textContent = cue.nextText != null || cue.named ? cue.detail : cue.detail.replace(/\bA's\b|\bB\b/g, (m) => (m === 'B' ? LETTER[plan.to] : `${LETTER[plan.from]}'s`)); // one pass, so a swapped letter isn't swapped back
     const nt = $('[data-mp-note]', el); nt.textContent = note?.text || ''; nt.className = `mp-note ${note?.tone || ''}`; nt.hidden = !note;
     $('[data-mp-part]', el).hidden = !!note;
     $('[data-mp-part]', el).innerHTML = part ? `<i style="background:${phraseColor(ph.label)}"></i>Deck ${LETTER[plan.from]} is in its ${esc(part.name.toLowerCase())}: ${esc(part.what)} ${esc(part.mix)}` : '';
-    $('[data-mp-steps]', el).innerHTML = guide.items.map((it, i) => `<li class="${it.status}${it === guide.current ? ' current' : ''}" title="${esc(it.title)}. ${esc(it.detail)}"><b>${it.status === 'done' ? '✓' : it.status === 'missed' ? '–' : i + 1}</b>${esc(it.short)}<span>bar ${it.bar}</span></li>`).join('');
+    $('[data-mp-steps]', el).innerHTML = guide.items.map((it, i) => `<li class="${it.status}${it === guide.current ? ' current' : ''}" title="${esc(it.title)}. ${esc(it.detail)}"><b>${it.status === 'done' ? '✓' : it.status === 'missed' ? '–' : i + 1}</b>${esc(it.short)}${PREP_STEPS.has(it.id) && it.id !== 'ready' ? '' : `<span>bar ${it.bar}</span>`}</li>`).join('');
     $('[data-a="cue-b"]', el).textContent = `Cue ${LETTER[plan.to]} up`;
     $('[data-a="cue-b"]', el).disabled = T.playing;
   }
@@ -2412,7 +2469,10 @@ function bind() {
   });
   // library panel size
   $('#libExpand').addEventListener('click', () => setLibView(state.libView === 'expanded' ? 'normal' : 'expanded'));
-  new ResizeObserver(() => measureLibLift()).observe($('.decks-row'));
+  // refit whenever the window or a section's size changes (a level shows the plan, a panel folds, the lessons pane opens)
+  const fitRO = new ResizeObserver(scheduleFit);
+  fitRO.observe($('.stage'));
+  for (const el of $$('.stage > :not(.library)')) fitRO.observe(el);
   applyLibView();
   // crates
   const cr = $('#crates');
@@ -2911,6 +2971,7 @@ function onControllerMessage(profile, ctl, data) {
   const d = a.side ? decks[a.side] : null;
   switch (a.type) {
     case 'play': return togglePlay(a.side);
+    case 'cue': return a.down ? cueDown(a.side) : cueUp(a.side);
     case 'restart': if (d.buffer) { d.seek(d.track.grid?.firstDownbeat || 0); state.did.add('restart'); } return;
     case 'sync': // BEAT SYNC = Align: line this deck's phrase up with the other deck (no tempo sync)
       if (alignDeck(a.side)) return;

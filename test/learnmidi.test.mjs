@@ -14,7 +14,9 @@ test('FLX4 buttons: play, cue, sync and headphones on each deck', () => {
   assert.deepEqual(midiToAction(flx4, ctl, [144, 11, 127]), { type: 'play', side: 'left' });
   assert.equal(midiToAction(flx4, ctl, [144, 11, 0]), null); // button release does nothing
   assert.deepEqual(midiToAction(flx4, ctl, [145, 11, 127]), { type: 'play', side: 'right' });
-  assert.deepEqual(midiToAction(flx4, ctl, [144, 12, 127]), { type: 'restart', side: 'left' });
+  assert.deepEqual(midiToAction(flx4, ctl, [144, 12, 127]), { type: 'cue', side: 'left', down: true });
+  assert.deepEqual(midiToAction(flx4, ctl, [144, 12, 0]), { type: 'cue', side: 'left', down: false }); // CUE needs its release, like a CDJ
+  assert.deepEqual(midiToAction(flx4, ctl, [0x81, 12, 64]), { type: 'cue', side: 'right', down: false }); // note-off release
   assert.deepEqual(midiToAction(flx4, ctl, [145, 88, 127]), { type: 'sync', side: 'right' });
   assert.deepEqual(midiToAction(flx4, ctl, [145, 84, 127]), { type: 'listen', side: 'right', on: true });
   assert.deepEqual(midiToAction(flx4, ctl, [145, 84, 127]), { type: 'listen', side: 'right', on: false }); // toggles

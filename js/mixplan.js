@@ -14,10 +14,15 @@ export const PART_INFO = {
 };
 export const partInfo = (label = '') => PART_INFO[label] || PART_INFO[Object.keys(PART_INFO).find((k) => label.startsWith(k))] || { name: label || 'Part', what: '', mix: '' };
 
+// How long the two tracks play together. Short blends are a quick fade, not a mix: aim for 32 bars and
+// never plan fewer than 16, starting B earlier in A when A's outro alone is too short.
+export const BLEND = { min: 16, max: 32 };
+
 /**
  * Plan a mix from A (playing) into B (next).
- * startBar: A's bar to press play on B. B starts from bStart (its first downbeat) and its intro lasts bIntroBars;
- * if B's intro is longer than A's outro, B starts earlier by whole phrases so its drop lands as A finishes.
+ * startBar: A's bar to press play on B. B starts from bStart (its first downbeat).
+ * The blend runs over B's intro and build (everything before its drop), 16 to 32 bars. If that, or B's intro,
+ * is longer than A's outro, B starts earlier by whole phrases so both tracks get time together.
  */
 export function planMix(A, B, phraseBars = 16) {
   if (!A?.grid || !B?.grid || !(A.duration > 0)) return null;
@@ -25,24 +30,30 @@ export function planMix(A, B, phraseBars = 16) {
   const out = mixOutPoint(A, sA ? { structure: sA } : null, phraseBars);
   const inPt = mixInPoints(B, sB ? { structure: sB } : null, phraseBars)[0];
   if (!out || !inPt) return null;
-  // B's intro is the Intro part only: that's what blends over A's outro. Its build can play as A finishes.
+  // B's intro is the Intro part only; its build can also play under A, up to B's drop.
   const bl = 240 / B.grid.bpm;
   const afterIntro = (B.phrases || []).find((p) => !/^Intro/.test(p.label || '') && p.start > B.grid.firstDownbeat + bl / 2);
   const bIntroBars = afterIntro ? Math.max(4, Math.round((afterIntro.start - B.grid.firstDownbeat) / bl))
     : sB?.firstDrop ? Math.max(4, sB.firstDrop - 1) : 32;
+  const bLeadBars = Math.max(bIntroBars, sB?.firstDrop ? sB.firstDrop - 1 : 0);
+  const want = Math.max(BLEND.min, Math.min(BLEND.max, bLeadBars - (bLeadBars % 4)));
   const aOutroBars = Math.max(4, out.totalBars - out.bar + 1);
+  const need = Math.max(want, bIntroBars);
   let startBar = out.bar;
-  if (bIntroBars > aOutroBars) startBar = Math.max(1, out.bar - Math.ceil((bIntroBars - aOutroBars) / phraseBars) * phraseBars);
+  if (need > aOutroBars) startBar = Math.max(1, out.bar - Math.ceil((need - aOutroBars) / phraseBars) * phraseBars);
   const room = out.totalBars - startBar + 1;
-  const blendBars = Math.max(4, Math.min(32, bIntroBars, room) - (Math.min(32, bIntroBars, room) % 4));
+  const blendBars = Math.max(4, Math.min(want, room - (room % 4)));
+  const early = out.bar - startBar;
   return {
     startBar, startTime: timeOfBar(A.grid, startBar),
     blendBars, swapBar: startBar + Math.floor(blendBars / 2), endBar: startBar + blendBars,
     aOutroStart: out.bar, aTotalBars: out.totalBars, aOutroBars,
     bStart: inPt.time, bIntroBars, bDropAtBarA: startBar + (sB?.firstDrop ? sB.firstDrop - 1 : bIntroBars),
-    why: startBar === out.bar
-      ? `B's ${bIntroBars}-bar intro fits inside A's ${aOutroBars}-bar outro.`
-      : `B's intro is ${bIntroBars} bars, longer than A's ${aOutroBars}-bar outro, so B starts ${out.bar - startBar} bars earlier and its drop lands as A ends.`,
+    why: !early
+      ? `B's ${bIntroBars}-bar intro fits inside A's ${aOutroBars}-bar outro: ${blendBars} bars with both tracks playing.`
+      : bIntroBars > aOutroBars
+        ? `B's intro is ${bIntroBars} bars, longer than A's ${aOutroBars}-bar outro, so B starts ${early} bars earlier and its drop lands as A ends.`
+        : `A's outro is only ${aOutroBars} bars, so B starts ${early} bars earlier to give you a ${blendBars}-bar blend.`,
   };
 }
 
@@ -70,33 +81,62 @@ export function shiftPlan(plan, startBar) {
 
 const BAND_WORD = { high: 'highs', mid: 'mids' };
 
+/** Steps that happen before B plays (getting it ready); they're missed if B starts first. */
+export const PREP_STEPS = new Set(['ready', 'pick', 'load', 'match', 'cue', 'levels']);
+
+/** Getting B ready, one move at a time (the detailed guide for newer DJs). bar is filled in by mixSteps. */
+export function prepSteps(controls = {}, names = { a: 'A', b: 'B' }) {
+  const { a, b } = names, c = controls;
+  const down = ['high', 'mid'].filter((k) => c[k]).map((k) => BAND_WORD[k]);
+  const levels = [
+    c.low && `Turn ${b}'s bass all the way down, so its bassline doesn't clash with ${a}'s.`,
+    c.volume ? `Pull ${b}'s volume all the way down and put the crossfader in the middle.` : `Keep the crossfader all the way over on ${a}, so nobody hears ${b} yet.`,
+    down.length && `Turn ${b}'s ${down.join(' and ')} down to about halfway.`,
+  ].filter(Boolean).join(' ');
+  return [
+    { id: 'pick', short: 'Pick a track', title: 'Pick the next track', detail: `Open the library: the Suggested tab lists tracks that blend well with ${a}. Look for a close speed and a matching key.` },
+    { id: 'load', short: `Load ${b}`, title: `Load it onto deck ${b}`, detail: `Press the ${b} button next to the track. ${b} waits, silent, while ${a} keeps playing.` },
+    { id: 'match', short: 'Match speed', title: `Match ${b}'s speed to ${a}`, detail: `Move ${b}'s tempo fader until both show the same BPM.` },
+    { id: 'cue', short: `Cue ${b} up`, title: `Cue ${b} up`, detail: `Press "Cue ${b} up" so it waits on its first beat, ready to play.` },
+    { id: 'levels', short: 'Set levels', title: `Set ${b}'s levels`, detail: levels },
+  ];
+}
+
 /**
  * The transition as a short list of steps, in A's bars. Only moves the DJ has controls for are included.
  * Each step: { id, bar (when it starts), by (when it should be finished), short, title, detail }.
- * names: the deck letters, e.g. { a: 'A', b: 'B' }.
+ * names: the deck letters, e.g. { a: 'A', b: 'B' }. detailed: split getting ready into single moves and
+ * swap the mids as well as the bass (Starter and Improver).
  */
-export function mixSteps(plan, controls = {}, names = { a: 'A', b: 'B' }) {
+export function mixSteps(plan, controls = {}, names = { a: 'A', b: 'B' }, detailed = false) {
   if (!plan) return [];
   const { a, b } = names, c = controls;
   const start = plan.startBar, swap = plan.swapBar, end = plan.endBar, blend = plan.blendBars;
   const down = ['high', 'mid'].filter((k) => c[k]).map((k) => BAND_WORD[k]);
-  const steps = [
+  const prepBar = Math.max(1, start - 16);
+  const steps = detailed ? prepSteps(c, names).map((s) => ({ ...s, bar: prepBar, by: start })) : [
     {
-      id: 'ready', bar: Math.max(1, start - 16), by: start, short: 'Get ready', title: `Get ${b} ready`,
+      id: 'ready', bar: prepBar, by: start, short: 'Get ready', title: `Get ${b} ready`,
       detail: [`Load it, match its speed to ${a}, then press "Cue ${b} up".`,
         c.low && `Turn ${b}'s bass all the way down.`,
         c.volume ? `Pull ${b}'s volume down and put the crossfader in the middle.` : `Keep the crossfader on ${a}.`,
         down.length && `Turn ${b}'s ${down.join(' and ')} down to about halfway.`].filter(Boolean).join(' '),
     },
+  ];
+  steps.push(
     { id: 'start', bar: start, by: start, short: `Start ${b}`, title: `Start ${b} on the 1 of bar ${start}`, detail: `Press play on ${b} right on the big "1". Nobody hears it yet.` },
     {
       id: 'fade', bar: start, by: swap, short: `Bring ${b} in`,
       title: c.volume ? `Raise ${b}'s volume: all the way up by bar ${swap}` : `Slide the crossfader to the middle by bar ${swap}`,
       detail: `Go slowly, a little every bar. You'll start to hear ${b} under ${a}.`,
     },
-  ];
+  );
   if (c.high) steps.push({ id: 'highs', bar: start + Math.round(blend / 4), by: swap, short: `${b}'s highs`, title: `Bring ${b}'s highs back to the middle`, detail: 'The hi-hats and cymbals come in. Turn the treble dial back to 12 o\'clock.' });
-  if (c.mid) steps.push({ id: 'mids', bar: start + Math.round((3 * blend) / 8), by: swap, short: `${b}'s mids`, title: `Bring ${b}'s mids back to the middle`, detail: 'Now the melody and vocals join in. Turn the mid dial back to 12 o\'clock.' });
+  if (c.mid) {
+    steps.push(detailed
+      ? { id: 'mids', swapA: true, bar: start + Math.round((3 * blend) / 8), by: swap, short: 'Swap mids', title: `Swap the mids by bar ${swap}`, detail: `Turn ${b}'s mids back to 12 o'clock and ${a}'s mids down to about halfway, so the melodies don't fight.` }
+      : { id: 'mids', bar: start + Math.round((3 * blend) / 8), by: swap, short: `${b}'s mids`, title: `Bring ${b}'s mids back to the middle`, detail: 'Now the melody and vocals join in. Turn the mid dial back to 12 o\'clock.' });
+  }
   if (c.low) steps.push({ id: 'swap', bar: swap, by: swap + 1, short: 'Swap bass', title: `Swap the bass on bar ${swap}`, detail: `On the "1": turn ${a}'s bass all the way down and ${b}'s bass back to the middle, at the same time.` });
   steps.push({
     id: 'out', bar: swap, by: end, short: `${a} out`,
@@ -107,7 +147,7 @@ export function mixSteps(plan, controls = {}, names = { a: 'A', b: 'B' }) {
 }
 
 // How the controls have to look for a step to count as done (EQ in dB, faders 0..1).
-export const GUIDE = { cutDb: -20, backDb: -6, faderUp: 0.9, xfMiddle: 0.45, xfAllB: 0.95, aGone: 0.05, rampSlack: 0.35, lateBars: 2 };
+export const GUIDE = { cutDb: -20, backDb: -6, halfDb: -10, faderUp: 0.9, xfMiddle: 0.45, xfAllB: 0.95, aGone: 0.05, rampSlack: 0.35, lateBars: 2 };
 const WAY = ['a little', 'about a quarter', 'about halfway', 'about three quarters', 'nearly all the way'];
 
 /** How far a fade step has got, 0..1, from the mixer. xf: crossfader towards B (0 = all A, 1 = all B). */
@@ -125,10 +165,14 @@ function isDone(step, snap, c) {
   const eqA = snap.eqA || {}, eqB = snap.eqB || {};
   switch (step.id) {
     case 'ready': return !!snap.bReady && (!c.low || (eqB.low ?? 0) <= GUIDE.cutDb) && (!c.volume || (snap.volB ?? 1) <= 0.1);
+    case 'pick': case 'load': return snap.bLoaded ?? !!snap.bReady;
+    case 'match': return snap.bMatched ?? !!snap.bReady;
+    case 'cue': return snap.bCued ?? !!snap.bReady;
+    case 'levels': return (!c.low || (eqB.low ?? 0) <= GUIDE.cutDb) && (c.volume ? (snap.volB ?? 1) <= 0.1 : (snap.xf ?? 0) <= 0.1);
     case 'start': return !!snap.bPlaying;
     case 'fade': return c.volume ? (snap.volB ?? 0) >= GUIDE.faderUp : (snap.xf ?? 0) >= GUIDE.xfMiddle;
     case 'highs': return (eqB.high ?? 0) >= GUIDE.backDb;
-    case 'mids': return (eqB.mid ?? 0) >= GUIDE.backDb;
+    case 'mids': return (eqB.mid ?? 0) >= GUIDE.backDb && (!step.swapA || (eqA.mid ?? 0) <= GUIDE.halfDb);
     case 'swap': return (eqB.low ?? 0) >= GUIDE.backDb && (eqA.low ?? 0) <= GUIDE.cutDb;
     case 'out': return rampProgress('out', snap, c) >= 0.95;
     default: return false;
@@ -136,7 +180,7 @@ function isDone(step, snap, c) {
 }
 
 /**
- * Where the DJ is in the steps. snap: { bReady, bPlaying, aPlaying, xf, volA, volB, eqA, eqB } read from
+ * Where the DJ is in the steps. snap: { bReady, bLoaded, bMatched, bCued, bPlaying, aPlaying, xf, volA, volB, eqA, eqB } read from
  * the mixer; done: ids already ticked (ticks stay, so a wobble on a dial doesn't untick a step).
  * Returns { items (steps + status 'done'|'now'|'todo'|'missed'), current, next, toNext, toDeadline, note, doneIds }.
  */
@@ -145,13 +189,13 @@ export function stepState(steps, plan, barA, snap = {}, controls = {}, done = ne
   for (const s of steps) {
     if (ids.has(s.id)) continue;
     // getting ready counts before B plays; the blend moves only once it does
-    const now = s.id === 'ready' ? !snap.bPlaying : s.id === 'start' || snap.bPlaying;
+    const now = PREP_STEPS.has(s.id) ? !snap.bPlaying : s.id === 'start' || snap.bPlaying;
     if (now && isDone(s, snap, c)) ids.add(s.id);
   }
   const items = steps.map((s) => {
     if (ids.has(s.id)) return { ...s, status: 'done' };
-    if (s.id === 'ready') return { ...s, status: snap.bPlaying ? 'missed' : 'now' };
-    if (s.id === 'start') return { ...s, status: ids.has('ready') || barA >= s.bar - 1 ? 'now' : 'todo' };
+    if (PREP_STEPS.has(s.id)) return { ...s, status: snap.bPlaying ? 'missed' : 'now' };
+    if (s.id === 'start') return { ...s, status: steps.every((x) => !PREP_STEPS.has(x.id) || ids.has(x.id)) || barA >= s.bar - 1 ? 'now' : 'todo' };
     return { ...s, status: snap.bPlaying && barA >= s.bar ? 'now' : 'todo' };
   });
   const current = items.find((it) => it.status === 'now') || null;

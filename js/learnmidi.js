@@ -22,6 +22,8 @@ export function jogTicks(profile, value) {
 export function midiToAction(profile, ctl, data, { tempoRange = 8, now = Date.now() } = {}) {
   const extra = EXTRAS[profile.id]?.(ctl, data);
   if (extra !== undefined) return extra;
+  const cue = cueButton(profile, ctl, data, now);
+  if (cue) return cue;
   const hit = applyMidi(profile, ctl, data, now, { tempoRange });
   if (!hit) return null;
   const [where, what] = hit.split('.');
@@ -29,7 +31,6 @@ export function midiToAction(profile, ctl, data, { tempoRange = 8, now = Date.no
   const d = side ? ctl.decks[where] : null;
   switch (what) {
     case 'play': return { type: 'play', side };
-    case 'cue': return { type: 'restart', side };
     case 'sync': return { type: 'sync', side };
     case 'jog': return { type: 'jog', side, ticks: jogTicks(profile, data[2]) };
     case 'tempo': return { type: 'tempo', side, pct: Math.max(-tempoRange, Math.min(tempoRange, d.tempo)) };
@@ -42,6 +43,25 @@ export function midiToAction(profile, ctl, data, { tempoRange = 8, now = Date.no
     case 'headMix': return ctl.headMix == null ? null : { type: 'headMix', value: ctl.headMix };
     default: return null;
   }
+}
+
+/**
+ * The CUE button needs its release as well as its press, like a CDJ: hold it while paused to hear the
+ * cue point, let go to go back there. Notes can be released as note-off (0x8n) or note-on with 0.
+ */
+function cueButton(profile, ctl, [status, d1, v], now) {
+  const type = status & 0xf0;
+  for (const [s, d, name, part] of profile.controls) {
+    if (d !== d1 || !name.endsWith('.cue')) continue;
+    const isNote = part === 'note' && (type === 0x90 || type === 0x80) && (status & 0x0f) === (s & 0x0f);
+    if (!isNote && status !== s) continue;
+    const deckNo = name.startsWith('d1') ? 1 : name.startsWith('d2') ? 2 : null;
+    if (!deckNo) return null;
+    const down = type !== 0x80 && v > 0;
+    if (down) { const dk = ctl.decks[deckNo]; dk.presses.cue = (dk.presses.cue || 0) + 1; dk.lastPress.cue = now; }
+    return { type: 'cue', side: deckNo === 1 ? 'left' : 'right', down };
+  }
+  return null;
 }
 
 /**
@@ -60,6 +80,7 @@ export function describeAction(a) {
   switch (a.type) {
     case 'play': return `Play / pause${deck}`;
     case 'restart': return `Cue: back to the start${deck}`;
+    case 'cue': return `CUE ${a.down ? 'pressed' : 'released'}${deck}`;
     case 'sync': return `Beat sync: align this deck's phrase to the other deck${deck}`;
     case 'jog': return `Jog ${a.ticks > 0 ? '+' : ''}${a.ticks}${deck}`;
     case 'tempo': return `Tempo ${a.pct >= 0 ? '+' : ''}${a.pct.toFixed(2)}%${deck}`;

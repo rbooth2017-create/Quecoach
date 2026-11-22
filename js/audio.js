@@ -25,7 +25,8 @@ hpMaster.gain.value = 0;
 const SPEAKER_CUE = 0.5; // Listen through the speakers: quieter than the room
 const speakerCue = ctx.createGain(); speakerCue.gain.value = SPEAKER_CUE; cueBus.connect(speakerCue);
 let wiring = [];      // nodes made for the current route, to take down on the next
-let hpElement = null; // <audio> for a separate headphone device
+let hpCtx = null;     // the headphone device's own audio context (closed on the next route)
+let hpKeep = null;    // muted <audio> that keeps the headphone stream flowing
 export const outputState = { mode: 'speakers', channels: 2, deviceId: null, error: null };
 
 function unwire() {
@@ -34,7 +35,8 @@ function unwire() {
   try { hpOut.disconnect(); } catch { /* */ }
   for (const n of wiring) { try { n.disconnect(); } catch { /* */ } }
   wiring = [];
-  if (hpElement) { hpElement.pause(); hpElement.srcObject = null; hpElement = null; }
+  if (hpCtx) { hpCtx.close().catch(() => {}); hpCtx = null; }
+  if (hpKeep) { hpKeep.pause(); hpKeep.srcObject = null; hpKeep = null; }
 }
 
 /** Send the main mix and the headphones where the route says. Resolves once the headphone device is playing. */
@@ -55,11 +57,21 @@ export async function routeOutputs(route) {
   master.connect(dest);
   if (route.mode === 'device' && route.deviceId) {
     const out = ctx.createMediaStreamDestination(); hpOut.connect(out); wiring.push(out);
-    const el = new Audio(); el.srcObject = out.stream; el.autoplay = true; hpElement = el;
     try {
-      if (el.setSinkId) await el.setSinkId(route.deviceId);
-      await el.play();
-      Object.assign(outputState, { mode: 'device', channels: 2, deviceId: route.deviceId });
+      // A second audio context on the headphone device, so the cue can go to any of its outputs
+      // (a controller's headphone socket is outputs 3-4, which an <audio> element can't reach).
+      hpCtx = new AudioContext({ sinkId: route.deviceId, latencyHint: 'interactive' });
+      const n = hpCtx.destination.maxChannelCount;
+      const [l, r] = route.cue && n > Math.max(...route.cue) ? route.cue : [0, 1];
+      const chans = Math.max(2, r + 1);
+      Object.assign(hpCtx.destination, { channelCount: chans, channelCountMode: 'explicit', channelInterpretation: 'discrete' });
+      const src = hpCtx.createMediaStreamSource(out.stream);
+      const sp = new ChannelSplitterNode(hpCtx, { numberOfOutputs: 2 }), merger = new ChannelMergerNode(hpCtx, { numberOfInputs: chans });
+      src.connect(sp); sp.connect(merger, 0, l); sp.connect(merger, 1, r); merger.connect(hpCtx.destination);
+      await hpCtx.resume();
+      // the stream only flows while something plays it: a silent element keeps it running in Chromium
+      const keep = new Audio(); keep.srcObject = out.stream; keep.muted = true; keep.play().catch(() => {}); hpKeep = keep;
+      Object.assign(outputState, { mode: 'device', channels: chans, deviceId: route.deviceId, socket: l === 2 });
       return outputState;
     } catch (err) {
       outputState.error = `Couldn't play to the headphone output: ${err.message}`;

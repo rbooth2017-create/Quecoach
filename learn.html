@@ -157,9 +157,12 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 /* ---------- workspace: stage + docked lessons pane ---------- */
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
 .stage { container-type: inline-size; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px; min-height: 0; }
-/* a column: lane, plan and decks keep their full height (never squashed into each other); the library takes what's left, at least 150px, and the stage scrolls if that doesn't fit */
+/* a column: lane, plan and decks keep their proportions and are zoomed (--fit, set by fitStage in learn.js) so they always fit the window;
+   the library is a drawer at the bottom: just its header in the column, sliding up over the decks when opened */
 .stage > * { flex: none; }
-.stage > .library { flex: 1 0 150px; }
+.stage > :not(.library) { zoom: var(--fit, 1); }
+.stage.fit-measure > :not(.library) { zoom: 1 !important; flex: none !important; }
+.stage.fit-full > .decks-area:not(.folded) { flex: 1 0 auto; }  /* room to spare: the decks take it */
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; min-width: 0; min-height: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px 0; }
 .panel-title { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
@@ -345,7 +348,7 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .mixer .label { text-align: center; font-size: 10px; color: var(--ink-3); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
 
 /* library */
-.library { display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+.library { display: grid; grid-template-rows: auto auto minmax(0, 1fr); order: 99 !important; margin-top: auto; position: sticky; bottom: 0; z-index: 6; box-shadow: 0 -6px 16px rgba(0,0,0,.12); }
 .library > .lib-body { overflow: hidden; border-radius: 0 0 12px 12px; }
 .library > .lib-head { position: relative; z-index: 6; }
 /* the library sits at the bottom of the window, so its menus open upwards */
@@ -376,12 +379,10 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .import-menu { right: auto; left: 0; }
 .menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 2px; width: auto; }
 .row-btns { display: flex; gap: 8px; justify-content: center; margin-top: 4px; }
-/* expanded: the library slides up over the decks, stopping just below their title rows */
-.stage.lib-expanded .library { position: relative; z-index: 5; margin-top: calc(-1 * var(--lib-lift, 0px)); box-shadow: 0 -10px 30px rgba(0,0,0,.16); transition: margin-top .18s ease; }
+/* open: the drawer slides up over the decks (half the stage, or up to the decks' title rows when expanded); in the column it only takes its header's height */
+.stage:not(.lib-collapsed) > .library { height: var(--lib-h, 50%); margin-top: calc(var(--lib-head, 44px) - var(--lib-h, 50%)); box-shadow: 0 -10px 30px rgba(0,0,0,.18); transition: height .18s ease, margin-top .18s ease; }
 /* collapsed: just its header, at the bottom of the window */
-/* the decks take the room the library gave up; the header stays in view at the bottom */
-.stage.lib-collapsed > .decks-area:not(.folded) { flex: 1 0 auto; }
-.stage.lib-collapsed > .library { flex: none; grid-template-rows: auto; position: sticky; bottom: 0; z-index: 6; box-shadow: 0 -6px 16px rgba(0,0,0,.12); }
+.stage.lib-collapsed > .library { grid-template-rows: auto; }
 .stage.lib-collapsed .library > :not(.lib-head) { display: none; }
 .stage.lib-collapsed .lib-head { border-bottom: none; }
 .library.flash { animation: flash 1.2s ease-out; }
@@ -618,13 +619,6 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 .swatch { height: 46px; border-radius: 7px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid rgba(128,128,128,.25); }
 .swatch i { width: 14px; height: 14px; border-radius: 50%; display: block; }
 
-/* smaller windows: let the page scroll instead of squashing */
-@media (max-height: 700px) {
-  body { overflow: auto; grid-template-rows: auto auto auto; }
-  .stage { overflow: visible; }
-  .stage > .library { flex: 0 0 420px; }
-  .stage.lib-collapsed > .library { flex: none; }
-}
 /* the stage gets narrower when the lessons pane is open, so respond to its width, not the window's */
 @container (max-width: 900px) {
   .decks-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

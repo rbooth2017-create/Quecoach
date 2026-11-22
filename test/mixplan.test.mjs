@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planMix, mixCue, partInfo, PART_INFO, mixControls, mixSteps, shiftPlan, stepState } from '../js/mixplan.js';
+import { planMix, mixCue, partInfo, PART_INFO, mixControls, mixSteps, prepSteps, shiftPlan, stepState } from '../js/mixplan.js';
 import { featuresFor } from '../js/levels.js';
 import { demoLibrary } from '../js/library.js';
 
@@ -37,6 +37,21 @@ test('a long intro starts B earlier, by whole phrases', () => {
   assert.equal(plan.startBar, 129 - 32);
   assert.match(plan.why, /starts 32 bars earlier/);
   assert.equal(planMix(A, { ...B, grid: null }), null);
+});
+
+test('a short outro and a short intro still get a long blend', () => {
+  const bar = 240 / A.grid.bpm;
+  // A's last 8 bars are the outro (the rest of its outro counts as drop); B has an 8-bar intro then an 8-bar build
+  const shortOutro = { ...A, phrases: A.phrases.map((p) => (p.label === 'Outro' ? { ...p, start: p.start + 24 * bar } : p)) };
+  const bb = 240 / B.grid.bpm, d = B.grid.firstDownbeat;
+  const shortIntro = { ...B, phrases: [{ label: 'Intro', start: d, end: d + 8 * bb }, { label: 'Up', start: d + 8 * bb, end: d + 16 * bb }, ...B.phrases.slice(2).map((p) => ({ ...p, start: p.start - 32 * bb, end: p.end - 32 * bb }))] };
+  const plan = planMix(shortOutro, shortIntro);
+  assert.equal(plan.aOutroBars, 9); // 8 bars plus the last part-bar
+  assert.equal(plan.bIntroBars, 8);
+  assert.equal(plan.blendBars, 16); // B's intro + build, not a quick 8-bar fade
+  assert.equal(plan.startBar, 153 - 16); // a phrase before A's outro so the blend fits
+  assert.equal(plan.endBar, 153);
+  assert.match(plan.why, /16-bar blend/);
 });
 
 test('cues count down to the mix point, then guide the blend', () => {
@@ -87,6 +102,36 @@ test('steps per level, timed in A\'s bars', () => {
   assert.equal(at(full).mids, 141);
   assert.match(full.find((x) => x.id === 'out').title, /Lower B's volume/);
   assert.deepEqual(mixSteps(null, {}), []);
+});
+
+test('Starter and Improver get one move per step: pick, load, match, cue, levels, then the swaps', () => {
+  const s = mixSteps(plan, ctl('starter'), undefined, true);
+  assert.deepEqual(ids(s), ['pick', 'load', 'match', 'cue', 'levels', 'start', 'fade', 'out']);
+  assert.match(s.find((x) => x.id === 'levels').detail, /crossfader all the way over on A/);
+  const imp = mixSteps(plan, ctl('improver'), undefined, true);
+  assert.deepEqual(ids(imp), ['pick', 'load', 'match', 'cue', 'levels', 'start', 'fade', 'swap', 'out']);
+  assert.match(imp.find((x) => x.id === 'levels').detail, /bass all the way down.*volume all the way down/);
+  const pad = mixSteps(plan, ctl('improver', true), undefined, true); // a controller adds highs and mids
+  assert.deepEqual(ids(pad).slice(5), ['start', 'fade', 'highs', 'mids', 'swap', 'out']);
+  assert.match(pad.find((x) => x.id === 'mids').title, /Swap the mids/);
+  assert.equal(prepSteps(ctl('starter'), { a: 'B', b: 'A' })[1].title, 'Load it onto deck A');
+});
+
+test('the detailed steps tick off one at a time', () => {
+  const c = ctl('improver'), steps = mixSteps(plan, c, undefined, true);
+  const base = { bLoaded: true, bMatched: false, bCued: false, bPlaying: false, aPlaying: true, xf: 0.5, volA: 1, volB: 1, eqA: { low: 0 }, eqB: { low: 0 } };
+  let g = stepState(steps, plan, 115, base, c);
+  assert.deepEqual(g.doneIds, ['pick', 'load']);
+  assert.equal(g.current.id, 'match');
+  g = stepState(steps, plan, 116, { ...base, bMatched: true, bCued: true }, c, new Set(g.doneIds));
+  assert.equal(g.current.id, 'levels');
+  g = stepState(steps, plan, 117, { ...base, bMatched: true, bCued: true, volB: 0, eqB: { low: -30 } }, c, new Set(g.doneIds));
+  assert.equal(g.current.id, 'start'); // all ready: start is up next, even before the bar
+  // the mids swap needs A's mids down too
+  const cc = ctl('improver', true), st = mixSteps(plan, cc, undefined, true), prep = ['pick', 'load', 'match', 'cue', 'levels', 'start'];
+  const blend = { bPlaying: true, aPlaying: true, volA: 1, volB: 1, eqA: { low: 0, mid: 0 }, eqB: { low: -30, mid: 0, high: 0 } };
+  assert.ok(!stepState(st, plan, 143, blend, cc, new Set(prep)).doneIds.includes('mids'));
+  assert.ok(stepState(st, plan, 143, { ...blend, eqA: { low: 0, mid: -15 } }, cc, new Set(prep)).doneIds.includes('mids'));
 });
 
 test('a late start moves the steps with it, and squeezes the blend near the end', () => {

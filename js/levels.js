@@ -32,6 +32,7 @@ const ON = {
   perfPads:      ['improver', 'confident', 'pro'],     // 8 performance pads: cues, loops, beat jump, pad FX, sampler
   beatFx:        ['confident', 'pro'],                 // Beat FX section in the mixer
   mixGuide:      ['starter', 'improver', 'confident'], // when to start the next track: countdown, timeline, part tips
+  mixDetail:     ['starter', 'improver'],              // the mix guide one move at a time: pick, load, match, cue, levels, swaps
   gridEdit:      ['improver', 'confident', 'pro'],     // fine-tune a beat grid Cue Coach worked out itself
   barCounter:    ['improver', 'confident', 'pro'],     // "Bar 17 · phrase 2"
   phraseMarks:   ['improver', 'confident', 'pro'],     // phrase lines on the waveform

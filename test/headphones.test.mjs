@@ -28,6 +28,16 @@ test('a driver that shows the headphones as their own output', () => {
   assert.ok(!looksLikeHeadphones('Headphones (Realtek Audio)'), 'laptop headphones are not picked on their own');
 });
 
+test('room sound on the laptop, controller plugged in: its headphone socket (3-4) still works', () => {
+  const r = cueRoute({ maxChannels: 2, outputs: outputs.slice(0, 2), mainId: 'mac' });
+  assert.equal(r.mode, 'device');
+  assert.equal(r.deviceId, 'flx');
+  assert.deepEqual(r.cue, [2, 3]);
+  assert.match(r.why, /MacBook Pro Speakers/);
+  // a plain second output (not a controller) plays on its 1-2
+  assert.deepEqual(cueRoute({ maxChannels: 2, outputs, mainId: 'flx', choice: { device: 'mac' } }).cue, [0, 1]);
+});
+
 test('stereo only: Listen through the speakers, with a setup tip for the controller', () => {
   const r = cueRoute({ maxChannels: 2, outputs: outputs.slice(0, 2), mainId: 'flx' });
   assert.equal(r.mode, 'speakers');
