@@ -55,6 +55,12 @@ export function resetPack(id) {
   if (on && started) p.start?.(started);
 }
 
+/** Stop every running pack (before wiping saves, so none writes its progress back). */
+export function stopPacks() {
+  for (const p of active()) { try { p.stop?.(); } catch (err) { console.error(`[pack ${p.id}] stop`, err); } }
+  started = null;
+}
+
 /** The core says "this happened". A pack that throws never breaks the app. */
 export function emit(event, data) {
   for (const p of active()) {

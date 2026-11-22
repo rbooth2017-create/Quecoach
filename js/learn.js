@@ -2,6 +2,7 @@
 // out as you level up. Works with mouse and keyboard; a controller is optional (later).
 import { Take, pickMime, fileName as recFileName, elapsed as recElapsed } from './recorder.js';
 import { ctx, Deck, beatmatch, synthDemoTrack, estimateGrid, setCrossfader, masterBus, mainOut, masterLevels, setLimiter, routeBooth, setBoothLevel, cueBus, routeOutputs, outputState, setHeadphoneMix, setHeadphoneLevel, testTone } from './audio.js';
+import { resetProgress } from './reset.js';
 import { loadPrefs, LATENCIES, START_VIEWS, stepZoom, canLeaveYoung } from './prefs.js';
 import { ACTIONS, GROUPS as KEY_GROUPS, loadKeys, changedKeys, actionForEvent, comboOf, rebind, keyLabel } from './keymap.js';
 import { newSession, logPlay, saveSessions, toText as historyText, toCSV as historyCSV, fileBase as historyFile, since as historySince, MIN_SECONDS as HISTORY_SECONDS } from './history.js';
@@ -288,7 +289,7 @@ function deckRole(side) {
 
 function renderDecks() { for (const s of SIDES) renderDeck(s); }
 /** Jog wheels on screen: your choice, or off in the pro layout (mouse users nudge with buttons, controller users have real ones). */
-const showJogs = () => state.prefs.jogs === 'show' || (state.prefs.jogs === 'auto' && !state.f.proLayout);
+const showJogs = () => state.prefs.jogs !== 'hide';
 
 function renderDeck(side) {
   const d = decks[side], el = $(`#deck-${side}`), f = state.f, t = d.track;
@@ -593,7 +594,7 @@ async function scanFolder(handle, token) {
   state.analysing = { text: `Reading ${handle.name}…` }; renderSource();
   const tracks = await lib.scanFolder(handle, (n) => { if (token === state.scanToken) { state.analysing = { text: `Reading ${handle.name}: ${n} tracks…` }; renderSource(); } });
   if (token !== state.scanToken) return;
-  if (!tracks.length) toast(`No audio files found in ${handle.name}.`);
+  if (!tracks.length) toast(`No audio files found in ${handle.name}. Need music? Try the practice tracks, or see Where to get music.`);
   setTracks(tracks, handle.name, 'folder');
   analyse(tracks, token);
 }
@@ -648,6 +649,7 @@ function renderSource() {
       ${choice('practice', 'sparkle', 'Practice tracks', 'Built in, made for learning')}
       ${choice('folder', 'folder', 'Music folder…', 'MP3, WAV, AIFF, FLAC')}
       ${choice('rekordbox', 'disc', 'rekordbox library', state.rbAvailable ? 'Your tracks, grids and keys' : (state.rbNote || 'Not connected'), !state.rbAvailable)}
+      <hr><button data-a="music-guide">${icon('external', 16)}<span>Where to get music…<small>Free tracks and download shops for DJs</small></span></button>
       ${copyAll ? `<hr><button data-a="copy-all">${icon('upload', 16)}<span>Copy all to My library<small>${state.tracks.filter(lib.canImport).length} tracks, with their beat grids and cues</small></span></button>` : ''}
     </div>` : ''}`;
 }
@@ -670,10 +672,16 @@ function renderList() {
   const base = state.source === 'managed' ? lib.tracksInCrate(state.tracks, crate) : state.tracks;
   if (state.source === 'managed' && !state.tracks.length) {
     el.innerHTML = `<div class="empty">${icon('library', 30)}<b>My library is empty</b><span>Copy music in and it stays here, even if the drive it came from is unplugged.<br>Drag audio files onto this panel, or:</span>
-      <span class="row-btns"><button class="primary" data-import="files">${icon('music', 15)} Import files…</button><button data-import="folder">${icon('folder', 15)} Import a folder…</button></span></div>`;
+      <span class="row-btns"><button class="primary" data-import="files">${icon('music', 15)} Import files…</button><button data-import="folder">${icon('folder', 15)} Import a folder…</button></span>
+      <button class="link" data-a="music-guide">No music yet? Where to get it</button></div>`;
     return;
   }
-  if (!state.tracks.length) { el.innerHTML = `<div class="empty">${icon('music', 30)}<b>No music yet</b><span>Choose where your music comes from with the button above.</span></div>`; return; }
+  if (!state.tracks.length) {
+    el.innerHTML = `<div class="empty">${icon('music', 30)}<b>No music here yet</b><span>${state.source === 'folder' ? 'That folder has no tracks Cue Coach can play (MP3, WAV, AIFF, FLAC). ' : ''}Mix the built-in practice tracks, or bring your own.</span>
+      <span class="row-btns"><button class="primary" data-source="practice">${icon('sparkle', 15)} Practice tracks</button><button data-source="${lib.hasManaged() ? 'managed' : 'folder'}">${icon('folder', 15)} ${lib.hasManaged() ? 'My library' : 'Music folder…'}</button></span>
+      <button class="link" data-a="music-guide">No music of your own? Where DJs get it</button></div>`;
+    return;
+  }
   const wanted = crate && state.tab !== 'suggested' ? wantedRows(crate) : [];
   if (crate && !base.length && !crate.wanted?.length) { el.innerHTML = `<div class="empty">${icon('crate', 30)}<b>${esc(crate.name)} is empty</b><span>Open All tracks and drag tracks onto this crate.</span></div>`; return; }
   let rows;
@@ -876,6 +884,20 @@ function openLinkMenu(btn, t, buyFirst = false) {
 }
 const closeLinkMenu = () => $('#linkMenu').classList.add('hidden');
 
+/** Where to get music: for players with no collection yet. Young DJs see the tips, not the shops. */
+function openMusicGuide() {
+  const g = stream.MUSIC_GUIDE, young = state.prefs.young;
+  const store = (s) => young
+    ? `<div class="guide-store"><b>${esc(s.label)}</b><span>${esc(s.note)}</span></div>`
+    : `<a class="guide-store" href="${esc(s.url)}" target="_blank" rel="noopener"><b>${esc(s.label)} ${icon('external', 12)}</b><span>${esc(s.note)}</span></a>`;
+  const free = (f) => `<div><span><b>${esc(f.label)}</b>${esc(f.note)}</span>${f.source ? `<button data-source="${f.source}">${state.source === f.source ? 'In use' : 'Use them'}</button>` : ''}</div>`;
+  $('#musicGuideBody').innerHTML = `<h3>Free, to get going</h3><div class="guide-free">${g.free.map(free).join('')}</div>
+    <h3>${young ? 'Music shops for DJs (ask a grown-up)' : 'Buy tracks to keep'}</h3><div class="guide-stores">${g.stores.map(store).join('')}</div>
+    <h3>Tips</h3><ul>${g.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+    <div class="card-actions"><button class="primary" data-source="${lib.hasManaged() ? 'managed' : 'folder'}">${icon('folder', 14)} I've got some: ${lib.hasManaged() ? 'open My library' : 'choose my folder'}</button></div>`;
+  if (!$('#musicGuide').open) $('#musicGuide').showModal();
+}
+
 function openPlaylistDlg() {
   if (!lib.hasManaged()) return toast('Playlists become crates in My library, in the Cue Coach desktop app.');
   state.importMenu = false; state.menuOpen = false; renderSource();
@@ -1004,12 +1026,6 @@ function scheduleFit() {
 }
 function fitStage() {
   const st = $('.stage'), lib = $('#library'); if (!st || !lib) return;
-  if (document.body.classList.contains('pro-layout')) {
-    // the pro layout never zooms: everything at full size, the library takes the rest of the height below the decks
-    if (st.style.getPropertyValue('--fit') !== '1') { st.style.setProperty('--fit', '1'); for (const s of SIDES) if (decks[s]) decks[s]._wave = null; }
-    st.classList.add('fit-full');
-    return;
-  }
   const cs = getComputedStyle(st), gap = parseFloat(cs.rowGap) || 0;
   const inner = st.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
   const head = $('.lib-head', lib).offsetHeight;
@@ -1965,6 +1981,11 @@ const playView = createPlayView({
       return Math.max(FINE, Math.floor((Math.abs(need) / 2) / FINE) * FINE);
     },
     hints: () => ({ speed: !!state.f.offsetHint }),
+    /** Headphone cue ("Listen"): hear a deck yourself before the room does. */
+    listening: (side) => !!decks[side].listening,
+    setListen: (side, on) => setListen(side, on),
+    /** False: no separate headphones, so the cue plays quietly through the speakers. */
+    hasPhones: () => hasPhones(),
     checking: () => performance.now() < state.checkUntil,
     daily: () => { const c = dailyChallenge(dayNumber()); return { text: c.text, done: state.career.daily?.day === dayNumber() && !!state.career.daily.done }; },
     bend: (side, dir) => nudge(side, dir),
@@ -2056,7 +2077,6 @@ function applyView() {
   if (on) playView.slots.lane.append(lane); else home.lane.parent.insertBefore(lane, home.lane.next);
   state.coachKey = null;
   document.body.classList.toggle('play-mode', on);
-  document.body.classList.toggle('pro-layout', !on && !!state.f.proLayout);
   $('#playView').classList.toggle('hidden', !on);
   const vb = $('#viewBtn');
   vb.classList.toggle('hidden', !state.f.playView);
@@ -2646,8 +2666,8 @@ function scheduleClicks() {
 /**
  * Take a track off a deck. The mix guide starts over too (a fresh plan, no steps ticked), so a guide that got
  * stuck on the wrong song picks up again at "pick the next song".
- * force: take it off even while the room hears it. settle (the Play view's reset): the emptied deck's volume and
- * bass back to normal, and if the other deck is playing, the room gets it at full volume with its bass.
+ * force: take it off even while the room hears it. settle (the Play view's reset): the emptied deck's volume back
+ * up and its bass cut, the other song keeps its bass, and if that one's playing the room gets it at full volume.
  */
 function eject(side, { force = false, settle = false } = {}) {
   const d = decks[side]; if (!d.buffer) return false;
@@ -2656,9 +2676,13 @@ function eject(side, { force = false, settle = false } = {}) {
   state.prep[side] = false; prepClick[side] = false; state.target = null;
   state.planKey = null; state.plan = null; state.mixDir = null; state.mixStartBar = null; state.mixDone = new Set();
   if (settle) {
-    d.setVolume(1); setEQ(side, 'low', 0);
     const other = side === 'left' ? 'right' : 'left', o = decks[other];
-    if (o.playing) { o.setVolume(1); setEQ(other, 'low', 0); moveXfader(other === 'left' ? 0 : 1); renderDeck(other); }
+    // the bass stays with the song that's left (the Bass slider sits all the way on its side, not in the middle),
+    // and the next song loads with its bass already out, as the guide wants
+    d.setVolume(1); setEQ(side, 'low', o.buffer ? -30 : 0); setListen(side, false);
+    if (o.buffer) setEQ(other, 'low', 0);
+    if (o.playing) { o.setVolume(1); moveXfader(other === 'left' ? 0 : 1); }
+    if (o.buffer) renderDeck(other);
   }
   renderDeck(side); renderLibrary(); if (state.paneOpen) renderTutor();
   return true;
@@ -2670,7 +2694,7 @@ function clearDecks() {
     const d = decks[side];
     if (d.buffer) { d.stop(); d.loop = null; d.track = null; d.buffer = null; d.peaks = null; d.bands = null; d._wave = null; }
     state.prep[side] = false; prepClick[side] = false;
-    d.setVolume(1); setEQ(side, 'low', 0);
+    d.setVolume(1); setEQ(side, 'low', 0); setListen(side, false);
     renderDeck(side);
   }
   state.target = null; state.planKey = null; state.plan = null;
@@ -2887,8 +2911,15 @@ function bind() {
   });
   $('#launchView').addEventListener('click', (e) => { const b = e.target.closest('[data-launch]'); if (b) chooseLaunch(b.dataset.launch); });
   $('#welcomeView').addEventListener('click', async (e) => {
+    if (e.target.closest('[data-a="music-guide"]')) return openMusicGuide();
     const b = e.target.closest('[data-source]'); if (!b || b.disabled) return;
     if (await useSource(b.dataset.source)) { $('#welcomeView').classList.add('hidden'); openLaunch(true); }
+  });
+  $('#musicGuide').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-source]'); if (!b) return;
+    $('#musicGuide').close();
+    const welcome = !$('#welcomeView').classList.contains('hidden');
+    if (await useSource(b.dataset.source) && welcome) { $('#welcomeView').classList.add('hidden'); openLaunch(true); }
   });
   $('#libTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { state.tab = b.dataset.tab; renderLibrary(); } });
   $('#source').addEventListener('click', async (e) => {
@@ -2896,6 +2927,7 @@ function bind() {
     if (a === 'menu') { state.menuOpen = !state.menuOpen; state.importMenu = false; renderSource(); return; }
     if (a === 'import-menu') { state.importMenu = !state.importMenu; state.menuOpen = false; renderSource(); return; }
     if (a === 'import-playlist') return openPlaylistDlg();
+    if (a === 'music-guide') { state.menuOpen = false; renderSource(); return openMusicGuide(); }
     if (a === 'cancel-import') { state.importCancelled = true; desktop?.library?.cancelImport(); return; }
     if (a === 'copy-all') { state.menuOpen = false; renderSource(); return importLibTracks(state.tracks.filter(lib.canImport)); }
     const imp = e.target.closest('[data-import]'); if (imp) return importDialog(imp.dataset.import);
@@ -2981,6 +3013,8 @@ function bind() {
     const a = e.target.closest('[data-a]')?.dataset.a;
     if (a === 'ask-ai') return askAICoach();
     if (a === 'ai-settings') return openAI();
+    if (a === 'music-guide') return openMusicGuide();
+    const src = e.target.closest('[data-source]'); if (src) return useSource(src.dataset.source);
     const imp = e.target.closest('[data-import]'); if (imp) return importDialog(imp.dataset.import);
     const buy = e.target.closest('[data-buy]'); if (buy) return openLinkMenu(buy, { title: state.query.trim() }, true);
     const wrow = e.target.closest('[data-w]');
@@ -3053,6 +3087,7 @@ function runCommand(cmd) {
     'source-managed': () => useSource('managed'),
     'library-import': () => importDialog('files'),
     'library-import-playlist': () => openPlaylistDlg(),
+    'music-guide': () => openMusicGuide(),
     'library-manager': () => sync.openManager(),
     'play-left': () => togglePlay('left'),
     'play-right': () => togglePlay('right'),
@@ -3808,7 +3843,7 @@ function renderSettings() {
     </section>
     ${pro ? '' : `<section class="set-sec"><h3>Start-up</h3>${row('When Cue Coach opens', 'The start screen lets you pick DJ Life, Learn or Pro each time.', `<select class="sel" data-pref="start">${START_VIEWS.map(([v, l]) => opt(v, p.start, l)).join('')}</select>`)}</section>`}
     <section class="set-sec"><h3>Decks</h3>
-      ${row('Jog wheels', 'Automatic hides them in the pro layout: nudge with the buttons, the keys or a controller.', `<select class="sel" data-pref="jogs">${opt('auto', p.jogs, 'Automatic')}${opt('show', p.jogs, 'Always show')}${opt('hide', p.jogs, 'Hide')}</select>`)}
+      ${row('Jog wheels', 'Hide them to nudge with the buttons, the keys or a controller instead.', `<select class="sel" data-pref="jogs">${opt('auto', p.jogs, 'Automatic')}${opt('show', p.jogs, 'Always show')}${opt('hide', p.jogs, 'Hide')}</select>`)}
       ${row('Speed fader', 'Which way is faster.', `<select class="sel" data-pref="upIsFaster">${opt('false', p.upIsFaster, 'Pull down to go faster (CDJ)')}${opt('true', p.upIsFaster, 'Push up to go faster')}</select>`)}
       ${pro || state.f.proTools ? row('Tempo range for new decks', 'Each deck\'s ±% button changes it on the fly.', `<select class="sel" data-pref="tempoRange">${[6, 8, 10, 16, 50].map((r) => opt(r, p.tempoRange, `±${r}%`)).join('')}</select>`) : ''}
       ${row('Protect the live deck', 'Never load a track onto the deck the room is hearing.', check('loadLock', p.loadLock))}
@@ -3828,6 +3863,9 @@ function renderSettings() {
           <div class="set-inline">${p.youngPin ? '<input type="password" inputmode="numeric" maxlength="4" class="pin" id="youngPin" placeholder="PIN" aria-label="PIN" autocomplete="off">' : ''}<button type="button" data-set="young-off">Switch off</button></div>`
         : `<p class="small">For younger DJs: hides links to shops and streaming services, the AI coach and API keys. Add a 4-digit PIN so only a grown-up can switch it off.</p>
           <div class="set-inline"><input type="password" inputmode="numeric" maxlength="4" class="pin" id="youngPin" placeholder="PIN (optional)" aria-label="PIN, optional" autocomplete="off"><button type="button" class="primary" data-set="young-on">Switch on</button></div>`}
+    </section>
+    <section class="set-sec"><h3>Start again</h3>
+      ${row('Reset your progress', 'Back to day one: your level, career, finished lessons, mix scores and DJ Life save are wiped. Your music, cue points, sets and settings are kept.', '<button type="button" class="danger" data-set="reset-progress">Start again</button>')}
     </section>
     <section class="set-sec"><h3>More</h3><div class="settings-more">${more.map(([id, ic, name, note]) => `<button type="button" data-set="${id}">${icon(ic, 18)}<span><b>${name}</b><small>${note}</small></span></button>`).join('')}</div></section>`;
   soundOutputs().then((outs) => {
@@ -3865,6 +3903,10 @@ function bindSettings() {
       if (!canLeaveYoung(state.prefs, $('#youngPin')?.value.trim())) return toast('That PIN isn\'t right.');
       savePrefs({ young: false, youngPin: '' }); applyYoung(); renderSettings();
       return toast('Young DJ mode off.');
+    }
+    if (id === 'reset-progress') {
+      if (!confirm('Start again from scratch?\n\nYour level, career, lessons, mix scores and DJ Life save will be wiped. This can\'t be undone.\n\nYour music, cue points, sets and settings are kept.')) return;
+      packs.stopPacks(); resetProgress(); return location.reload();
     }
     dlg.close();
     if (id === 'music') { state.menuOpen = true; renderSource(); $('#library').scrollIntoView({ block: 'nearest' }); return; }

@@ -176,7 +176,15 @@ export function createDjLife(ctx, { key }) {
     layer.querySelector('[data-focus]')?.focus();
   }
   function close() {
+    if (layer.dataset.view === 'pay') return goHome(); // a finished gig always ends back in your room
     layer.classList.add('hidden'); layer.innerHTML = ''; layer.dataset.view = '';
+    if (st.queue.length) showCard(st.queue.shift());
+  }
+  /** After a gig: pack up (the decks empty), go home to your room, and book the next gig on the computer. */
+  function goHome() {
+    layer.classList.add('hidden'); layer.innerHTML = ''; layer.dataset.view = '';
+    ctx.clearDecks?.();
+    world.open('room');
     if (st.queue.length) showCard(st.queue.shift());
   }
   function showCard(c) { if (c.type === 'week') drawWeek(c.week); else if (c.type === 'pay') drawPay(c); }
@@ -373,7 +381,8 @@ export function createDjLife(ctx, { key }) {
         ${pay.fans ? `<li class="ok">${pay.fans} new ${pay.fans === 1 ? 'fan' : 'fans'}</li>` : ''}
         <li>${esc(fitWords)}</li>
       </ul>
-      <div class="dl-acts"><button class="cl-go" data-dl="board" data-focus>To the gig board</button><button class="cl-ghost" data-dl="close">Keep practising</button></div>
+      <p class="dl-sub">That's the gig done. Head home and book your next one on the computer.</p>
+      <div class="dl-acts"><button class="cl-go" data-dl="home" data-focus>Back to your room</button></div>
     </div>`, 'pay');
     for (const w of weeks || []) st.queue.push({ type: 'week', week: w });
     sfx('cash');
@@ -410,6 +419,7 @@ export function createDjLife(ctx, { key }) {
     const b = e.target.closest('[data-dl]'); if (!b || b.disabled) return;
     const [a, arg] = b.dataset.dl.split(':');
     if (a === 'close') return close();
+    if (a === 'home') return goHome();
     if (a === 'tab') { st.tab = arg; st.place = null; return drawBoard(); }
     if (a === 'allgigs') { st.tab = 'gigs'; st.place = null; return drawBoard(); }
     if (a === 'town') { close(); return leaveDecks(() => world.open('town')); }

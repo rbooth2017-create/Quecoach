@@ -20,7 +20,7 @@ test('stops follow the level', () => {
   assert.ok(!starter.includes('keylock'), 'Starter has no key lock');
   assert.ok(starter.includes('lane'));
   assert.ok(confident.includes('keylock'));
-  assert.ok(!confident.includes('lane'), 'Confident hides the beat lane');
+  assert.ok(confident.includes('lane'), 'Confident keeps the waveforms');
   assert.deepEqual(starter, STOPS.filter((s) => starter.includes(s.id)).map((s) => s.id), 'order is kept');
 });
 

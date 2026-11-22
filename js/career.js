@@ -20,7 +20,7 @@ export const VENUES = [
   {
     id: 'warehouse', name: 'Warehouse', level: 'confident', crowd: 36, picky: 1.25,
     who: 'A proper club night. 400 people.',
-    unlocks: ['Match by ear: the beat lane hides until you check', 'Treble dial for cleaner blends', 'Beat FX'],
+    unlocks: ['Match by ear: no more speed tips', 'Treble dial for cleaner blends', 'Beat FX'],
   },
   {
     id: 'main', name: 'Main room', level: 'pro', crowd: 48, picky: 1.5,

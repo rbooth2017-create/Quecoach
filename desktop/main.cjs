@@ -270,6 +270,7 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Library Manager…', accelerator: 'CmdOrCtrl+Shift+L', click: () => createManagerWindow() },
         cmd('Find Music…', 'search', 'CmdOrCtrl+F'),
+        cmd('Where to Get Music…', 'music-guide'),
         { type: 'separator' },
         cmd('AI Coach Settings…', 'ai'),
         cmd('Controller and Sound…', 'controller'),

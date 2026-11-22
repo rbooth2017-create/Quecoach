@@ -25,6 +25,29 @@ export function trackLinks(t) {
   ];
 }
 
+/**
+ * Where to get music to mix, for people with no collection yet. Download stores sell files you own and keep;
+ * streaming can't go on the decks (see the top of this file), so it isn't listed as a way to get tracks.
+ */
+export const MUSIC_GUIDE = {
+  stores: [
+    { id: 'bandcamp', label: 'Bandcamp', url: 'https://bandcamp.com/discover', note: 'Most of the money goes to the artist. Download as WAV, AIFF or FLAC.' },
+    { id: 'beatport', label: 'Beatport', url: 'https://www.beatport.com/', note: 'The big one for house, techno and dance. Charts for every style.' },
+    { id: 'traxsource', label: 'Traxsource', url: 'https://www.traxsource.com/', note: 'House, soulful and deep. Good DJ charts.' },
+    { id: 'juno', label: 'Juno Download', url: 'https://www.junodownload.com/', note: 'Huge catalogue, every dance style, plus older records.' },
+  ],
+  free: [
+    { label: 'Free downloads from artists', note: 'Many producers give tracks away on Bandcamp ("name your price") and SoundCloud. Look for a download button.' },
+    { label: 'Practice tracks', note: 'Cue Coach has its own built-in tracks, made for learning. They cost nothing and are always there.', source: 'practice' },
+  ],
+  tips: [
+    'Buy MP3 at 320 kbps, or WAV, AIFF or FLAC. Low-quality files sound thin on a big system.',
+    'Pick a few tracks of the same style and a similar BPM to start. They\'re much easier to mix together.',
+    'Keep them all in one folder, then choose that folder in Cue Coach.',
+    'Streaming apps and ripped videos won\'t work on the decks: the audio is locked, and mixing it breaks their rules.',
+  ],
+};
+
 /** "spotify:track:ID" or "https://open.spotify.com/track/ID?si=…" → "ID" ('' if neither). */
 export function spotifyTrackId(s) {
   const m = String(s || '').match(/(?:spotify:track:|open\.spotify\.com\/(?:intl-[a-z-]+\/)?track\/)([A-Za-z0-9]{22})/);

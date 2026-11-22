@@ -71,6 +71,16 @@ export function createPlayView({ root, layer, api }) {
         ${deckHTML('left')}
         <div class="pv-center">
           <div class="pv-lock" data-pv-lock aria-hidden="true"><i class="pv-ring l"></i><i class="pv-ring r"></i><b data-pv-locktext></b></div>
+          <div class="pv-gauges" data-pv-gauges hidden>
+            <div class="pv-gauge" data-pv-gspeed title="Speed: how much faster or slower the next song is than the one playing. In the middle, they match.">
+              <span class="pv-glabel">Speed</span><span class="pv-gval" data-pv-gspeedtext></span>
+              <div class="pv-gtrack"><i class="pv-gside lo">Slower</i><i class="pv-gmid"></i><i class="pv-gdot"></i><i class="pv-gside hi">Faster</i></div>
+            </div>
+            <div class="pv-gauge pv-gbeat" data-pv-gbeat title="Beats: the line in the middle is the playing song's kick drum, the dot is the next song's. Get the dot onto the line.">
+              <span class="pv-glabel">Kick drums</span><span class="pv-gval" data-pv-gbeattext></span>
+              <div class="pv-gtrack"><i class="pv-gside lo">Behind</i><i class="pv-gq a"></i><i class="pv-gmid"></i><i class="pv-gq b"></i><i class="pv-gdot"></i><i class="pv-gside hi">Ahead</i></div>
+            </div>
+          </div>
           <div class="pv-count" data-pv-count hidden><b data-pv-big></b><span data-pv-unit></span></div>
           <div class="pv-speed" data-pv-speed hidden>
             <div class="pv-seg"><button data-hold="slower">${icon('minus', 16)}Slower</button><button data-hold="faster">${icon('plus', 16)}Faster</button></div>
@@ -150,6 +160,10 @@ export function createPlayView({ root, layer, api }) {
       <div class="pv-role" data-role></div>
       <div class="pv-name" data-name></div>
       <div class="pv-sub" data-sub></div>
+      <div class="pv-meta">
+        <span class="pv-bpm" data-bpm title="The song's speed right now, in beats per minute, and how far its tempo is moved from the original"><b data-bpmnum>–</b><small>BPM</small><em data-bpmpct></em></span>
+        <button class="pv-cue" data-pv-cue="${side}" aria-pressed="false" hidden>${icon('headphones', 15)}Cue<b class="pv-tip" data-pv-tip="cue:${side}" aria-hidden="true"></b></button>
+      </div>
       <div class="pv-seek" data-pv-seek="${side}" role="slider" tabindex="0" aria-label="Skip through the song" aria-valuemin="0" aria-valuemax="100" title="Click or drag to skip through the song">
         <i class="pv-zone" title="The mix: bring the next song in here"></i><i class="pv-done"></i><i class="pv-head"></i>
       </div>
@@ -164,6 +178,8 @@ export function createPlayView({ root, layer, api }) {
     if (p) { const side = p.dataset.pvPlay; return D[side].buffer ? api.play(side) : openPicker(side); }
     const sk = e.target.closest('[data-pv-skip]');
     if (sk) return skipToMix(sk.dataset.pvSkip);
+    const cu = e.target.closest('[data-pv-cue]');
+    if (cu) { const side = cu.dataset.pvCue; return api.setListen?.(side, !api.listening(side)); }
     const ej = e.target.closest('[data-pv-eject]');
     if (ej) return removeSong(ej.dataset.pvEject);
     const b = e.target.closest('[data-pv]'); if (!b) {
@@ -298,7 +314,8 @@ export function createPlayView({ root, layer, api }) {
           const adv = speedAdvice(bm?.bpmDiff);
           return { kicker, title: 'Match the speed', detail: `${adv.text} When the two circles join up into one, you've got it.`, step: 'match' };
         }
-        return { kicker, title: 'Match it by ear', detail: `Listen to the two kick drums. If they gallop, tap Faster or Slower until ${inc} sits on the beat. Press C to check.`, step: 'match' };
+        if (T.buffer && !api.listening?.(r.inc) && api.gain(r.inc) <= 0.12) return { kicker, title: `Cue ${inc} in your headphones`, detail: `Press Cue under ${inc} so you can hear it before the room does.`, step: 'match', hl: [`cue:${r.inc}`], tips: { [`cue:${r.inc}`]: '🎧 Hear it first' } };
+        return { kicker, title: 'Match the speed', detail: `Tap Faster or Slower until the Speed dot sits in the middle, then push ${inc} until its kick lands on the line.`, step: 'match' };
       }
       case 'cue':
         return { kicker, title: 'Get it ready', detail: 'Tap the big "Get it ready" button.', cta: 'ready', step: 'cue' };
@@ -394,6 +411,16 @@ export function createPlayView({ root, layer, api }) {
         pb.innerHTML = icon(want === 'add' ? 'plus' : want, 26);
         pb.setAttribute('aria-label', want === 'add' ? 'Choose a song' : `${want === 'play' ? 'Play' : 'Pause'} ${d.track.title}`);
       }
+      // speed: BPM now, and how far the tempo is moved
+      const bpm = loaded && d.bpm ? d.bpm : null, pct = loaded ? d.tempoPct || 0 : 0;
+      setText($('[data-bpmnum]', de), bpm ? bpm.toFixed(1) : '–');
+      setText($('[data-bpmpct]', de), !bpm ? '' : Math.abs(pct) < 0.05 ? '±0%' : `${pct > 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}%`);
+      // headphone cue
+      const cb = $('[data-pv-cue]', de), on = loaded && !!api.listening?.(side);
+      cb.hidden = !loaded || !api.setListen;
+      cb.classList.toggle('on', on); cb.setAttribute('aria-pressed', String(on));
+      cb.title = api.hasPhones?.() ? `Cue: hear ${loaded ? d.track.title : 'this song'} in your headphones, even when the room can't` : 'Cue: hear this song before the room does. No separate headphones are set up, so it plays quietly through the speakers.';
+      de.classList.toggle('cued', on);
     }
 
     // the lock
@@ -403,6 +430,32 @@ export function createPlayView({ root, layer, api }) {
     lk.dataset.state = !bm ? 'off' : ear ? 'ear' : lock >= 0.99 ? 'locked' : lock >= 0.8 ? 'close' : 'apart';
     lk.classList.toggle('flip', r.floor === 'right');
     setText(el('locktext'), !bm ? '' : ear ? 'BY EAR' : lock >= 0.99 ? (bm.both ? 'LOCKED' : '100%') : `${Math.round(lock * 100)}%`);
+    lk.hidden = !!(ear && bm); // the meters below do the job when there are no speed tips
+    // speed and beat meters: the facts, no advice. Speed when there are no tips; the kick meter whenever both play.
+    const gs = el('gauges');
+    gs.hidden = !bm || (!ear && !bm.both);
+    if (!gs.hidden) {
+      const incName = songName(r.inc);
+      const sp = el('gspeed'); sp.hidden = !ear;
+      if (ear) {
+        const diff = bm.bpmDiff, same = Math.abs(diff) < 0.05;
+        sp.style.setProperty('--x', String(Math.max(-1, Math.min(1, diff / 4))));
+        sp.dataset.tone = same ? 'ok' : Math.abs(diff) < 0.5 ? 'close' : 'warn';
+        setText(el('gspeedtext'), same ? 'Same speed ✓' : `${Math.abs(diff).toFixed(1)} BPM ${diff > 0 ? 'faster' : 'slower'}`);
+        sp.title = same ? 'Speed: both songs play at the same BPM.' : `Speed: ${incName} is ${Math.abs(diff).toFixed(2)} BPM ${diff > 0 ? 'faster' : 'slower'} than ${songName(r.floor)}.`;
+      }
+      const bt = el('gbeat'); bt.hidden = !bm.both;
+      if (bm.both) {
+        const ms = offsetMs, a = Math.abs(ms);
+        const px = Math.max(-1, Math.min(1, bm.phase * 2));
+        bt.style.setProperty('--x', (Math.sign(px) * Math.sqrt(Math.abs(px))).toFixed(3)); // stretched near the line, so a few ms still shows
+        bt.dataset.tone = a < 15 ? 'ok' : a < 45 ? 'close' : 'warn';
+        setText(el('gbeattext'), a < 15 ? 'Together ✓' : `${Math.round(a / 5) * 5} ms ${ms > 0 ? 'ahead' : 'behind'}`);
+        // each kick flashes: the line for the song playing, the dot for the one coming in
+        bt.style.setProperty('--pf', ((1 - F.beatPhase()) ** 3).toFixed(3));
+        bt.style.setProperty('--pt', ((1 - T.beatPhase()) ** 3).toFixed(3));
+      }
+    }
 
     // what to say, and which controls matter now
     const s = say(n, r, bm);
@@ -421,7 +474,7 @@ export function createPlayView({ root, layer, api }) {
       $('[data-hold="back"]', sp).classList.toggle('hint', nud?.dir === 'back');
       $('[data-hold="ahead"]', sp).classList.toggle('hint', nud?.dir === 'ahead');
       $('.pv-seg.small', sp).hidden = !T.playing; // pushing the beats only matters once both play
-      setText(el('advice'), ear ? 'Trust your ears.' : adv ? adv.text : nud?.text || (bm ? 'Same speed.' : ''));
+      setText(el('advice'), ear ? (T.playing && F.playing ? 'Push it until the dot sits on the line.' : '') : adv ? adv.text : nud?.text || (bm ? 'Same speed.' : ''));
       sp.classList.toggle('focus', s.step === 'match');
     }
 
@@ -445,6 +498,7 @@ export function createPlayView({ root, layer, api }) {
       v.closest('.pv-vol').classList.toggle('hint', hl.has(`vol:${side}`));
       v.closest('.pv-vol').classList.toggle('low', D[side].buffer && api.vol(side) < 0.05);
     }
+    for (const side of SIDES) $(`[data-pv-cue="${side}"]`, root).classList.toggle('hint', hl.has(`cue:${side}`));
     const bs = el('bass');
     if (document.activeElement !== bs) bs.value = bassSliderValue();
     el('bassrow').classList.toggle('hint', hl.has('bass'));

@@ -6,7 +6,7 @@ export const DEFAULTS = {
   start: 'ask',           // Learn mode on start-up: 'ask' (the start screen), 'play', 'decks' or 'life' (DJ Life)
   latency: 'interactive', // audio buffer: 'interactive' (lowest delay), 'balanced', 'playback' (safest on slow computers)
   limiter: true,          // the safety limiter on the master out
-  jogs: 'auto',           // jog wheels on the full decks: 'auto' (hidden in the pro layout), 'show', 'hide'
+  jogs: 'auto',           // jog wheels on the full decks: 'auto' and 'show' show them, 'hide' nudges with buttons
   tempoRange: 16,         // Pro: each deck's tempo range to start with (the deck's button changes it)
   upIsFaster: false,      // the speed fader: false = pull down to go faster (like a CDJ), true = push up
   loadLock: true,         // never load over the deck the room is hearing

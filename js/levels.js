@@ -9,7 +9,7 @@
 export const LEVELS = [
   { id: 'starter', name: 'Starter', blurb: 'Step-by-step coaching, beat lane and plain-word tips.' },
   { id: 'improver', name: 'Improver', blurb: 'Shorter tips. Adds the bass dial, volume and a bar counter for smoother blends.' },
-  { id: 'confident', name: 'Confident', blurb: 'Beatmatch by ear: the beat lane hides until you ask to check. Adds the treble dial.' },
+  { id: 'confident', name: 'Confident', blurb: 'No speed tips: match by ear and by the waveforms. Adds the treble dial and Beat FX.' },
   { id: 'pro', name: 'Pro', blurb: 'No coaching. Full three-band EQ, ±16% tempo, keys and numbers.' },
 ];
 
@@ -25,9 +25,9 @@ const ON = {
   lesson:        ['starter', 'improver', 'confident'], // the step card at the top
   lessonDetail:  ['starter'],                          // full sentences, not just the step title
   keyHints:      ['starter', 'improver'],              // keyboard chips next to controls
-  beatLane:      ['starter', 'improver', 'pro'],       // zoomed waveforms with the beat grid (Confident trains by ear)
+  beatLane:      ['starter', 'improver', 'confident', 'pro'], // zoomed waveforms with the beat grid (from Confident, no dots or tips on it)
   beatDots:      ['starter', 'improver'],              // big "1" dots over the grid lines, to learn counting
-  beatLaneCheck: ['confident'],                        // hidden; "Check" shows it for a few seconds
+  beatLaneCheck: [],                                   // hidden; "Check" shows it for a few seconds (by-ear lessons only now)
   offsetHint:    ['starter', 'improver'],              // "Right is 40 ms late: nudge it forward" (and the Play view's speed tips)
   matchLabels:   ['starter', 'improver', 'confident'], // "Great match" instead of raw key/BPM numbers
   matchReasons:  ['starter', 'improver'],              // "Neighbouring key, blends well · Close in speed"
@@ -58,7 +58,6 @@ const ON = {
   keyLock:       ['improver', 'confident', 'pro'],     // key lock button (Starter: the pitch follows the speed, like a record)
   quantise:      ['improver', 'confident', 'pro'],     // hot cues and play wait for the next beat (Starter learns timing by hand)
   proTools:      ['pro'],                              // tempo range per deck, key shift, slip, reverse, censor
-  proLayout:     ['pro'],                              // the compact full decks: no zoom, small jogs, library below
 };
 
 /** Features that only exist in Learn mode: Pro mode is the decks with nothing of the game around them. */

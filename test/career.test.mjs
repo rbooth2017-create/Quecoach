@@ -106,6 +106,6 @@ test('Pro mode is the decks with none of the game', () => {
   const pro = featuresFor('starter', 'pro');
   assert.deepEqual(Object.keys(pro), FEATURES);
   for (const f of ['playView', 'career', 'lesson', 'tour', 'mixReport', 'offsetHint', 'mixGuide']) assert.equal(pro[f], false, f);
-  for (const f of ['fullEQ', 'hotCues', 'perfPads', 'beatFx', 'proTools', 'proLayout', 'keyLock', 'beatLane']) assert.equal(pro[f], true, f);
+  for (const f of ['fullEQ', 'hotCues', 'perfPads', 'beatFx', 'proTools', 'keyLock', 'beatLane']) assert.equal(pro[f], true, f);
   assert.equal(featuresFor('pro').playView, true, 'Pro level in Learn mode still has the game');
 });

@@ -349,6 +349,20 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .xf { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; font-weight: 750; font-size: 11px; }
 #xfader { width: 100%; height: 6px; background: linear-gradient(90deg, var(--left), var(--line-2) 50%, var(--right)); }
 #xfader::-webkit-slider-thumb { width: 26px; height: 20px; border-radius: 5px; border-color: var(--ink-3); }
+/* one mixer at every level: channel A | master, quantise and Beat FX | channel B. Knobs and FX added at higher
+   levels go down the channels and the middle side by side, so the mixer stays about as tall as the decks. */
+.mixer { grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr); grid-template-rows: auto auto auto auto 1fr auto; grid-template-areas: "l l l" "p p p" "a o b" "a q b" "a fx b" "x x x"; gap: 8px 6px; align-content: start; }
+.decks-row { grid-template-columns: minmax(0, 1fr) 272px minmax(0, 1fr); }
+.mixer > .label { grid-area: l; }
+.mixer > .pcount { grid-area: p; }
+.mixer .strips { display: contents; }
+.mixer .strip[data-side="left"] { grid-area: a; }
+.mixer .strip[data-side="right"] { grid-area: b; }
+.mixer .outs { grid-area: o; flex-direction: column; align-items: center; gap: 6px; padding-top: 4px; }
+.mixer .q-btn { grid-area: q; justify-self: stretch; }
+.mixer .bfx { grid-area: fx; align-content: start; border-top: none; padding: 2px 0 0; gap: 4px; }
+.mixer .bfx-row button { padding: 1px 6px; }
+.mixer .xf { grid-area: x; }
 .mixer .label { text-align: center; font-size: 10px; color: var(--ink-3); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
 
 /* library */
@@ -581,6 +595,19 @@ dialog a { color: var(--left); }
 /* toast + dialogs */
 #toast { position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, 16px); opacity: 0; background: var(--ink); color: var(--card); padding: 8px 16px; border-radius: 10px; transition: .22s; pointer-events: none; max-width: 80vw; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
+.music-guide { width: min(560px, 92vw); }
+.music-guide h3 { margin: 14px 0 6px; font-size: 13px; color: var(--ink); }
+.guide-stores { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.guide-store { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; text-align: left; text-decoration: none; color: var(--ink); background: transparent; }
+a.guide-store:hover { border-color: var(--ink-3); }
+.guide-store b { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.guide-store span { color: var(--ink-2); font-size: 12px; }
+.guide-free { display: grid; gap: 6px; }
+.guide-free > div { display: flex; gap: 10px; align-items: center; justify-content: space-between; font-size: 12px; color: var(--ink-2); }
+.guide-free b { color: var(--ink); display: block; font-size: 13px; }
+.guide-free button { flex: none; white-space: nowrap; }
+#welcomeView .note { color: var(--ink-2); font-size: 13px; margin: 20px 0 0; }
+button.link { background: none; border: 0; padding: 0; color: var(--left); font: inherit; text-decoration: underline; cursor: pointer; }
 dialog { border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; background: var(--card); color: var(--ink); box-shadow: 0 24px 70px rgba(0,0,0,.3); width: min(480px, 92vw); }
 dialog::backdrop { background: rgba(10, 12, 16, .35); }
 dialog h2 { margin: 0 0 4px; font-size: 16px; }
@@ -877,6 +904,19 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
 .pv-name { font-weight: 750; font-size: 17px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pv-sub { color: var(--pv-ink-3); font-size: 13px; min-height: 18px; }
 /* seek strip: click or drag to skip through the song; the mix section glows */
+/* speed and headphone cue under each song */
+.pv-meta { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 30px; }
+.pv-bpm { display: inline-flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
+.pv-bpm b { font-size: 20px; font-weight: 850; color: var(--c); letter-spacing: .01em; }
+.pv-bpm small { font-size: 10.5px; font-weight: 800; letter-spacing: .12em; color: var(--pv-ink-3); }
+.pv-bpm em { font-style: normal; font-size: 12px; font-weight: 700; color: var(--pv-ink-2); padding-left: 4px; }
+.pv-deck.empty .pv-bpm { opacity: .35; }
+.pv-cue { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: 99px; border: 1.5px solid color-mix(in srgb, var(--c) 55%, transparent); background: transparent; color: var(--pv-ink) !important; font-weight: 750; font-size: 13px; }
+.pv-cue:hover { background: color-mix(in srgb, var(--c) 14%, transparent); }
+.pv-cue.on { background: var(--c); border-color: var(--c); color: #0b0816 !important; box-shadow: 0 0 18px color-mix(in srgb, var(--c) 55%, transparent); }
+.pv-cue.hint:not(.on) { border-color: var(--pv-gold); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pv-gold) 35%, transparent); }
+.pv-cue[hidden] { display: none; }
+.pv-deck.cued .pv-role { color: var(--c); }
 .pv-seek { --at: 0; --z0: 0; --z1: 0; position: relative; width: min(100%, 300px); height: 14px; margin-top: 6px; border-radius: 7px; background: var(--pv-card-2); border: 1px solid var(--pv-line-2); cursor: pointer; touch-action: none; }
 .pv-seek.off { opacity: .35; pointer-events: none; }
 .pv-seek i { position: absolute; top: 0; bottom: 0; pointer-events: none; }
@@ -920,6 +960,26 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
 .pv-lock[data-state="locked"] .pv-ring { background: color-mix(in srgb, var(--pv-ok) 20%, transparent); box-shadow: 0 0 34px color-mix(in srgb, var(--pv-ok) 60%, transparent); }
 .pv-lock b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 15px; font-weight: 850; letter-spacing: .04em; color: var(--pv-gold); }
 .pv-lock[data-state="locked"] b { color: var(--pv-ok); }
+/* speed and kick-drum meters: where the next song is against the one playing */
+.pv-lock[hidden], .pv-gauges[hidden], .pv-gauge[hidden] { display: none; }
+.pv-gauges { display: grid; gap: 10px; width: 100%; }
+.pv-gauge { --x: 0; --pf: 0; --pt: 0; display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: baseline; padding: 8px 10px 10px; border-radius: 12px; background: var(--pv-card-2); border: 1px solid var(--pv-line-2); --tone: var(--pv-warn); }
+.pv-gauge[data-tone="close"] { --tone: var(--pv-gold); }
+.pv-gauge[data-tone="ok"] { --tone: var(--pv-ok); border-color: color-mix(in srgb, var(--pv-ok) 55%, transparent); }
+.pv-glabel { font-size: 10.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--pv-ink-3); }
+.pv-gval { font-size: 13px; font-weight: 800; color: var(--tone); font-variant-numeric: tabular-nums; }
+.pv-gtrack { grid-column: 1 / -1; position: relative; height: 22px; border-radius: 11px; background: linear-gradient(90deg, color-mix(in srgb, var(--pv-warn) 18%, transparent), color-mix(in srgb, var(--pv-ok) 22%, transparent) 42% 58%, color-mix(in srgb, var(--pv-warn) 18%, transparent)); }
+.pv-gtrack i { position: absolute; pointer-events: none; }
+.pv-gmid { left: 50%; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--pv-ink); }
+.pv-gq { top: 5px; bottom: 5px; width: 1px; background: var(--pv-line-2); }
+.pv-gq.a { left: 25%; } .pv-gq.b { left: 75%; }
+.pv-gdot { left: calc(50% + var(--x) * 50%); top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 12px var(--tone); transition: left .12s linear; }
+.pv-gside { top: 50%; transform: translateY(-50%); font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-ink-3); }
+.pv-gside.lo { left: 8px; } .pv-gside.hi { right: 8px; }
+/* each kick drum flashes: the line for the song on the floor, the dot for the one coming in */
+.pv-gbeat .pv-gmid { box-shadow: 0 0 calc(4px + 14px * var(--pf)) color-mix(in srgb, var(--pv-ink) calc(var(--pf) * 90%), transparent); }
+.pv-gbeat .pv-gdot { transform: scale(calc(1 + .45 * var(--pt))); transition: none; }
+@media (prefers-reduced-motion: reduce) { .pv-gbeat .pv-gdot { transform: none; } }
 .pv-count { display: flex; align-items: baseline; gap: 6px; padding: 4px 14px; border-radius: 99px; background: var(--pv-card-2); border: 1px solid var(--pv-line-2); }
 .pv-count b { font-size: 22px; font-weight: 850; font-variant-numeric: tabular-nums; }
 .pv-count span { font-size: 12px; color: var(--pv-ink-2); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
@@ -1123,7 +1183,7 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
 .vb-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--right); box-shadow: 0 0 0 3px var(--right-soft); }
 
 /* the venue map and bookings: over any view */
-.career-layer { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; padding: 24px; background: rgba(5,3,12,.72); backdrop-filter: blur(8px); color: var(--pv-ink); overflow: auto; }
+.career-layer { -webkit-app-region: no-drag; /* over the title bar's drag strip: let clicks through to the cards */ position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; padding: 24px; background: rgba(5,3,12,.72); backdrop-filter: blur(8px); color: var(--pv-ink); overflow: auto; }
 .cl-card { position: relative; width: min(1180px, 100%); border-radius: 24px; background: radial-gradient(ellipse at 85% 0%, #2a1450 0%, var(--pv-bg) 60%); border: 1px solid var(--pv-line-2); box-shadow: 0 40px 100px rgba(0,0,0,.6); padding: 28px 30px; }
 .cl-card h2 { margin: 0; font-size: clamp(26px, 3.4vw, 38px); font-weight: 850; letter-spacing: -.02em; }
 .cl-lead { color: var(--pv-ink-2); font-size: 15px; margin: 6px 0 0; max-width: 680px; }
@@ -1174,28 +1234,6 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
 /* ---------- Pro mode: just the decks ---------- */
 body.mode-pro #venueBtn, body.mode-pro #viewBtn, body.mode-pro #progress, body.mode-pro #coach { display: none !important; }
 #levelBtn .ic { display: inline-block; }
-/* the pro layout: no zoom, everything at full size, compact decks, the library a normal panel below them */
-body.pro-layout .stage > :not(.library) { zoom: 1 !important; }
-body.pro-layout .stage { gap: 8px; padding: 8px; }
-body.pro-layout .stage:not(.lib-collapsed) > .library { height: auto; margin-top: 0; flex: 1 1 260px; min-height: 230px; box-shadow: none; transition: none; }
-body.pro-layout .stage.fit-full > .decks-area:not(.folded) { flex: none; }
-body.pro-layout #lane { height: 150px; }
-body.pro-layout .decks-row { grid-template-columns: minmax(0, 1fr) 256px minmax(0, 1fr); gap: 8px; }
-body.pro-layout .deck { grid-template-rows: auto; gap: 8px; padding: 10px 12px; }
-body.pro-layout .deck-head .title { font-size: 15px; }
-body.pro-layout .deck-head .artist { font-size: 13px; }
-body.pro-layout .bpm b { font-size: 26px; }
-body.pro-layout .bpm span, body.pro-layout .counter, body.pro-layout .deckfoot, body.pro-layout .pitch .val { font-size: 12px; }
-body.pro-layout .wave { height: 46px; }
-body.pro-layout .deckbody { grid-template-columns: 64px minmax(0, 1fr) 64px; min-height: 0; }
-body.pro-layout .pitch .vfader { height: 104px; }
-body.pro-layout .pitch .keylock { font-size: 12px; padding: 3px 9px; }
-body.pro-layout .cue-btn { width: 52px; height: 30px; font-size: 12px; }
-body.pro-layout .tlabel { font-size: 11px; }
-body.pro-layout .pmodes button { font-size: 12px; padding: 5px 4px; }
-body.pro-layout .ppad { height: 36px; font-size: 12px; }
-body.pro-layout .dial-label, body.pro-layout .mixer .label, body.pro-layout .bfx-row, body.pro-layout .bfx-row b { font-size: 12px; }
-body.pro-layout .deckfoot .ghost.small { font-size: 12px; padding: 4px 9px; }
 .nudges { display: flex; justify-content: center; gap: 8px; align-self: center; }
 .nudges button { min-width: 84px; height: 40px; justify-content: center; font-weight: 650; border-radius: 10px; touch-action: none; }
 .nudges button.on { border-color: var(--c); color: var(--c); background: var(--soft); }
@@ -1233,6 +1271,8 @@ body.pro-layout .deckfoot .ghost.small { font-size: 12px; padding: 4px 9px; }
 .set-row:last-child { border-bottom: none; }
 .set-row span b { display: block; font-size: 13px; }
 .set-row span small { display: block; color: var(--ink-2); font-size: 12px; }
+button.danger { color: var(--warn); border-color: var(--warn); }
+button.danger:hover { background: var(--warn-soft); }
 .set-inline { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .sel { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card-2); max-width: 260px; }
 .pin::placeholder { letter-spacing: normal; }
@@ -1310,25 +1350,6 @@ body:not(.play-mode) #toast { bottom: 64px; }
 :root[data-theme="neon"] .bpm b, :root[data-theme="neon"] .deck-head .title { letter-spacing: -.01em; }
 :root[data-theme="neon"] .titlebar { background: linear-gradient(90deg, color-mix(in srgb, var(--card) 92%, var(--left)), var(--card) 40%, var(--card) 60%, color-mix(in srgb, var(--card) 92%, var(--right))); }
 
-/* the pro mixer: channel A | master, meter, quantise and Beat FX | channel B, so it's as short as the decks */
-body.pro-layout .mixer { grid-template-columns: minmax(0, 1fr) 104px minmax(0, 1fr); grid-template-rows: auto auto auto 1fr auto; grid-template-areas: "a c b" "a q b" "a fx b" "a fx b" "x x x"; gap: 6px 8px; padding: 8px; align-content: start; }
-body.pro-layout .mixer > .label, body.pro-layout .mixer > .pcount { display: none; }
-body.pro-layout .mixer .strips { display: contents; }
-body.pro-layout .mixer .strip[data-side="left"] { grid-area: a; }
-body.pro-layout .mixer .strip[data-side="right"] { grid-area: b; }
-body.pro-layout .mixer .strip { gap: 6px; padding: 6px 4px; }
-body.pro-layout .mixer .fader-row { flex: none; }
-body.pro-layout .mixer .fader-row .vfader, body.pro-layout .mixer .meter { height: 104px; }
-body.pro-layout .mixer .outs { grid-area: c; flex-direction: column; align-items: center; gap: 6px; }
-body.pro-layout .mixer .q-btn { grid-area: q; justify-self: stretch; }
-body.pro-layout .mixer .bfx { grid-area: fx; border-top: none; padding: 4px 0 0; gap: 4px; }
-body.pro-layout .mixer .bfx .label { font-size: 11px; }
-body.pro-layout .mixer .bfx-row button { padding: 1px 6px; }
-body.pro-layout .mixer .xf { grid-area: x; }
-body.pro-layout .deck { align-content: start; }
-body.pro-layout .decks-head { display: none; }
-body.pro-layout #lane { height: 128px; }
-body.pro-layout .stage:not(.lib-collapsed) > .library { min-height: 190px; }
 
 /* D2: the side panel never grows past its width: its column can shrink, tabs scroll, buttons and selects wrap */
 .tutor { grid-template-columns: minmax(0, 1fr); }
@@ -1340,26 +1361,8 @@ body.pro-layout .stage:not(.lib-collapsed) > .library { min-height: 190px; }
 .sp-form select { width: 100%; min-width: 0; }
 .tutor-body { min-width: 0; }
 
-/* compact pro deck: the tempo fader with its buttons beside it, a slimmer transport */
-body.pro-layout .pitch { grid-template-columns: auto auto; grid-template-rows: auto auto auto auto; column-gap: 6px; row-gap: 4px; align-items: center; justify-items: center; }
-body.pro-layout .pitch .vfader { grid-column: 1; grid-row: 1 / 5; }
-body.pro-layout .pitch > :not(.vfader) { grid-column: 2; }
-body.pro-layout .deckbody { grid-template-columns: 64px minmax(0, 1fr) 96px; }
-body.pro-layout .transport { gap: 6px; }
-body.pro-layout .transport .play { width: 46px; height: 46px; }
-body.pro-layout .transport .tlabel { display: none; }
-body.pro-layout .deckfoot { gap: 4px 8px; }
-body.pro-layout .mixer .dial { width: 34px; height: 34px; }
-body.pro-layout .mixer .dial-wrap { gap: 0; }
-body.pro-layout .mixer .strip > .dial-label { display: none; }
 
-/* the pro library is part of the page, never a sheet over the decks: on a short screen the stage scrolls a little instead */
-body.pro-layout .stage > .library { position: relative; }
-@media (max-height: 940px) { body.pro-layout #lane { height: 104px; } body.pro-layout .stage:not(.lib-collapsed) > .library { min-height: 170px; } }
 
-body.pro-layout .mixer .cut { line-height: 22px; font-size: 11px; padding: 0 9px; }
-body.pro-layout .mixer .dial-label, body.pro-layout .mmeter .limit, body.pro-layout .q-btn { font-size: 11px; }
-body.pro-layout .q-btn { padding: 4px 10px; }
 
 /* four side panel tabs fit: tighter tabs, the count lives in the set list's own heading */
 .tutor-head { gap: 4px; padding-left: 10px; }
@@ -1451,6 +1454,7 @@ body.pro-layout .q-btn { padding: 4px 10px; }
       <button class="choice desktop-only" data-source="managed"><span data-icon="library"></span><b>My library</b><span>Copy your music into Cue Coach so it's always there, even with the drive unplugged.</span></button>
       <button class="choice" data-source="rekordbox" id="rbChoice"><span data-icon="disc"></span><b>My rekordbox library</b><span id="rbChoiceNote">Use the tracks, beat grids and keys you already have.</span></button>
     </div>
+    <p class="note">No music of your own yet? Start with the practice tracks, and <button class="link" data-a="music-guide">see where DJs get theirs</button>.</p>
   </div>
 </div>
 
@@ -1467,6 +1471,13 @@ body.pro-layout .q-btn { padding: 4px 10px; }
 <div id="toast" role="status" aria-live="polite"></div>
 <section class="mix-report hidden" id="mixReport" role="status" aria-live="polite" aria-label="Mix report"></section>
 <input type="file" id="dirInput" webkitdirectory multiple class="hidden">
+
+<dialog id="musicGuide" class="music-guide">
+  <h2>Where to get music</h2>
+  <p>To mix, you need tracks saved on your computer. Here's where DJs get them.</p>
+  <div id="musicGuideBody"></div>
+  <form method="dialog" class="dlg-foot"><button>Done</button></form>
+</dialog>
 
 <dialog id="levels">
   <h2>Your level</h2>

@@ -127,9 +127,10 @@ test('coaching fades out and tools fade in as the level goes up', () => {
   assert.equal(starter.lesson, true); assert.equal(pro.lesson, false);
   assert.equal(starter.beatLane, true); assert.equal(pro.beatLane, true); // Pro keeps the waveforms, like rekordbox
   assert.equal(starter.beatDots, true); assert.equal(pro.beatDots, false); // …but the counting dots go
-  assert.equal(featuresFor('confident').beatLane, false); // Confident beatmatches by ear
+  assert.equal(featuresFor('confident').beatLane, true); // Confident keeps the waveforms, without the dots or tips
+  assert.equal(featuresFor('confident').beatDots, false); assert.equal(featuresFor('confident').offsetHint, false);
   assert.equal(starter.hotCues, false); assert.equal(featuresFor('improver').hotCues, true);
-  assert.equal(featuresFor('confident').beatLaneCheck, true);
+  assert.equal(featuresFor('confident').beatLaneCheck, false);
   assert.equal(starter.bassEQ, false); assert.equal(pro.fullEQ, true);
   assert.deepEqual(Object.keys(featuresFor('nonsense')), FEATURES); // unknown → starter
   assert.equal(featuresFor('nonsense').lessonDetail, true);

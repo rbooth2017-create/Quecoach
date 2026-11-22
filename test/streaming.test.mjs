@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   trackLinks, spotifyTrackId, decodeText, parseDelimited, parsePlaylist, splitArtistTitle,
-  norm, titleParts, artistNames, matchScore, matchPlaylist, playlistSummary,
+  norm, titleParts, artistNames, matchScore, matchPlaylist, playlistSummary, MUSIC_GUIDE,
 } from '../js/streaming.js';
 const M = createRequire(import.meta.url)('../desktop/libmodel.cjs');
 
@@ -157,4 +157,13 @@ test('crates keep a clean list of tracks still to get', () => {
   // renaming and adding keep it
   const kept = M.addToCrate(M.renameCrate(r.lib, 'c1', 'Sun'), 'c1', []);
   assert.equal(kept.crates[0].wanted.length, 1);
+});
+
+test('the music guide points to download shops and the practice tracks, never streaming', () => {
+  const { stores, free, tips } = MUSIC_GUIDE;
+  assert.deepEqual(stores.map((s) => s.id), ['bandcamp', 'beatport', 'traxsource', 'juno']);
+  assert.ok(stores.every((s) => s.url.startsWith('https://') && s.note));
+  assert.ok(free.some((f) => f.source === 'practice'), 'offers the built-in tracks');
+  assert.ok(!stores.some((s) => /spotify|apple|youtube|soundcloud/i.test(s.url)), 'only shops that sell files to keep');
+  assert.ok(tips.length >= 3);
 });
