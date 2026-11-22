@@ -17,15 +17,28 @@ test('every song part is explained in plain words', () => {
   assert.equal(partInfo('').what, '');
 });
 
-test('the plan starts B at A\'s outro when B\'s intro fits', () => {
+// The cue and step tests below use a 32-bar blend from A's outro: start 129, swap 145, end 161.
+const plan32 = shiftPlan(planMix(A, B), 129);
+
+test('a dance mix plays B\'s whole intro and build under A, so B\'s drop lands as A ends', () => {
   const plan = planMix(A, B);
   assert.equal(plan.aOutroStart, 129); // 32+16+32+16+32 bars, then the outro
-  assert.equal(plan.startBar, 129);
   assert.equal(plan.bIntroBars, 32);
-  assert.equal(plan.blendBars, 32);
-  assert.equal(plan.swapBar, 145);
+  assert.equal(plan.blendBars, 48); // B's 32-bar intro + 16-bar build, not a quick 32
+  assert.equal(plan.startBar, 113); // a phrase before A's outro, so it all fits
+  assert.equal(plan.swapBar, 137); // halfway, on a 4-bar line
+  assert.equal(plan.endBar, 161); // A's last bar
+  assert.equal(plan.bDropAtBarA, 161); // B's drop lands as A ends
   assert.ok(Math.abs(plan.bStart - B.grid.firstDownbeat) < 1e-9);
-  assert.equal(plan.bDropAtBarA, 129 + 48); // B's build follows its intro, so its drop lands 48 bars after it starts
+  assert.match(plan.why, /drop lands as A ends/);
+});
+
+test('B\'s intro that fits inside A\'s outro starts on the outro', () => {
+  // B with a 16-bar intro and no build: a 16-bar blend from A's outro
+  const bb = 240 / B.grid.bpm, d = B.grid.firstDownbeat;
+  const short = { ...B, phrases: [{ label: 'Intro', start: d, end: d + 16 * bb }, ...B.phrases.slice(2).map((p) => ({ ...p, start: p.start - 32 * bb, end: p.end - 32 * bb }))] };
+  const plan = planMix(A, short);
+  assert.equal(plan.startBar, 129); assert.equal(plan.blendBars, 16); assert.equal(plan.swapBar, 137);
   assert.match(plan.why, /fits inside/);
 });
 
@@ -55,7 +68,7 @@ test('a short outro and a short intro still get a long blend', () => {
 });
 
 test('cues count down to the mix point, then guide the blend', () => {
-  const plan = planMix(A, B);
+  const plan = plan32;
   assert.equal(mixCue(plan, 100, false).phase, 'prep');
   assert.match(mixCue(plan, 100, false).title, /Mix point in 29 bars/);
   assert.equal(mixCue(plan, 121, false).title, 'Start deck B in 8 bars');
@@ -71,7 +84,7 @@ test('cues count down to the mix point, then guide the blend', () => {
 });
 
 // ---------- the step-by-step transition guide ----------
-const plan = planMix(A, B); // start 129, swap 145, end 161
+const plan = plan32; // start 129, swap 145, end 161
 const ctl = (level, controller = false) => mixControls(featuresFor(level), controller);
 const ids = (steps) => steps.map((s) => s.id);
 const at = (steps) => Object.fromEntries(steps.map((s) => [s.id, s.bar]));

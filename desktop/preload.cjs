@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('cueDesktop', {
   setChrome: (c) => ipcRenderer.invoke('chrome', { bg: String(c?.bg || ''), fg: String(c?.fg || '') }),
   onCommand: (cb) => ipcRenderer.on('command', (_e, c) => cb(String(c))),
   // Windows/Linux: the app menu, opened from the ☰ button (the custom title bar hides the menu bar)
+  openLibraryManager: () => ipcRenderer.invoke('open-library-manager'),
   showMenu: (x, y) => ipcRenderer.invoke('show-menu', { x: Number(x) || 0, y: Number(y) || 0 }),
   // The real path of a dropped or picked file ('' when it has none, e.g. made in memory).
   filePath: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
@@ -34,6 +35,7 @@ contextBridge.exposeInMainWorld('cueDesktop', {
     importItems: (items) => ipcRenderer.invoke('library-import', { items }),
     cancelImport: () => ipcRenderer.invoke('library-cancel-import'),
     updateAnalysis: (id, data) => ipcRenderer.invoke('library-update-analysis', String(id), data),
+    updateMeta: (id, fields) => ipcRenderer.invoke('library-update-meta', String(id), fields),
     crate: (op, args) => ipcRenderer.invoke('library-crate', String(op), args),
     remove: (ids) => ipcRenderer.invoke('library-delete', ids),
     onProgress: (cb) => ipcRenderer.on('library-progress', (_e, p) => cb(p)),

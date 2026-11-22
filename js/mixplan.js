@@ -14,15 +14,17 @@ export const PART_INFO = {
 };
 export const partInfo = (label = '') => PART_INFO[label] || PART_INFO[Object.keys(PART_INFO).find((k) => label.startsWith(k))] || { name: label || 'Part', what: '', mix: '' };
 
-// How long the two tracks play together. Short blends are a quick fade, not a mix: aim for 32 bars and
-// never plan fewer than 16, starting B earlier in A when A's outro alone is too short.
-export const BLEND = { min: 16, max: 32 };
+// How long the two tracks play together. Short blends are a quick fade, not a mix: never plan fewer than 16
+// bars. Dance tracks get B's whole intro and build (up to 64 bars) under A, so B's drop lands as A ends;
+// a pop song with a short intro keeps a short blend. B starts earlier in A when A's outro alone is too short.
+export const BLEND = { min: 16, max: 64 };
 
 /**
  * Plan a mix from A (playing) into B (next).
  * startBar: A's bar to press play on B. B starts from bStart (its first downbeat).
- * The blend runs over B's intro and build (everything before its drop), 16 to 32 bars. If that, or B's intro,
- * is longer than A's outro, B starts earlier by whole phrases so both tracks get time together.
+ * The blend runs over B's intro and build (everything before its drop), 16 to 64 bars, so B's drop lands as A
+ * ends. If that is longer than A's outro, B starts earlier by whole phrases so both tracks get time together.
+ * The bass swap sits halfway, on a 4-bar line.
  */
 export function planMix(A, B, phraseBars = 16) {
   if (!A?.grid || !B?.grid || !(A.duration > 0)) return null;
@@ -46,17 +48,21 @@ export function planMix(A, B, phraseBars = 16) {
   const early = out.bar - startBar;
   return {
     startBar, startTime: timeOfBar(A.grid, startBar),
-    blendBars, swapBar: startBar + Math.floor(blendBars / 2), endBar: startBar + blendBars,
+    blendBars, swapBar: swapAt(startBar, blendBars), endBar: startBar + blendBars,
     aOutroStart: out.bar, aTotalBars: out.totalBars, aOutroBars,
     bStart: inPt.time, bIntroBars, bDropAtBarA: startBar + (sB?.firstDrop ? sB.firstDrop - 1 : bIntroBars),
     why: !early
       ? `B's ${bIntroBars}-bar intro fits inside A's ${aOutroBars}-bar outro: ${blendBars} bars with both tracks playing.`
       : bIntroBars > aOutroBars
         ? `B's intro is ${bIntroBars} bars, longer than A's ${aOutroBars}-bar outro, so B starts ${early} bars earlier and its drop lands as A ends.`
+        : want > aOutroBars && blendBars === want
+          ? `B's intro and build run ${bLeadBars} bars before its drop, longer than A's ${aOutroBars}-bar outro, so B starts ${early} bars earlier: a ${blendBars}-bar blend, and B's drop lands as A ends.`
         : `A's outro is only ${aOutroBars} bars, so B starts ${early} bars earlier to give you a ${blendBars}-bar blend.`,
   };
 }
 
+/** The bass swap: halfway through the blend, on a 4-bar line. */
+const swapAt = (start, blend) => start + Math.max(2, Math.floor(blend / 8) * 4);
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
@@ -76,7 +82,7 @@ export function shiftPlan(plan, startBar) {
   if (s === plan.startBar) return plan;
   const room = plan.aTotalBars - s + 1;
   const blendBars = Math.max(4, Math.min(plan.blendBars, room - (room % 4)));
-  return { ...plan, startBar: s, blendBars, swapBar: s + Math.floor(blendBars / 2), endBar: s + blendBars, bDropAtBarA: plan.bDropAtBarA + (s - plan.startBar) };
+  return { ...plan, startBar: s, blendBars, swapBar: swapAt(s, blendBars), endBar: s + blendBars, bDropAtBarA: plan.bDropAtBarA + (s - plan.startBar) };
 }
 
 const BAND_WORD = { high: 'highs', mid: 'mids' };

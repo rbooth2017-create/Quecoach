@@ -120,6 +120,21 @@ function updateAnalysis(lib, id, { grid, duration, phrases, energyEst } = {}) {
   };
 }
 
+/**
+ * Edit a track's details from the library manager: title, artist, genre, key, energy (1-10) and BPM.
+ * Empty title is refused; unknown fields are ignored; energy and BPM must be numbers in range or null.
+ */
+function updateMeta(lib, id, fields = {}) {
+  const f = fields && typeof fields === 'object' ? fields : {};
+  const ch = {};
+  if ('title' in f && str(f.title)) ch.title = str(f.title).slice(0, 200);
+  for (const k of ['artist', 'genre', 'key']) if (k in f) ch[k] = str(f[k]).slice(0, k === 'key' ? 8 : 200);
+  if ('energy' in f) { const e = num(f.energy); ch.energy = e ? Math.max(1, Math.min(10, Math.round(e))) : null; }
+  if ('comment' in f) ch.comment = str(f.comment).slice(0, 500);
+  if ('rating' in f) { const r = Number(f.rating); ch.rating = Number.isFinite(r) ? Math.max(0, Math.min(5, Math.round(r))) : 0; }
+  return { ...lib, tracks: lib.tracks.map((t) => (t.id === id ? { ...t, ...ch } : t)) };
+}
+
 /** Take tracks out of the library and out of every crate. */
 function removeTracks(lib, ids) {
   const gone = new Set(ids);
@@ -202,7 +217,7 @@ function removeFromCrate(lib, id, trackIds) {
 module.exports = {
   VERSION, emptyLibrary, normalise, AUDIO_EXT, isAudioName,
   safeFileName, uniqueFileName, parseFileName, libraryFileName,
-  recordFrom, findDuplicate, addTrack, updateAnalysis, removeTracks,
+  recordFrom, findDuplicate, addTrack, updateAnalysis, updateMeta, removeTracks,
   createCrate, renameCrate, deleteCrate, addToCrate, removeFromCrate,
   cleanWanted, setWanted,
 };

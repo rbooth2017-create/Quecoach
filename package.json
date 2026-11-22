@@ -29,6 +29,7 @@
       "index.html",
       "spike.html",
       "learn.html",
+      "library.html",
       "js/**",
       "desktop/**",
       "package.json",

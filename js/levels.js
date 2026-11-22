@@ -22,6 +22,7 @@ const ON = {
   matchReasons:  ['starter', 'improver'],              // "Neighbouring key, blends well · Close in speed"
   friendlyRoles: ['starter', 'improver'],              // "In the room" / "Listening" instead of A / B
   upNext:        ['starter', 'improver', 'confident', 'pro'],
+  playView:      ['starter', 'improver', 'confident', 'pro'], // the game skin: try it at any level; Full decks is a click away
   setFirst:      ['confident', 'pro'],                 // the side panel opens on the set list, not the lessons
   // tools
   volume:        ['improver', 'confident', 'pro'],     // channel volume dial (Starter mixes with the crossfader only)

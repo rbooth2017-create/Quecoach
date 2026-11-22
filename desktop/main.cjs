@@ -207,6 +207,31 @@ function errorPage(title, text) {
     <div style="max-width:440px;text-align:center;padding:24px"><h1 style="font-size:20px;margin:0 0 8px">${esc(title)}</h1><p style="color:#5c6272;line-height:1.5;margin:0">${esc(text)}</p></div></body>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
+// ---------- the library manager: its own window for tracks, crates, set lists, beat grids and cues ----------
+let managerWin = null;
+function createManagerWindow() {
+  if (managerWin) { managerWin.show(); return managerWin.focus(); }
+  const st = readWinState(), wa = screen.getPrimaryDisplay().workArea;
+  const width = Math.min(1320, wa.width), height = Math.min(860, wa.height);
+  const bounds = onScreen(st.managerBounds) ? st.managerBounds : { width, height, x: wa.x + Math.round((wa.width - width) / 2) + 40, y: wa.y + Math.round((wa.height - height) / 2) + 30 };
+  const bg = st.chrome?.bg || '#f6f5f1', fg = st.chrome?.fg || '#1d2230';
+  managerWin = new BrowserWindow({
+    ...bounds, minWidth: 980, minHeight: 620, title: 'Cue Coach Library', show: false, backgroundColor: bg,
+    icon: fs.existsSync(ICON) ? ICON : undefined,
+    ...(IS_MAC ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 15 } }
+      : { titleBarStyle: 'hidden', titleBarOverlay: { color: bg, symbolColor: fg, height: 46 } }),
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  managerWin.once('ready-to-show', () => managerWin.show());
+  managerWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  managerWin.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(ORIGIN)) e.preventDefault(); });
+  const save = () => { if (managerWin && !managerWin.isDestroyed()) writeWinState({ managerBounds: managerWin.getNormalBounds() }); };
+  let t; for (const ev of ['resize', 'move']) managerWin.on(ev, () => { clearTimeout(t); t = setTimeout(save, 400); });
+  managerWin.on('close', save);
+  managerWin.on('closed', () => { managerWin = null; });
+  managerWin.loadURL(`${ORIGIN}/library.html`);
+}
+
 const sendCommand = (cmd) => { if (!learnWin) createLearnWindow(); learnWin.webContents.send('command', cmd); };
 
 // Extra full-size windows (the audio spike test page).
@@ -238,6 +263,7 @@ function buildMenu() {
         cmd('Import Music to My Library…', 'library-import', 'CmdOrCtrl+I'),
         cmd('Import Playlist from Spotify or Apple Music…', 'library-import-playlist'),
         { type: 'separator' },
+        { label: 'Library Manager…', accelerator: 'CmdOrCtrl+Shift+L', click: () => createManagerWindow() },
         cmd('Find Music…', 'search', 'CmdOrCtrl+F'),
         { type: 'separator' },
         cmd('AI Coach Settings…', 'ai'),
@@ -292,6 +318,9 @@ ipcMain.handle('pin', (e, v) => (fromUs(e) ? setPinned(v) : pinned));
 ipcMain.handle('get-pin', () => pinned);
 // AI coach (Claude): only the Learn window may use it. The key stays in this process, encrypted on disk.
 const fromLearn = (e) => fromUs(e) && learnWin && e.sender === learnWin.webContents;
+// My library can be used by the Learn window and the library manager window.
+const fromApp = (e) => fromLearn(e) || (fromUs(e) && managerWin && e.sender === managerWin.webContents);
+ipcMain.handle('open-library-manager', (e) => { if (fromApp(e)) createManagerWindow(); });
 ipcMain.handle('ai-status', (e) => (fromLearn(e) ? ai.status() : null));
 ipcMain.handle('show-menu', (e, pos) => { if (fromLearn(e)) Menu.getApplicationMenu()?.popup({ window: learnWin, x: Math.round(pos?.x || 0), y: Math.round(pos?.y || 0) }); });
 ipcMain.handle('ai-set-key', (e, key) => (fromLearn(e) ? ai.setKey(key) : null));
@@ -318,7 +347,7 @@ const plain = (v, max = 2e6) => { try { const s = JSON.stringify(v ?? {}); retur
 async function runImport(items) {
   if (importing) return { busy: true };
   importing = new AbortController();
-  const send = (p) => learnWin?.webContents.send('library-progress', p);
+  const send = (p) => { learnWin?.webContents.send('library-progress', p); managerWin?.webContents.send('library-progress', p); };
   try {
     const res = await store().importItems(items, { readTags: await readTagsFn(), signal: importing.signal, onProgress: send });
     send({ ...res, finished: true, errors: res.errors.slice(0, 5) });
@@ -326,18 +355,18 @@ async function runImport(items) {
   } finally { importing = null; }
 }
 
-ipcMain.handle('library-list', async (e) => (fromLearn(e) ? libView(await store().load()) : null));
+ipcMain.handle('library-list', async (e) => (fromApp(e) ? libView(await store().load()) : null));
 ipcMain.handle('library-read', async (e, id) => {
-  if (!fromLearn(e)) return null;
+  if (!fromApp(e)) return null;
   await store().load();
   const rec = store().get(String(id));
   if (!rec) throw new Error('That track is no longer in your library.');
   return fs.promises.readFile(store().filePath(rec));
 });
 ipcMain.handle('library-import-dialog', async (e, kind) => {
-  if (!fromLearn(e)) return null;
+  if (!fromApp(e)) return null;
   const folder = kind === 'folder';
-  const r = await dialog.showOpenDialog(learnWin, folder
+  const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender) || learnWin, folder
     ? { title: 'Import a folder of music', buttonLabel: 'Import', properties: ['openDirectory', 'multiSelections'] }
     : { title: 'Import music', buttonLabel: 'Import', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'mp4', 'wav', 'aif', 'aiff', 'flac', 'ogg', 'oga', 'opus'] }] });
   if (r.canceled || !r.filePaths.length) return { cancelled: true };
@@ -350,7 +379,7 @@ ipcMain.handle('library-import-dialog', async (e, kind) => {
   return runImport(paths.map((p) => ({ path: p })));
 });
 ipcMain.handle('library-import', async (e, payload) => {
-  if (!fromLearn(e)) return null;
+  if (!fromApp(e)) return null;
   const raw = Array.isArray(payload?.items) ? payload.items.slice(0, 20000) : [];
   const items = [];
   for (const it of raw) {
@@ -363,14 +392,18 @@ ipcMain.handle('library-import', async (e, payload) => {
   }
   return runImport(items);
 });
-ipcMain.handle('library-cancel-import', (e) => { if (fromLearn(e)) importing?.abort(); });
+ipcMain.handle('library-cancel-import', (e) => { if (fromApp(e)) importing?.abort(); });
 ipcMain.handle('library-update-analysis', async (e, id, data) => {
-  if (!fromLearn(e)) return;
+  if (!fromApp(e)) return;
   const d = plain(data);
   await store().update((l) => libModel.updateAnalysis(l, String(id), { grid: d.grid, duration: d.duration, phrases: d.phrases, energyEst: d.energyEst }));
 });
+ipcMain.handle('library-update-meta', async (e, id, fields) => {
+  if (!fromApp(e)) return null;
+  return libView(await store().update((l) => libModel.updateMeta(l, String(id), plain(fields, 1e5))));
+});
 ipcMain.handle('library-crate', async (e, op, args) => {
-  if (!fromLearn(e)) return null;
+  if (!fromApp(e)) return null;
   const a = plain(args, 3e6), ids = Array.isArray(a.trackIds) ? a.trackIds.map(String) : [];
   let created = null;
   const lib = await store().update((l) => {
@@ -387,19 +420,20 @@ ipcMain.handle('library-crate', async (e, op, args) => {
   return { crates: lib.crates, created };
 });
 ipcMain.handle('library-delete', async (e, ids) => {
-  if (!fromLearn(e) || !Array.isArray(ids)) return null;
+  if (!fromApp(e) || !Array.isArray(ids)) return null;
   return libView(await store().remove(ids.map(String), (p) => shell.trashItem(p)));
 });
 app.on('will-quit', () => { importing?.abort(); });
 
 // The Learn page tells us its theme colours so the title bar and window background match.
 ipcMain.handle('chrome', (e, c) => {
-  if (!fromUs(e) || !learnWin || e.sender !== learnWin.webContents) return;
+  if (!fromApp(e)) return;
+  const w = BrowserWindow.fromWebContents(e.sender);
   const hex = (v, d) => (/^#[0-9a-f]{3,8}$/i.test(String(v || '').trim()) ? String(v).trim() : d);
   const bg = hex(c?.bg, '#f6f5f1'), fg = hex(c?.fg, '#1d2230');
-  learnWin.setBackgroundColor(bg);
-  if (!IS_MAC) learnWin.setTitleBarOverlay({ color: bg, symbolColor: fg, height: 46 });
-  writeWinState({ chrome: { bg, fg } });
+  w.setBackgroundColor(bg);
+  if (!IS_MAC) w.setTitleBarOverlay({ color: bg, symbolColor: fg, height: 46 });
+  if (w === learnWin) writeWinState({ chrome: { bg, fg } });
 });
 ipcMain.handle('mode', (e, m) => { if (fromUs(e)) setMode(m); return mode; });
 // mini view: the page asks for the height its content needs

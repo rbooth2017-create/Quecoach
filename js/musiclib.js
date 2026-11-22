@@ -105,7 +105,7 @@ export function managedTrack(rec) {
     title: rec.title || 'Untitled', artist: rec.artist || '', genre: rec.genre || '',
     bpm: bpm ? Math.round(bpm * 100) / 100 : null,
     key: rec.key || '', camelot: toCamelot(rec.key), energy: rec.energy ?? null,
-    duration: rec.duration || 0, rating: 0,
+    duration: rec.duration || 0, rating: rec.rating || 0, comment: rec.comment || '',
     grid: grid || (rec.bpm ? { bpm: rec.bpm, firstDownbeat: 0, approx: true } : null),
     analysed: !!grid && !grid.approx,
     phrases: rec.phrases || [], cues: rec.cues || [], energyEst: rec.energyEst ?? null,

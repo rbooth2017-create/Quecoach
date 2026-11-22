@@ -117,3 +117,13 @@ test('normalise repairs a damaged library file', () => {
   assert.equal(l.tracks.length, 1);
   assert.deepEqual(l.crates, [{ id: 'c', name: 'X', trackIds: [] }]);
 });
+
+test('updateMeta edits details from the library manager, within limits', () => {
+  let l = M.updateMeta(lib3(), 'a', { title: '  New name ', artist: 'X', energy: 14, rating: 3, bogus: 1, file: 'evil.mp3' });
+  const a = l.tracks.find((t) => t.id === 'a');
+  assert.equal(a.title, 'New name'); assert.equal(a.artist, 'X'); assert.equal(a.energy, 10); assert.equal(a.rating, 3);
+  assert.equal(a.bogus, undefined); assert.notEqual(a.file, 'evil.mp3');
+  l = M.updateMeta(l, 'a', { title: '   ', energy: '' });
+  assert.equal(l.tracks.find((t) => t.id === 'a').title, 'New name'); // empty title refused
+  assert.equal(l.tracks.find((t) => t.id === 'a').energy, null);
+});

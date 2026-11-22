@@ -3,7 +3,7 @@
 import { Take, pickMime, fileName as recFileName, elapsed as recElapsed } from './recorder.js';
 import { ctx, Deck, beatmatch, synthDemoTrack, estimateGrid, setCrossfader, masterBus, cueBus, routeOutputs, outputState, setHeadphoneMix, setHeadphoneLevel, testTone } from './audio.js';
 import { cueRoute, headphoneMix, setupTip, MODES as HP_MODES } from './headphones.js';
-import { beatLen, barLen, fmtTime, timeOfBar } from './engine.js';
+import { beatLen, barLen, fmtTime, timeOfBar, mixOutPoint } from './engine.js';
 import * as lib from './musiclib.js';
 import { readTags, TAG_BYTES } from './tags.js';
 import { beatHint, updateAligned, fill, HOLD_S, ALIGN_MS, TEMPO_OK } from './lesson.js';
@@ -32,12 +32,16 @@ import { midiToAction, LIGHTS, KEEPALIVE, describeAction, hexBytes, flx4Lights, 
 import { detectController, emptyController } from './controller.js';
 import { LEARN_STEPS, learnControl, buildProfile, learnedCount } from './midilearn.js';
 import { icon } from './icons.js';
+import * as sync from './libsync.js';
 import * as stream from './streaming.js';
 import * as lay from './layout.js';
 import { stopsFor, step as tourStep, shouldAutoStart, progressLabel } from './tour.js';
 import { setArc, energyChartSVG } from './setchart.js';
 import { energyFeatures, estimateEnergy } from './energy.js';
 import { newRecorder, feed as feedMix, addToHistory, progressStats, sparkSVG, CLEAN_SCORE, skillStats, levelAdvice } from './mixreport.js';
+import { createPlayView } from './playview.js';
+import { starsFor } from './playscore.js';
+import { loadCareer, recordMix as careerMix, takeBooking as careerTake, syncToLevel, venueById } from './career.js';
 
 const THEMES = [
   { id: 'auto', name: 'Match my computer', bg: '#f6f5f1', bg2: '#14161b', left: '#2f7df6', right: '#ff6b4a' },
@@ -94,8 +98,13 @@ const state = {
   // mix reports: the recorder watching the current transition, past scores, the report on screen
   mixRec: newRecorder(), mixHistory: store.get('mixHistory', []), report: null,
   savedSets: store.get('savedSets', []),
+  // the Play view (Starter) and your career from the bedroom to the main room
+  view: store.get('view', store.get('level', 'starter') === 'starter' ? 'play' : 'decks'), guideNow: null, // the game skin is the Starter default; any level can switch to it
+  career: loadCareer(store.get('career', null), store.get('level', 'starter')),
 };
 state.f = featuresFor(state.level);
+/** Is the simple Play view on screen (instead of the full decks)? */
+const playOn = () => !!state.f?.playView && state.view === 'play';
 
 const decks = {};
 const jogs = {};
@@ -163,6 +172,8 @@ function setLevel(id, quiet = false) {
   $('#levelBtn').innerHTML = `${esc(LEVELS[levelIndex(state.level)].name)} ${icon('chevron', 14)}`;
   if (!state.f.upNext && state.tab === 'suggested') state.tab = 'all';
   renderLevels(); renderDecks(); renderMixer(); renderLibrary(); state.coachKey = null;
+  saveCareer(syncToLevel(state.career, state.level)); // a level picked by hand moves you to its venue
+  applyView();
   if (!quiet) toast(`${LEVELS[levelIndex(state.level)].name}: ${LEVELS[levelIndex(state.level)].blurb}`);
 }
 function renderLevels() {
@@ -384,6 +395,7 @@ async function loadTo(side, track) {
     if (side === 'right') state.alignLocked = false;
     state.target = null;
     if (side === 'left' && !decks.right.buffer && state.f.upNext) state.tab = 'suggested'; // what's next?
+    if (playView.pickerOpen()) playView.closePicker(); // the Play view's song picker has done its job
   } catch (err) {
     console.error(err); toast(`Couldn't load "${track.title}": ${err.message}`);
   } finally {
@@ -408,6 +420,7 @@ async function loadDroppedFile(side, file) {
 
 /** Point the user at the library, e.g. "pick a track for deck B". */
 function focusLibrary(target = null, tab = null) {
+  if (playOn()) return playView.openPicker(target || (decks.left.buffer ? 'right' : 'left'));
   state.target = target;
   if (tab) state.tab = tab;
   if (state.libView === 'collapsed') setLibView('normal');
@@ -1120,7 +1133,7 @@ function recordMix(s, dt) {
   const side = (k) => { const d = decks[k]; return { gain: d.buffer ? d.xf.gain.value * d.vol.gain.value : 0, playing: !!(d.buffer && d.playing), low: d.eq.low, phrasePos: phrasePos(d) }; };
   const sample = {
     left: side('left'), right: side('right'), offsetMs: s.offsetMs, barOffset: s.barOffset, keyScore: s.keyScore,
-    bassTool: mixControls(state.f, ctlState.connected.length > 0).low, bpm: decks.left.bpm || decks.right.bpm || 120,
+    bassTool: guideControls().low, bpm: decks.left.bpm || decks.right.bpm || 120,
   };
   const r = feedMix(state.mixRec, sample, dt);
   // a clip of every transition, for "Listen back" in the report
@@ -1164,14 +1177,18 @@ function onMixReport(r, clip = null) {
   // clean mixes count towards the next level (the first-mix lesson counts its own)
   if (r.score >= CLEAN_SCORE && state.lessonId !== 'first-mix') { state.cleanMixes += 1; store.set('cleanMixes', state.cleanMixes); }
   if (state.report?.clip) URL.revokeObjectURL(state.report.clip);
-  state.report = { ...r, at, levelUp: r.score >= CLEAN_SCORE ? suggestLevelUp(state.level, state.cleanMixes) : null, fromTitle: decks[r.from].track?.title, toTitle: decks[r.to].track?.title };
+  // every mix counts towards your gig; a finished gig books you at the next venue (that's how you level up now)
+  const hadOffer = !!state.career.offer;
+  saveCareer(careerMix(state.career, starsFor(r.score)));
+  state.report = { ...r, at, stars: starsFor(r.score), levelUp: null, fromTitle: decks[r.from].track?.title, toTitle: decks[r.to].track?.title };
   store.set('lastReport', { ...state.report, clip: null });
-  renderReport();
+  if (playOn()) playView.showResult(r, state.career); else renderReport();
+  if (!hadOffer && state.career.offer) setTimeout(() => playView.openBooked(), playOn() ? 2500 : 1200);
   if (state.paneOpen && paneTab() === 'lessons' && !state.guideOpen) renderTutor();
 }
 function renderReport() {
   const el = $('#mixReport'), r = state.report;
-  el.classList.toggle('hidden', !r);
+  el.classList.toggle('hidden', !r || playOn()); // the Play view shows its own stars card
   if (!r) return;
   const tone = r.score >= 75 ? 'ok' : r.score >= 55 ? 'close' : 'warn';
   const lessonName = (id) => LESSONS.find((l) => l.id === id)?.title || 'the lesson';
@@ -1264,6 +1281,7 @@ function placeTour(el = tour.stops[tour.i] && visibleEl(tour.stops[tour.i].targe
   card.style.top = `${Math.max(16, Math.min(vh - ch - 16, top))}px`;
 }
 function maybeStartTour() {
+  if (playOn()) return; // the tour shows the full decks
   if (shouldAutoStart({ done: store.get('tourDone', false), hasSource: !!state.source, welcomeOpen: !$('#welcomeView').classList.contains('hidden') })) setTimeout(startTour, 600);
 }
 function bindTour() {
@@ -1637,8 +1655,9 @@ function drawBeatDots(g, dots, { w, cx, pps, rowH, left }) {
 
 /** Hot cues and rekordbox memory cues, for markers. */
 function allCues(t) {
-  const out = cuesFor(t).map((time, i) => (time == null ? null : { time, color: CUE_COLORS[i], label: String(i + 1) })).filter(Boolean);
+  const out = cuesFor(t).map((time, i) => (time == null ? null : { time, color: CUE_COLORS[i % 4], label: String(i + 1) })).filter(Boolean);
   for (const c of t.cues || []) if (c.num < 0 && !c.loop) out.push({ time: c.time, color: '#d9d9d9', label: '' });
+  for (const c of memCues[t.id] || []) out.push({ time: c.time, color: '#d9d9d9', label: '' }); // memory cues set in the library manager
   return out;
 }
 
@@ -1726,7 +1745,9 @@ function alignDeck(side) {
   if (!o?.canAlign) return false;
   decks[side].seek(o.target);
   state.did.add('align');
-  toast(`Jumped deck ${LETTER[side]} ${o.beats > 0 ? 'forward' : 'back'} ${beatsWords(o.beats)}: same beat and bar as ${LETTER[side === 'left' ? 'right' : 'left']}.`);
+  const other = side === 'left' ? 'right' : 'left';
+  if (playOn()) toast(`Jumped ${decks[side].track.title} ${o.beats > 0 ? 'forward' : 'back'} ${beatsWords(o.beats)}: same beat and bar as ${decks[other].track.title}.`);
+  else toast(`Jumped deck ${LETTER[side]} ${o.beats > 0 ? 'forward' : 'back'} ${beatsWords(o.beats)}: same beat and bar as ${LETTER[other]}.`);
   return true;
 }
 
@@ -1763,6 +1784,138 @@ function updateMixCounter() {
   }
 }
 
+// ---------- the Play view and your career (js/playview.js, js/career.js) ----------
+function saveCareer(c) { state.career = c; store.set('career', c); renderVenueBtn(); }
+/** Put the next deck on its first beat, ready to play on GO. */
+function readyDeck(side) {
+  const d = decks[side]; if (!d.buffer || d.playing) return;
+  const plan = currentPlan();
+  d.seek(plan && plan.to === side ? plan.bStart : d.track.grid?.firstDownbeat || 0);
+  toast(`${d.track.title} is ready on its first beat.`);
+}
+const playView = createPlayView({
+  root: $('#playView'), layer: $('#careerLayer'),
+  api: {
+    decks,
+    now: () => state.guideNow,
+    beatmatch: (ref, other) => beatmatch(ref, other),
+    gain: (side) => { const d = decks[side]; return d.buffer ? d.xf.gain.value * d.vol.gain.value : 0; },
+    xfader: () => state.xfader,
+    setXfader: (x) => moveXfader(x),
+    play: (side) => togglePlay(side),
+    tempo: (side, pct) => stepTempo(side, pct),
+    tempoStep: FINE, // a tap stays inside the "matched" window; holding speeds up
+    bend: (side, dir) => nudge(side, dir),
+    ready: readyDeck,
+    load: (side, track) => loadTo(side, track),
+    trackCount: () => state.tracks.length,
+    vol: (side) => decks[side].vol.gain.value,
+    setVol: (side, v) => { decks[side].setVolume(Math.max(0, Math.min(1, v))); const f = $(`[data-vol="${side}"]`); if (f) f.value = decks[side].vol.gain.value; },
+    bass: (side) => decks[side].eq.low,
+    setBass: (side, db) => setEQ(side, 'low', Math.max(-30, Math.min(6, db))),
+    controls: () => guideControls(),
+    count: (side) => { const d = decks[side]; return d.buffer && d.track?.grid ? beatCount(d.track.grid, d.position()) : null; },
+    phraseGap: () => { const mover = alignSide(), o = deckOffset(mover); return o && { mover, beats: o.beats, canAlign: !!o.canAlign, words: beatsWords(o.beats), far: Math.abs(o.beats) > ALIGN_MAX_BEATS }; },
+    align: (side) => alignDeck(side),
+    seek: (side, t) => {
+      const d = decks[side]; if (!d.buffer || !Number.isFinite(t)) return;
+      const at = snapToBeat(d, t); // land on a beat, so a matched pair stays matched
+      d.seek(Math.max(0, Math.min(d.buffer.duration - 0.5, at)));
+      state.did.add('scrub');
+    },
+    mixZone,
+    openLibrary: (side, slot) => {
+      state.target = side;
+      if (state.f.upNext && decks[side === 'left' ? 'right' : 'left'].buffer) state.tab = 'suggested';
+      slot.append($('#library'));
+      renderLibrary();
+      requestAnimationFrame(() => $('#search').focus());
+    },
+    closeLibrary: () => {
+      state.target = null;
+      home.library.parent.insertBefore($('#library'), home.library.next);
+      renderLibrary(); scheduleFit();
+    },
+    suggest: (ref, { exclude = [], limit = 20, query = '' } = {}) => {
+      const pool = lib.searchTracks(state.tracks, query);
+      if (ref) return lib.rankNext(ref, pool, { exclude, limit });
+      const skip = new Set(exclude);
+      return pool.filter((t) => !skip.has(t.id)).slice(0, limit).map((t) => ({ track: t, match: null }));
+    },
+    career: () => state.career,
+    takeBooking: () => {
+      const wasPlay = playOn();
+      saveCareer(careerTake(state.career));
+      const v = venueById(state.career.venue);
+      const lvl = state.level;
+      if (v.level !== state.level) setLevel(v.level, true);
+      playView.resetVibe();
+      toast(wasPlay && v.level !== lvl ? `Welcome to ${v.name}. Your new tools are on the full decks, a click away.` : `Welcome to ${v.name}. Bigger crowd, same you.`);
+    },
+    djName: () => store.get('djName', ''),
+    setDjName: (n) => store.set('djName', n),
+    fullDecks: () => setView('decks'),
+  },
+});
+/**
+ * The mix section on a deck, in seconds: where the next song comes in and where the handover ends.
+ * With both songs loaded it's the mix guide's plan; with one, the start of its outro. lead: how far
+ * before it "Skip to the mix" lands, so there's time to get the next song ready.
+ */
+function mixZone(side) {
+  const d = decks[side]; if (!d.buffer || !d.track.grid) return null;
+  const g = d.track.grid, bl = barLen(g), lead = 8 * bl;
+  const p = state.guideNow?.plan;
+  if (p && p.from === side) return { start: timeOfBar(g, p.startBar), end: Math.min(d.buffer.duration, timeOfBar(g, p.endBar)), lead };
+  const out = d.track.phrases?.find((x) => /outro/i.test(x.label));
+  const pt = out ? { time: snapToBeat(d, out.start) } : mixOutPoint({ ...d.track, duration: d.buffer.duration });
+  if (!pt) return null;
+  return { start: pt.time, end: Math.min(d.buffer.duration, pt.time + 16 * bl), lead };
+}
+/** Where the beat lane, lesson card and library live on the full decks, so the Play view can borrow them. */
+const home = {};
+for (const [k, sel] of Object.entries({ coach: '#coach', lane: '#lanePanel', library: '#library' })) { const n = $(sel); home[k] = { parent: n.parentNode, next: n.nextSibling }; }
+/** Play view (the game skin, any level) or full decks. */
+function setView(v) {
+  state.view = v === 'decks' ? 'decks' : 'play'; store.set('view', state.view);
+  applyView();
+  if (!playOn() && v === 'decks') toast('The full decks: every control, the library and the lessons. The Play view is back up top whenever you want it.');
+}
+function applyView() {
+  const on = playOn();
+  if (!on && playView.pickerOpen()) playView.closePicker();
+  // the beat lane and lesson card come along into the game skin, and go back after
+  for (const k of ['coach', 'lane']) {
+    const n = k === 'coach' ? $('#coach') : $('#lanePanel');
+    if (on) playView.slots[k].append(n); else home[k].parent.insertBefore(n, home[k].next);
+  }
+  state.coachKey = null;
+  document.body.classList.toggle('play-mode', on);
+  $('#playView').classList.toggle('hidden', !on);
+  const vb = $('#viewBtn');
+  vb.classList.toggle('hidden', !state.f.playView);
+  vb.innerHTML = on ? `${icon('sliders', 15)} Full decks` : `${icon('sparkle', 15)} Play view`;
+  vb.title = on ? 'Show the full decks, mixer, library and lessons' : 'Back to the simple Play view';
+  if (on) { $('#mixReport').classList.add('hidden'); if (tourOpen()) endTour(); }
+  else {
+    // the full decks at this level may have no volume or bass control: don't leave a deck stuck quiet
+    for (const s of SIDES) {
+      if (!state.f.volume && decks[s].vol.gain.value < 1) decks[s].setVolume(1);
+      if (!state.f.bassEQ && decks[s].eq.low !== 0) setEQ(s, 'low', 0);
+      decks[s]._wave = null;
+    }
+    renderDecks(); renderMixer(); scheduleFit();
+  }
+  state.planKey = null; // the guide's moves differ between the two views
+  renderVenueBtn();
+}
+function renderVenueBtn() {
+  const b = $('#venueBtn'); if (!b) return;
+  const v = venueById(state.career.venue);
+  b.innerHTML = `${icon('level', 15)} ${esc(v.name)}${state.career.offer ? ' <span class="vb-dot" aria-label="You\'ve been booked"></span>' : ''}`;
+  b.classList.toggle('hidden', playOn()); // the Play view has its own
+}
+
 // ---------- every frame ----------
 let last = performance.now();
 function frame(now) {
@@ -1778,6 +1931,11 @@ function frame(now) {
   drawLane(hint);
   scheduleClicks();
   renderCoach(s);
+  if (playOn()) { // the full decks are hidden: skip drawing them (the beat lane and lesson card are in the Play view)
+    syncLights(); updateMixPlan(); playView.update(dt);
+    requestAnimationFrame(frame);
+    return;
+  }
   drawMeters();
   for (const side of SIDES) {
     const d = decks[side], el = $(`#deck-${side}`);
@@ -1889,6 +2047,18 @@ function currentPlan() {
 
 const STEP_PRAISE = { match: 'Speeds matched.', start: 'Right on the 1.', fade: 'Nice, smooth fade-in.', highs: 'Highs in.', mids: 'Mids in.', swap: 'Clean bass swap.', out: 'Mix done: nice and smooth.' };
 
+/**
+ * The mixer moves the guide asks for. The game skin has its own volume and bass sliders at every level, so
+ * there you always fade with the volume and swap the bass (and nothing it has no slider for, unless a
+ * controller is plugged in).
+ */
+function guideControls() {
+  const ctl = ctlState.connected.length > 0;
+  return playOn() ? { volume: true, low: true, mid: ctl, high: ctl } : mixControls(state.f, ctl);
+}
+/** One move at a time (Starter, Improver, and the game skin at any level). */
+const guideDetailed = () => !!state.f.mixDetail || playOn();
+
 /** The guide's steps for this plan, where the DJ is in them, and how the mixer looks right now. */
 function mixGuideNow(plan, bar) {
   const F = decks[plan.from], T = decks[plan.to];
@@ -1896,8 +2066,8 @@ function mixGuideNow(plan, bar) {
   if (!T.playing && (state.mixStartBar != null || state.mixDone.has('start'))) { state.mixStartBar = null; state.mixDone = new Set(); }
   // the steps follow when B was really started (a late start, or a beat off); a start well before the plan keeps the "started early" tip
   const p = T.playing && state.mixStartBar != null && state.mixStartBar >= plan.startBar - 1 ? shiftPlan(plan, state.mixStartBar) : plan;
-  const controls = mixControls(state.f, ctlState.connected.length > 0);
-  const steps = mixSteps(p, controls, { a: LETTER[plan.from], b: LETTER[plan.to] }, state.f.mixDetail);
+  const controls = guideControls();
+  const steps = mixSteps(p, controls, { a: LETTER[plan.from], b: LETTER[plan.to] }, guideDetailed());
   const toB = plan.to === 'right' ? state.xfader : 1 - state.xfader;
   const bMatched = !!T.buffer && Math.abs((F.bpm || 0) - (T.bpm || 0)) < 0.1;
   const bCued = !!T.buffer && !T.playing && Math.abs(T.position() - plan.bStart) < 60 / (T.bpm || 120);
@@ -1916,7 +2086,7 @@ function mixGuideNow(plan, bar) {
 
 /** Starter and Improver: one deck playing and the other empty, so the guide starts at "pick the next track". */
 function waitingForNext() {
-  if (!state.f.mixGuide || !state.f.mixDetail) return null;
+  if (!state.f.mixGuide || !guideDetailed()) return null;
   const L = decks.left, R = decks.right;
   const from = L.playing && !R.buffer ? 'left' : R.playing && !L.buffer ? 'right' : null;
   return from && { from, to: from === 'left' ? 'right' : 'left' };
@@ -1924,7 +2094,7 @@ function waitingForNext() {
 
 function showWaitingGuide(el, w) {
   const names = { a: LETTER[w.from], b: LETTER[w.to] };
-  const items = prepSteps(mixControls(state.f, ctlState.connected.length > 0), names).map((s, i) => ({ ...s, status: i === 0 ? 'now' : 'todo' }));
+  const items = prepSteps(guideControls(), names).map((s, i) => ({ ...s, status: i === 0 ? 'now' : 'todo' }));
   const cur = items[0];
   const key = `wait|${w.from}|${items.map((it) => it.short).join()}`;
   if (el.dataset.key === key) return;
@@ -1943,7 +2113,12 @@ function updateMixPlan() {
   const el = $('#mixPlan'), plan = state.f.mixGuide ? currentPlan() : null;
   const waiting = plan ? null : waitingForNext();
   el.classList.toggle('hidden', !plan && !waiting);
-  if (waiting) return showWaitingGuide(el, waiting);
+  if (waiting) {
+    const items = prepSteps(guideControls(), { a: LETTER[waiting.from], b: LETTER[waiting.to] }).map((s, i) => ({ ...s, status: i === 0 ? 'now' : 'todo' }));
+    state.guideNow = { waiting: { ...waiting, items } };
+    return showWaitingGuide(el, waiting);
+  }
+  state.guideNow = null;
   if (!plan) return;
   $('[data-mp-time]', el).style.display = '';
   $('[data-a="cue-b"]', el).style.display = '';
@@ -1955,6 +2130,8 @@ function updateMixPlan() {
   if (cue.nextText != null && !full) cue = { ...cue, detail: cue.nextText };
   // before B starts, say exactly how to get it ready (bass cut, volume down) for this level's controls
   else if (!T.playing && PREP_STEPS.has(guide.current?.id) && (cue.phase === 'prep' || cue.phase === 'soon')) cue = { ...cue, detail: guide.current.id === 'ready' ? guide.current.detail : `Now: ${guide.current.title}. ${guide.current.detail}`, named: true }; // already uses the real deck letters
+  state.guideNow = { plan: { ...p, from: plan.from, to: plan.to }, guide, cue: F.playing ? cue : null, bar };
+  if (playOn()) return; // the Play view says it its own way
   const ph = F.track.phrases?.find((x) => F.position() >= x.start && F.position() < x.end);
   const part = ph ? partInfo(ph.label) : null;
   const note = guide.note;
@@ -2123,6 +2300,7 @@ function cueUp(side) {
 
 // ---------- hot cues ----------
 const cueStore = store.get('cues', {});
+const memCues = store.get('memcues', {});
 /** Four pads: your own cues, falling back to rekordbox's hot cues A–D. */
 function cuesFor(t) {
   const own = cueStore[t.id] || [];
@@ -2172,10 +2350,12 @@ function gridChanged(side) {
   const d = decks[side], t = d.track, g = t.grid;
   g.adjusted = true; t.bpm = g.bpm;
   lib.persistAnalysis(t);
+  sync.send({ type: 'analysis', id: t.id, grid: g, bpm: t.bpm });
   clearTimeout(gridChanged.timer[side]);
   gridChanged.timer[side] = setTimeout(() => {
     if (decks[side].track !== t || !decks[side].buffer) return;
     t.phrases = phrasesFor(decks[side].buffer, g); lib.persistAnalysis(t);
+    sync.send({ type: 'analysis', id: t.id, grid: g, bpm: t.bpm, phrases: t.phrases });
     if (state.paneOpen) renderTutor();
   }, 400);
   state.coachKey = null; renderPrep(side);
@@ -2388,6 +2568,8 @@ function bind() {
   $('#themeBtn').addEventListener('click', () => { renderThemes(); $('#themes').showModal(); });
   $('#themeList').addEventListener('click', (e) => { const b = e.target.closest('[data-theme-id]'); if (b) applyTheme(b.dataset.themeId); });
   $('#levelBtn').addEventListener('click', () => { renderLevels(); $('#levels').showModal(); });
+  $('#viewBtn').addEventListener('click', () => setView(playOn() ? 'decks' : 'play'));
+  $('#venueBtn').addEventListener('click', () => (state.career.offer ? playView.openBooked() : playView.openMap()));
   $('#levelList').addEventListener('click', (e) => { const b = e.target.closest('[data-level]'); if (b) { setLevel(b.dataset.level); $('#levels').close(); } });
   $('#checkBtn').addEventListener('click', check);
   $('#mixPlan').addEventListener('click', (e) => {
@@ -2469,6 +2651,8 @@ function bind() {
   });
   // library panel size
   $('#libExpand').addEventListener('click', () => setLibView(state.libView === 'expanded' ? 'normal' : 'expanded'));
+  $('#openManager').addEventListener('click', () => sync.openManager());
+  bindManagerSync();
   // refit whenever the window or a section's size changes (a level shows the plan, a panel folds, the lessons pane opens)
   const fitRO = new ResizeObserver(scheduleFit);
   fitRO.observe($('.stage'));
@@ -2568,8 +2752,39 @@ function bind() {
   });
   window.addEventListener('resize', () => { for (const s of SIDES) decks[s]._wave = null; });
   window.addEventListener('keydown', onKey);
-  window.addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') nudge('right', 0); });
+  window.addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') nudge(keySide(), 0); });
   desktop?.onCommand?.(runCommand);
+}
+
+// ---------- the library manager window ----------
+/** Changes made in the library manager window show up here straight away. */
+function bindManagerSync() {
+  const replace = (obj, v) => { for (const k of Object.keys(obj)) delete obj[k]; Object.assign(obj, v || {}); };
+  sync.onShared(['cues', 'cuepoints', 'memcues', 'set', 'savedSets'], (key) => {
+    if (key === 'cues') replace(cueStore, store.get('cues', {}));
+    if (key === 'cuepoints') replace(cuePoints, store.get('cuepoints', {}));
+    if (key === 'memcues') replace(memCues, store.get('memcues', {}));
+    if (key === 'set') state.set = loadSavedSet();
+    if (key === 'savedSets') state.savedSets = store.get('savedSets', []);
+    for (const s of SIDES) decks[s]._wave = null;
+    renderDecks(); renderSetPanel(); renderList();
+  });
+  sync.onMessage(async (m) => {
+    if (m.type === 'analysis') {
+      const ts = [...new Set([...state.tracks.filter((t) => t.id === m.id), ...SIDES.map((s) => decks[s].track).filter((t) => t?.id === m.id)])];
+      for (const t of ts) {
+        if (m.grid) { t.grid = m.grid; t.bpm = m.bpm ?? m.grid.bpm; t.analysed = true; }
+        if (m.phrases) t.phrases = m.phrases;
+      }
+      for (const s of SIDES) if (decks[s].track?.id === m.id) { decks[s]._wave = null; state.coachKey = null; if (state.prep[s]) renderPrep(s); renderDeck(s); }
+      renderList();
+    } else if (m.type === 'library' && lib.hasManaged()) refreshManaged();
+    else if (m.type === 'load') {
+      const t = state.tracks.find((x) => x.id === m.id);
+      if (!t) return toast('That track isn\'t in the music open here. Switch to the same music as the library manager.');
+      loadTo(m.side === 'right' ? 'right' : 'left', t);
+    } else if (m.type === 'source' && m.kind && m.kind !== state.source && !state.tracks.length) useSource(m.kind, { fromGesture: false });
+  });
 }
 
 /** Commands from the desktop app's menus. */
@@ -2581,6 +2796,7 @@ function runCommand(cmd) {
     'source-managed': () => useSource('managed'),
     'library-import': () => importDialog('files'),
     'library-import-playlist': () => openPlaylistDlg(),
+    'library-manager': () => sync.openManager(),
     'play-left': () => togglePlay('left'),
     'play-right': () => togglePlay('right'),
     search: () => focusLibrary(null),
@@ -2597,8 +2813,11 @@ function runCommand(cmd) {
   }[cmd] || (() => {}))();
 }
 
+/** The deck the arrow keys move: deck B, or in the Play view whichever song is coming in. */
+const keySide = () => (playOn() ? playView.incoming() : 'right');
 function onKey(e) {
   if (tourKey(e)) return;
+  if (playView.layerOpen() || (playOn() && e.target?.closest?.('.pv-picker'))) return;
   const typing = !!e.target?.matches?.('input[type=search], input[type=text], textarea');
   if (e.key === 'Escape') { if (typing) e.target.blur(); if (state.target) { state.target = null; renderLibrary(); } return; }
   if (typing || e.metaKey || e.ctrlKey || e.altKey || !$('#welcomeView').classList.contains('hidden')) return;
@@ -2615,11 +2834,11 @@ function onKey(e) {
   const act = {
     q: () => togglePlay('left'),
     p: () => togglePlay('right'),
-    arrowup: () => stepTempo('right', e.shiftKey ? 1 : FINE),
-    arrowdown: () => stepTempo('right', e.shiftKey ? -1 : -FINE),
-    arrowleft: () => { if (!e.repeat) { nudge('right', -1); state.did.add('jog'); } },
-    arrowright: () => { if (!e.repeat) { nudge('right', 1); state.did.add('jog'); } },
-    l: () => setPane(!state.paneOpen),
+    arrowup: () => stepTempo(keySide(), e.shiftKey ? 1 : FINE),
+    arrowdown: () => stepTempo(keySide(), e.shiftKey ? -1 : -FINE),
+    arrowleft: () => { if (!e.repeat) { nudge(keySide(), -1); state.did.add('jog'); } },
+    arrowright: () => { if (!e.repeat) { nudge(keySide(), 1); state.did.add('jog'); } },
+    l: () => { if (!playOn()) setPane(!state.paneOpen); },
     '[': () => moveXfader(state.xfader - 0.05),
     ']': () => moveXfader(state.xfader + 0.05),
     '/': () => focusLibrary(null),
@@ -3309,6 +3528,7 @@ async function boot() {
   maybeStartTour();
 }
 
+window.cueLearn = { state, decks, playView }; // handy for debugging in the console
 boot();
 requestAnimationFrame(frame);
 
