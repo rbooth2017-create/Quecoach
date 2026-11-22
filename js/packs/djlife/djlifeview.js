@@ -49,6 +49,7 @@ export function createDjLife(ctx, { key }) {
     djName: () => ctx.djName(),
     sound: sfx,
     marks: townMarks,
+    goal: nextGoal,
     saveMove: (home, id, move) => { life = { ...life, layout: { ...life.layout, [home]: { ...(life.layout[home] || {}), [id]: move } } }; save(); },
     use: (what, it) => {
       if (what === 'decks') { world.close(true); ctx.showPlay(); return; }
@@ -65,6 +66,19 @@ export function createDjLife(ctx, { key }) {
       }
     },
   });
+  /** What a new player should do next where they're standing: the thing to point at and a line to read. */
+  function nextGoal(scene, venue) {
+    const g = life.gig, atHome = g && (g.offer.hosted || g.offer.venue === 'bedroom');
+    const where = g && !atHome ? venueById(g.offer.venue).name : '';
+    if (scene === 'room') {
+      if (!g) return { id: 'laptop', text: life.history.length ? 'Click the computer to find a gig' : 'Click the computer to find your first gig' };
+      if (atHome) return { id: 'booth', text: 'Click your decks to start the gig' };
+      return { id: 'door', text: `Go out the door, then follow the pink arrow to ${where}` };
+    }
+    if (scene === 'town' && g) return { id: null, text: atHome ? 'Head home: your gig is in your room' : `Follow the pink arrow to ${where}` };
+    if (scene === 'venue' && g && !atHome && g.offer.venue === venue) return { id: 'booth', text: 'Click the decks to start your set' };
+    return null;
+  }
   /** Markers over buildings in town: where tonight's gig is, and which venues have gigs for you this week. */
   function townMarks() {
     const out = {};
@@ -93,17 +107,38 @@ export function createDjLife(ctx, { key }) {
     const k = `${life.cash}|${life.day}|${!!life.gig}|${tonight}`;
     if (k === st.chipKey) return;
     st.chipKey = k;
-    chips.innerHTML = `<button class="pv-chip" data-dl="room" title="Walk round your room">${HOUSE}Your room</button>
+    chips.innerHTML = `<button class="pv-chip" data-dl="room" title="Walk round your room (leaves the decks)">${HOUSE}Room</button>
       <button class="pv-chip dl-gigs${tonight && !life.gig ? ' ping' : ''}" data-dl="board" title="DJ Life: your gigs, the shop and your home">${icon('disc', 15)}${life.gig ? 'Tonight\'s gig' : 'Gigs'}</button>
-      <span class="pv-chip dl-cash" title="Your money">${esc(money(life.cash))}</span>
-      <span class="pv-chip dl-day" title="The day in DJ Life">${esc(dayLabel(life.day))}</span>`;
+      <span class="pv-chip dl-cash" title="Your money, and the day in DJ Life">${esc(money(life.cash))}<span class="dl-day">${esc(dayLabel(life.day))}</span></span>`;
   }
   chips.addEventListener('click', onChipClick);
   function onChipClick(e) {
     if (e.target.closest('[data-dl="board"]')) openBoard();
-    if (e.target.closest('[data-dl="room"]')) openRoom();
+    if (e.target.closest('[data-dl="room"]')) leaveDecks(() => openRoom());
   }
   function openRoom() { if (!life.intro) return drawIntro(); world.open(); }
+
+  // ---------- walking away from the decks ----------
+  /** Leaving the decks ends tonight's gig (after a check) and takes both songs off, so they're empty next time. */
+  function leaveDecks(then) {
+    if (life.gig) { st.afterLeave = then; return drawLeave(); }
+    ctx.clearDecks?.();
+    then();
+  }
+  function drawLeave() {
+    show(`<div class="cl-card dl-card dl-small" role="dialog" aria-modal="true" aria-labelledby="dlTitle">
+      <span class="cl-kick">${esc(life.gig.offer.title)}</span><h2 id="dlTitle">Leave the gig?</h2>
+      <p class="cl-lead">If you walk away from the decks, the music stops and the gig ends. You won't get paid.</p>
+      <div class="dl-acts"><button class="cl-go" data-dl="close" data-focus>Stay and play</button><button class="cl-ghost" data-dl="leave-go">Leave the gig</button></div>
+    </div>`, 'leave');
+  }
+  /** End tonight's gig early: no pay, a little reputation lost, and the decks cleared. */
+  function quitGig() {
+    const r = leaveGig(life); life = r.life; save();
+    for (const w of r.weeks) st.queue.push({ type: 'week', week: w });
+    ctx.clearDecks?.();
+    renderAll(); ctx.toast('You packed up and left. There\'s always next week.');
+  }
 
   // ---------- your room, drawn behind the decks when you're at home ----------
   function renderScene() {
@@ -120,7 +155,6 @@ export function createDjLife(ctx, { key }) {
       ${lights >= 2 ? '<i class="dl-heads"><b></b><b></b></i>' : ''}
       ${lights >= 3 ? '<i class="dl-laser"><b></b><b></b><b></b></i>' : ''}
       ${spk >= 1 ? '<i class="dl-spk l"></i><i class="dl-spk r"></i>' : ''}
-      ${has('dec-poster') ? '<i class="dl-poster"></i>' : ''}
       ${has('dec-plant') ? '<i class="dl-plant"></i>' : ''}
       ${has('dec-shelf') ? '<i class="dl-shelf"></i>' : ''}
       ${has('dec-neon') ? `<i class="dl-neon">${esc(name)}</i>` : ''}
@@ -378,11 +412,18 @@ export function createDjLife(ctx, { key }) {
     if (a === 'close') return close();
     if (a === 'tab') { st.tab = arg; st.place = null; return drawBoard(); }
     if (a === 'allgigs') { st.tab = 'gigs'; st.place = null; return drawBoard(); }
-    if (a === 'town') { close(); return world.open('town'); }
+    if (a === 'town') { close(); return leaveDecks(() => world.open('town')); }
     if (a === 'board') { st.tab = 'gigs'; st.place = null; if (st.queue.length) return showCard(st.queue.shift()); return drawBoard(); }
     if (a === 'intro') { life.intro = true; save(); close(); return world.open(); }
     if (a === 'intro-board') { life.intro = true; save(); return drawBoard(); }
-    if (a === 'room') { close(); return world.open(); }
+    if (a === 'room') { close(); return leaveDecks(() => world.open()); }
+    if (a === 'leave-go') {
+      const then = st.afterLeave; st.afterLeave = null;
+      quitGig(); layer.classList.add('hidden'); layer.innerHTML = '';
+      then?.();
+      if (st.queue.length) showCard(st.queue.shift());
+      return;
+    }
     if (a === 'booked') { close(); return ctx.openBooked(); }
     if (a === 'day') return moveOn(life.day + 1);
     if (a === 'week') return moveOn((weekOf(life.day) + 1) * 7);
@@ -404,10 +445,8 @@ export function createDjLife(ctx, { key }) {
       return;
     }
     if (a === 'leave') {
-      if (!confirm('Leave the gig? You won\'t get paid and your reputation takes a small hit.')) return;
-      const r = leaveGig(life); life = r.life; save();
-      for (const w of r.weeks) st.queue.push({ type: 'week', week: w });
-      renderAll(); ctx.toast('You packed up and left. There\'s always next week.');
+      if (!confirm('Leave the gig? The music stops and you won\'t get paid.')) return;
+      quitGig();
       return st.queue.length ? showCard(st.queue.shift()) : drawBoard();
     }
     if (a === 'buy') {

@@ -27,8 +27,9 @@ const MOVE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke
  * getLife(): the current save. use(what, item): DJ Life does something ('decks', 'laptop', 'look', 'sofa', 'shop',
  * 'estate', 'cars', 'set'). marks(): { buildingId: 'gig' | 'offer' } for the town. saveMove(home, id, move): build
  * mode put something down. djName(): for the neon sign. sound(name): a little sound effect. onClose(): closed.
+ * goal(scene, venue): what to do next, for new players: { id (the thing to point at, or null), text } or null.
  */
-export function createWorld({ getLife, use, marks, saveMove, djName, sound, onClose }) {
+export function createWorld({ getLife, use, marks, saveMove, djName, sound, onClose, goal }) {
   const el = document.createElement('div');
   el.className = 'dl-world hidden';
   el.tabIndex = -1;
@@ -43,6 +44,7 @@ export function createWorld({ getLife, use, marks, saveMove, djName, sound, onCl
         <button class="pv-chip" data-wa="decks">${icon('sliders', 15)}Decks</button>
         <button class="pv-x" data-wa="close" aria-label="Close" title="Close (Esc)">${icon('x', 16)}</button></div>
     </div>
+    <div class="dl-goal hidden" data-w="goal" role="status"></div>
     <div class="dl-prompt hidden" data-w="prompt"><kbd>E</kbd><span data-w="say"></span></div>
     <div class="dl-whelp" data-w="help"></div>`;
   document.body.append(el);
@@ -329,6 +331,9 @@ export function createWorld({ getLife, use, marks, saveMove, djName, sound, onCl
     for (const it of st.items.filter((i) => i.kind === 'led')) drawWallThing(ctx, it, st.t, name, st.room);
     // your gig is off screen: an arrow at the edge points the way
     if (st.scene === 'town') pointToGig();
+    // what to do next: a bouncing arrow over it
+    const next = st.goalNow?.id && !st.build ? st.items.find((i) => i.id === st.goalNow.id) : null;
+    if (next) drawGoalArrow(next);
     // the thing you're holding in build mode
     if (g) {
       ctx.save(); ctx.globalAlpha = 0.75; drawThing(ctx, g.it, st.t, name, st.room); ctx.restore();
@@ -337,6 +342,17 @@ export function createWorld({ getLife, use, marks, saveMove, djName, sound, onCl
       box(ctx, t.x, t.y, t.w, t.h, 0, 1, g.ok ? '#4ade80' : '#fb7185');
       ctx.restore();
     }
+  }
+  function drawGoalArrow(it) {
+    const pts = outline(it);
+    const x = pts.reduce((a, p) => a + p.sx, 0) / pts.length, top = Math.min(...pts.map((p) => p.sy));
+    const y = top - 10 - Math.abs(Math.sin(st.t * 4)) * 10;
+    ctx.save();
+    ctx.fillStyle = '#facc15'; ctx.shadowColor = '#facc15'; ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(x - 13, y - 15); ctx.lineTo(x - 5, y - 15); ctx.lineTo(x - 5, y - 30);
+    ctx.lineTo(x + 5, y - 30); ctx.lineTo(x + 5, y - 15); ctx.lineTo(x + 13, y - 15); ctx.closePath(); ctx.fill();
+    ctx.restore();
   }
   function pointToGig() {
     const id = Object.keys(st.marks).find((k) => st.marks[k] === 'gig'); if (!id) return;
@@ -377,6 +393,10 @@ export function createWorld({ getLife, use, marks, saveMove, djName, sound, onCl
     const dt = Math.min(0.05, (now - st.last) / 1000); st.last = now; st.t += dt;
     step(dt);
     if (st.scene === 'town') follow(false);
+    const gl = st.build ? null : goal?.(st.scene, st.venue) || null;
+    const gt = gl?.text || '';
+    if (gt !== (st.goalNow?.text || '')) { W('goal').textContent = gt; W('goal').classList.toggle('hidden', !gt); }
+    st.goalNow = gl;
     const near = st.path.length || st.build ? null : st.items.find((i) => i.use && nextTo(st.at, i)) || null;
     const say = near ? sayFor(near) : '';
     if (near !== st.near || say !== st.say) {

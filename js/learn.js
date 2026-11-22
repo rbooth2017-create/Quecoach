@@ -1970,6 +1970,9 @@ const playView = createPlayView({
     bend: (side, dir) => nudge(side, dir),
     ready: readyDeck,
     load: (side, track) => loadTo(side, track),
+    /** Take a song off (a reset when the guide's lost): the mix guide starts over from picking the next song. */
+    eject: (side, force) => eject(side, { force, settle: true }),
+    live: (side) => isLive(side),
     trackCount: () => state.tracks.length,
     vol: (side) => decks[side].vol.gain.value,
     setVol: (side, v) => { decks[side].setVolume(Math.max(0, Math.min(1, v))); const f = $(`[data-vol="${side}"]`); if (f) f.value = decks[side].vol.gain.value; },
@@ -2640,12 +2643,39 @@ function scheduleClicks() {
   }
 }
 
-function eject(side) {
-  const d = decks[side]; if (!d.buffer) return;
-  if (isLive(side)) return toast(`Deck ${LETTER[side]} is playing to the room. Pause it or move the crossfader away first.`);
+/**
+ * Take a track off a deck. The mix guide starts over too (a fresh plan, no steps ticked), so a guide that got
+ * stuck on the wrong song picks up again at "pick the next song".
+ * force: take it off even while the room hears it. settle (the Play view's reset): the emptied deck's volume and
+ * bass back to normal, and if the other deck is playing, the room gets it at full volume with its bass.
+ */
+function eject(side, { force = false, settle = false } = {}) {
+  const d = decks[side]; if (!d.buffer) return false;
+  if (isLive(side) && !force) { toast(`Deck ${LETTER[side]} is playing to the room. Pause it or move the crossfader away first.`); return false; }
   d.stop(); d.loop = null; d.track = null; d.buffer = null; d.peaks = null; d.bands = null; d._wave = null;
   state.prep[side] = false; prepClick[side] = false; state.target = null;
+  state.planKey = null; state.plan = null; state.mixDir = null; state.mixStartBar = null; state.mixDone = new Set();
+  if (settle) {
+    d.setVolume(1); setEQ(side, 'low', 0);
+    const other = side === 'left' ? 'right' : 'left', o = decks[other];
+    if (o.playing) { o.setVolume(1); setEQ(other, 'low', 0); moveXfader(other === 'left' ? 0 : 1); renderDeck(other); }
+  }
   renderDeck(side); renderLibrary(); if (state.paneOpen) renderTutor();
+  return true;
+}
+
+/** Stop everything and take both songs off: you walked away from the decks (DJ Life). Mixer back to normal too. */
+function clearDecks() {
+  for (const side of SIDES) {
+    const d = decks[side];
+    if (d.buffer) { d.stop(); d.loop = null; d.track = null; d.buffer = null; d.peaks = null; d.bands = null; d._wave = null; }
+    state.prep[side] = false; prepClick[side] = false;
+    d.setVolume(1); setEQ(side, 'low', 0);
+    renderDeck(side);
+  }
+  state.target = null; state.planKey = null; state.plan = null;
+  moveXfader(0);
+  renderLibrary(); if (state.paneOpen) renderTutor();
 }
 
 function check() {
@@ -3872,6 +3902,7 @@ const packCtx = {
   playOn: () => playOn(),
   showPlay: () => { if (!playOn()) setView('play'); },
   resetVibe: () => playView.resetVibe(),
+  clearDecks: () => { clearDecks(); playView.resetVibe(); },
 };
 
 // ---------- the start screen: DJ Life, Learn or Pro ----------

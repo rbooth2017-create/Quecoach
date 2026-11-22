@@ -7,7 +7,8 @@ button.dl-gigs:hover { background: color-mix(in srgb, var(--pv-b) 34%, transpare
 .dl-gigs.ping { animation: dl-ping 1.6s ease-in-out infinite; }
 @keyframes dl-ping { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--pv-b) 25%, transparent); } }
 .dl-cash { color: var(--pv-gold); font-variant-numeric: tabular-nums; }
-.dl-day { color: var(--pv-ink-2); }
+.dl-day { color: var(--pv-ink-2); font-weight: 600; }
+.dl-cash .dl-day::before { content: "·"; margin: 0 6px; color: var(--pv-ink-3); }
 @media (max-width: 1100px) { .dl-day { display: none; } }
 
 /* ---------- the overlay ---------- */
@@ -156,3 +157,7 @@ button.dl-gigs:hover { background: color-mix(in srgb, var(--pv-b) 34%, transpare
 .dl-world .pv-chip.on { background: color-mix(in srgb, var(--pv-ok) 25%, transparent); border-color: var(--pv-ok); }
 .dl-world .pv-chip[hidden] { display: none; }
 .dl-card > .dl-acts .dl-roombtn { align-self: auto; }
+
+/* ---------- what to do next (new players) ---------- */
+.dl-goal { position: absolute; left: 50%; top: 72px; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 9px 18px; border-radius: 99px; background: #facc15; color: #1a1200; font-weight: 800; font-size: 15px; text-align: center; box-shadow: 0 0 24px rgba(250,204,21,.35); pointer-events: none; animation: dl-pop .18s ease-out; }
+.dl-goal.hidden { display: none; }

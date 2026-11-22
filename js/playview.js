@@ -11,6 +11,7 @@ const SIDES = ['left', 'right'];
 const OTHER = { left: 'right', right: 'left' };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const $ = (sel, el) => el.querySelector(sel);
+const own = (name) => `${name}'${/s$/i.test(name) ? '' : 's'}`;
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : w.endsWith('x') ? 'es' : 's'}`;
 const STAR = (on = true) => `<svg class="pv-star ${on ? 'on' : ''}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>`;
 const stars = (n) => `<span class="pv-stars" role="img" aria-label="${n} of 3 stars">${[0, 1, 2].map((i) => STAR(i < n)).join('')}</span>`;
@@ -61,8 +62,7 @@ export function createPlayView({ root, layer, api }) {
         <div class="pv-top-r">
           <span class="pv-packchips" data-pv-packchips></span>
           <span class="pv-chip pv-daily" data-pv-daily></span>
-          <span class="pv-chip" data-pv-streak title="Mixes in a row with 2 stars or more"></span>
-          <span class="pv-chip" data-pv-starcount title="Stars from all your mixes"></span>
+          <span class="pv-chip" data-pv-starcount></span>
           <button class="pv-chip" data-pv="decks" title="Show the full decks, mixer, library and lessons">${icon('sliders', 15)}Full decks</button>
         </div>
       </header>
@@ -90,13 +90,13 @@ export function createPlayView({ root, layer, api }) {
       <div class="pv-laneslot" data-pv-laneslot></div>
       <div class="pv-hand pv-bassrow" data-pv-bassrow>
         <span class="pv-hl" data-pv-bl></span>
-        <input type="range" min="0" max="1" step="0.005" value="0" data-pv-bass aria-label="Bass slider: towards a side gives that song the bass and takes it from the other">
+        <span class="pv-track"><input type="range" min="0" max="1" step="0.005" value="0" data-pv-bass aria-label="Bass slider: towards a side gives that song the bass and takes it from the other"><b class="pv-tip" data-pv-tip="bass" aria-hidden="true"></b></span>
         <span class="pv-hr" data-pv-br></span>
         <span class="pv-tag">Bass</span>
       </div>
       <div class="pv-hand" data-pv-hand>
         <span class="pv-hl" data-pv-hl></span>
-        <input type="range" min="0" max="1" step="0.005" value="0" data-pv-xf aria-label="Handover slider: left plays the left song to the room, right plays the right song">
+        <span class="pv-track"><input type="range" min="0" max="1" step="0.005" value="0" data-pv-xf aria-label="Handover slider: left plays the left song to the room, right plays the right song"><b class="pv-tip below" data-pv-tip="hand" aria-hidden="true"></b></span>
         <span class="pv-hr" data-pv-hr></span>
         <span class="pv-tag">Handover</span>
       </div>
@@ -138,6 +138,7 @@ export function createPlayView({ root, layer, api }) {
       <label class="pv-vol" title="Volume">
         <input type="range" min="0" max="1" step="0.01" value="1" data-pv-vol="${side}" aria-label="Volume, ${side} song">
         <span>Vol</span>
+        <b class="pv-tip" data-pv-tip="vol:${side}" aria-hidden="true"></b>
       </label>
       <div class="pv-disc">
         <i class="pv-glow"></i>
@@ -153,6 +154,7 @@ export function createPlayView({ root, layer, api }) {
         <i class="pv-zone" title="The mix: bring the next song in here"></i><i class="pv-done"></i><i class="pv-head"></i>
       </div>
       <button class="pv-skip" data-pv-skip="${side}" hidden>Skip to the mix ${icon('chevron', 13, 'style="transform:rotate(-90deg)"')}</button>
+      <button class="pv-eject" data-pv-eject="${side}" hidden title="Take this song off the deck. The mix steps start again from picking a song.">${icon('eject', 13)}Remove song</button>
     </div>`;
   }
 
@@ -162,6 +164,8 @@ export function createPlayView({ root, layer, api }) {
     if (p) { const side = p.dataset.pvPlay; return D[side].buffer ? api.play(side) : openPicker(side); }
     const sk = e.target.closest('[data-pv-skip]');
     if (sk) return skipToMix(sk.dataset.pvSkip);
+    const ej = e.target.closest('[data-pv-eject]');
+    if (ej) return removeSong(ej.dataset.pvEject);
     const b = e.target.closest('[data-pv]'); if (!b) {
       const row = e.target.closest('[data-pv-load]');
       if (row) { const t = row._track; const side = row.dataset.pvLoad; if (t) api.load(side, t); }
@@ -271,11 +275,14 @@ export function createPlayView({ root, layer, api }) {
   function say(n, r, bm) {
     const F = D[r.floor], T = D[r.inc];
     const inc = songName(r.inc), floor = songName(r.floor);
-    if (!F.buffer && !T.buffer) return { kicker: 'Let\'s go', title: 'Pick your first song', detail: 'Choose something you love. It goes on the left and you press play.', cta: 'pick' };
+    if (!F.buffer && !T.buffer) return { kicker: 'Let\'s go', title: 'Pick your first song', detail: 'Tap "Choose a song" and pick one you love.', cta: 'pick' };
     if (!F.playing && !T.playing) {
       const side = F.buffer ? r.floor : r.inc;
-      return { kicker: 'Ready when you are', title: 'Press play', detail: `Start ${songName(side)} with the button in the middle of its disc.` };
+      return { kicker: 'Ready when you are', title: 'Press play', detail: `Tap the play button in the middle of the disc to start ${songName(side)}.` };
     }
+    const arrow = (side) => (side === 'left' ? '⬅' : '➡');
+    const volMode = api.controls().volume;
+    const handMid = Math.abs(api.xfader() - 0.5) <= 0.15;
     const g = n?.guide, cur = g?.current;
     const id = n?.waiting ? 'pick' : cur?.id;
     const items = stepItems(n);
@@ -285,22 +292,25 @@ export function createPlayView({ root, layer, api }) {
     const cue = n?.cue;
     switch (id) {
       case 'pick': case 'load':
-        return { kicker, title: 'Pick what\'s next', detail: 'Choose a song from Play next. The green ones blend best with this one.', step: 'pick' };
+        return { kicker, title: 'Pick the next song', detail: 'Choose one from Play next on the right. The green ones mix best with this one.', step: 'pick' };
       case 'match': {
         if (!byEar()) {
           const adv = speedAdvice(bm?.bpmDiff);
-          return { kicker, title: 'Lock the pulse', detail: `${adv.text} When the two circles sit on top of each other, the speeds match.`, step: 'match' };
+          return { kicker, title: 'Match the speed', detail: `${adv.text} When the two circles join up into one, you've got it.`, step: 'match' };
         }
         return { kicker, title: 'Match it by ear', detail: `Listen to the two kick drums. If they gallop, tap Faster or Slower until ${inc} sits on the beat. Press C to check.`, step: 'match' };
       }
       case 'cue':
-        return { kicker, title: 'Get it ready', detail: `Press "Get it ready" so ${inc} waits on its very first beat.`, cta: 'ready', step: 'cue' };
+        return { kicker, title: 'Get it ready', detail: 'Tap the big "Get it ready" button.', cta: 'ready', step: 'cue' };
       case 'levels': case 'ready': {
+        // one thing at a time, and a bubble on the control that does it
         const c = api.controls();
-        if (!c.volume) return { kicker, title: 'Keep it secret', detail: `Slide the handover all the way to ${floor}, so nobody hears ${inc} yet.`, step: 'levels', hl: ['hand'] };
+        if (!c.volume) return { kicker, title: `Slide the handover to ${floor}`, detail: `All the way, so nobody hears ${inc} yet.`, step: 'levels', hl: ['hand'], tips: { hand: `${arrow(r.floor)} All the way` } };
         const volDown = api.vol(r.inc) <= 0.1, bassDown = !c.low || api.bass(r.inc) <= -20;
-        const todo = [!volDown && `${inc}'s volume all the way down`, !bassDown && `the bass slider all the way to ${floor}`].filter(Boolean);
-        return { kicker, title: 'Hide it: volume and bass down', detail: `${todo.length ? `Slide ${todo.join(', and ')}.` : 'Done.'} Then put the handover in the middle: the volume does the mixing now.`, step: 'levels', hl: [!volDown && `vol:${r.inc}`, !bassDown && 'bass', 'hand'].filter(Boolean) };
+        if (!handMid && !volDown) return { kicker, title: 'Put the handover in the middle', detail: 'The Vol sliders do the mixing from now on.', step: 'levels', hl: ['hand'], tips: { hand: 'Slide to the middle' } };
+        if (!volDown) return { kicker, title: `Cut ${own(inc)} volume`, detail: 'Pull its Vol slider, next to its disc, all the way down. Then nobody hears it yet.', step: 'levels', hl: [`vol:${r.inc}`], tips: { [`vol:${r.inc}`]: '⬇ Cut the volume' } };
+        if (!bassDown) return { kicker, title: `Cut ${own(inc)} bass`, detail: `Slide the Bass slider all the way to ${floor}. Two basslines at once sound muddy.`, step: 'levels', hl: ['bass'], tips: { bass: `${arrow(r.floor)} All the way` } };
+        return { kicker, title: 'All set', detail: `${inc} is hidden and ready.`, step: 'levels' };
       }
       case 'start': {
         const count = cue && ['soon', 'count', 'go'].includes(cue.phase) ? { big: cue.big, unit: cue.unit, phase: cue.phase } : null;
@@ -311,14 +321,15 @@ export function createPlayView({ root, layer, api }) {
         return { kicker, title: bars ? `Start it in ${plural(bars, 'bar')}` : 'Start it on the 1', detail: `Wait for the countdown, then press play on ${inc}. Nobody hears it yet.`, count, step: 'start' };
       }
       case 'fade': {
-        const vol = api.controls().volume;
-        return { kicker, title: vol ? 'Fade it in, slowly' : 'Slide it over, slowly', detail: note(g) || (vol ? `Raise ${inc}'s volume a little every bar: all the way up by the end of the countdown. Keep its bass down.` : `Move the handover towards ${inc}, a little every bar. Halfway by the end of the countdown.`), count: deadline(g), step: 'fade', slide: true, hl: [vol ? `vol:${r.inc}` : 'hand'] };
+        if (volMode && !handMid && api.vol(r.inc) < 0.5) return { kicker, title: 'Handover to the middle first', detail: `Or nobody can hear ${inc} when you turn it up.`, count: deadline(g), step: 'fade', hl: ['hand'], tips: { hand: 'Slide to the middle' } };
+        if (volMode) return { kicker, title: `Turn ${inc} up, slowly`, detail: note(g) || 'Push its Vol slider up a little every bar. All the way up when the countdown ends.', count: deadline(g), step: 'fade', slide: true, hl: [`vol:${r.inc}`], tips: { [`vol:${r.inc}`]: '⬆ Up, slowly' } };
+        return { kicker, title: `Slide the handover to ${inc}, slowly`, detail: note(g) || 'A little every bar. Halfway when the countdown ends.', count: deadline(g), step: 'fade', slide: true, hl: ['hand'], tips: { hand: `${arrow(r.inc)} Slowly` } };
       }
       case 'swap':
-        return { kicker, title: `Swap the bass on bar ${cur.bar}`, detail: note(g) || `On the "1", slide the bass all the way over to ${inc}. Two basslines at once sound muddy, so do it in one go.`, count: deadline(g), step: 'swap', slide: true, hl: ['bass'] };
+        return { kicker, title: `Swap the bass on bar ${cur.bar}`, detail: note(g) || `When the count hits the 1, slide the Bass slider all the way to ${inc}, in one go.`, count: deadline(g), step: 'swap', slide: true, hl: ['bass'], tips: { bass: `${arrow(r.inc)} All the way, in one go` } };
       case 'out': {
-        const vol = api.controls().volume;
-        return { kicker, title: `Fade ${floor} out`, detail: note(g) || (vol ? `Lower ${floor}'s volume slowly until it's silent. Then it can stop.` : `Keep sliding until it's all ${inc}. Then ${floor} can stop.`), count: deadline(g), step: 'out', slide: true, hl: [vol ? `vol:${r.floor}` : 'hand'] };
+        if (volMode) return { kicker, title: `Turn ${floor} down, slowly`, detail: note(g) || 'Pull its Vol slider down a little every bar, until you can\'t hear it.', count: deadline(g), step: 'out', slide: true, hl: [`vol:${r.floor}`], tips: { [`vol:${r.floor}`]: '⬇ Down, slowly' } };
+        return { kicker, title: `Slide the handover to ${inc}`, detail: note(g) || `Keep going until it's all ${inc}. Then ${floor} can stop.`, count: deadline(g), step: 'out', slide: true, hl: ['hand'], tips: { hand: `${arrow(r.inc)} All the way` } };
       }
       default:
         if (cur && id) return { kicker, title: cur.title, detail: note(g) || cur.detail, count: deadline(g), step: id, slide: true };
@@ -376,6 +387,7 @@ export function createPlayView({ root, layer, api }) {
       if (zone) { sb.style.setProperty('--z0', (zone.start / dur).toFixed(4)); sb.style.setProperty('--z1', (zone.end / dur).toFixed(4)); }
       const skip = $('.pv-skip', de);
       skip.hidden = !zone || side !== r.floor || pos >= zone.start - zone.lead - 1;
+      $('.pv-eject', de).hidden = !loaded;
       const pb = $('.pv-play', de), want = !loaded ? 'add' : d.playing ? 'pause' : 'play';
       if (pb.dataset.state !== want) {
         pb.dataset.state = want;
@@ -443,6 +455,9 @@ export function createPlayView({ root, layer, api }) {
     el('bl').classList.toggle('on', !!(D.left.buffer && bl)); el('br').classList.toggle('on', !!(D.right.buffer && br));
     el('bassrow').classList.toggle('muddy', !!(bothBass && D.left.playing && D.right.playing && api.gain('left') > 0.12 && api.gain('right') > 0.12));
     el('hand').classList.toggle('hint', hl.has('hand'));
+    // a bubble on the control to touch now, saying what to do with it
+    const tips = s.tips || {};
+    for (const t of root.querySelectorAll('[data-pv-tip]')) setText(t, hl.has(t.dataset.pvTip) ? tips[t.dataset.pvTip] || '' : '');
 
     // the phrase counter, and lining the phrases up
     const prow = el('phrase');
@@ -516,8 +531,13 @@ export function createPlayView({ root, layer, api }) {
     const gp = gigProgress(career);
     const hud = filter('gigHud', null); // a pack's own gig: { label, done, of, text }
     setText(el('venue'), filter('venueName', venue.name));
-    setText(el('streak'), `×${career.streak} streak`);
-    el('starcount').innerHTML = `${STAR(true)}${career.stars}`;
+    // stars and streak share one chip; the streak only shows once you have one going
+    const ck = `${career.stars}|${career.streak}`;
+    if (el('starcount').dataset.key !== ck) {
+      el('starcount').dataset.key = ck;
+      el('starcount').innerHTML = `${STAR(true)}${career.stars}${career.streak >= 2 ? ` · ×${career.streak} streak` : ''}`;
+      el('starcount').title = `Stars from all your mixes. Streak: ${career.streak} mixes in a row with 2 stars or more.`;
+    }
     const gb = hud || gp;
     const gk = `${gb.done}|${gb.of}|${gp.booked}|${!!hud}`;
     if (el('gigbars').dataset.key !== gk) {
@@ -581,6 +601,15 @@ export function createPlayView({ root, layer, api }) {
   }
 
   // ---------- picking a song: your library, lent by the full decks ----------
+  /** Take a song off its deck: the reset for when the mix steps lose track of which song goes next. */
+  function removeSong(side) {
+    const d = D[side]; if (!d.buffer) return;
+    const live = api.live?.(side);
+    if (live && !confirm(`"${d.track.title}" is playing to the room. Stop it and take it off?`)) return;
+    api.eject(side, live);
+    st.sayKey = ''; st.stepsKey = ''; st.nextKey = ''; // redraw the steps and Play next from scratch
+  }
+
   function openPicker(side) {
     st.picker = { side };
     const other = D[OTHER[side]];
