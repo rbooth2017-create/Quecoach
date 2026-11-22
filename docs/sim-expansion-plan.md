@@ -1,6 +1,8 @@
 # Cue Coach: "DJ Life", a sim expansion pack (plan)
 
 > **Status (22 Nov 2026):** milestones 1–8 are built. Hooks: `js/packs.js`. Pack: `js/packs/djlife/`. Tests: `test/djlife.test.mjs`. Switch it on in Settings → Expansion packs. Still to do: milestone 9 (payday sounds, a fans feed, a balancing pass after real play).
+>
+> **World, stage 1 built:** an isometric room you walk round (section 7). Stages 2–5 to come.
 
 *Draft, 22 Nov 2026. A plan for an add-on that turns Cue Coach's Play view into a DJ life sim: you play gigs to earn money, pay rent, upgrade your home and gear, and build a reputation from the bedroom to the main room.*
 
@@ -240,3 +242,40 @@ A first fun version is milestones 1–5: play gigs, get paid, pay rent.
 - **Real time or turns?** This plan uses turns (a day per gig). Real-time weeks could feel more like a life sim, but would punish people who play once a week.
 - **Does the existing venue map stay?** Proposed: while DJ Life is on, the gig board replaces it; the map comes back when the pack is off.
 - **Name.** "DJ Life" is a placeholder.
+
+---
+
+## 7. The walk-around world (isometric 2D)
+
+Instead of only menus, DJ Life gets a world you walk round as your DJ. It's a new way of showing the same game: the
+money, gigs, gear and homes above don't change.
+
+**Stage 1 (built).** Your room, in isometric 2D. Click a spot to walk there, or use the arrow keys / WASD; walk up to
+things and press E to use them:
+
+| Thing | What it does |
+|---|---|
+| Decks | Go to the Play view and mix |
+| Laptop | The gig board |
+| Wardrobe | The shop |
+| Door | Head out (the town is stage 3; for now it says so) |
+| Sofa | Sit down for a bit |
+
+Each home is a bigger room (7 × 6 tiles at your parents' up to 13 × 10 in the studio house). The gear you own and the
+decor you put up stand in the room: speakers either side of the decks, LED strips, moving heads, lasers, disco ball,
+plant, record shelf, poster, neon sign with your DJ name. Your outfit and headphones show on your character.
+
+Files: `js/packs/djlife/iso.js` (tiles to screen, room layouts, path-finding; tested in
+`test/djlife-world.test.mjs`), `sprites.js` (drawing), `world.js` (the screen, walking and controls).
+
+**Your own art.** Everything is drawn with simple shapes until you draw your own: put a PNG in
+`js/packs/djlife/art/`, add its name to `art/art.js`, and it replaces the shape. `art/README.md` lists the names
+and sizes. Start with `dj.png`.
+
+**Still to come**
+
+2. **Build mode:** pick up and move the things in your room, turn them, lay out your own deck setup.
+3. **The town:** walk out of the door to a street with the venues and the shop.
+4. **Gigs inside venues:** your character behind the decks, the crowd as little dancing people, busier when the vibe
+   is high.
+5. **Building:** walls and rooms in the bigger homes.

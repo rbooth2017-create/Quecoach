@@ -10,6 +10,7 @@ import { makeBoard, boardFor } from './gigs.js';
 import { SLOTS, gearById, gearInSlot } from './gear.js';
 import { HOMES, homeById } from './homes.js';
 import { loadLife } from './save.js';
+import { createWorld } from './world.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const mixes = (n) => `${n} ${n === 1 ? 'mix' : 'mixes'}`;
@@ -17,6 +18,7 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 const signed = (n) => (n > 0 ? `+${n}` : String(n));
 const dayLabel = (day) => `Week ${weekOf(day) + 1} · ${DAY_NAMES[weekday(day)]}`;
 const STAR = '<svg class="dl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>';
+const HOUSE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7M5 9.5V20h14V9.5M10 20v-5h4v5"/></svg>';
 const TABS = [['gigs', 'Gigs'], ['shop', 'Shop'], ['home', 'Home'], ['diary', 'Diary']];
 
 export function createDjLife(ctx, { key }) {
@@ -39,6 +41,19 @@ export function createDjLife(ctx, { key }) {
   document.body.append(layer);
   const chips = ctx.slots.chips, scene = ctx.slots.scene;
 
+  // ---------- your room: walk round it (world.js) ----------
+  const world = createWorld({
+    getLife: () => life,
+    djName: () => ctx.djName(),
+    use: (what) => {
+      if (what === 'decks') { world.close(true); ctx.showPlay(); return; }
+      if (what === 'laptop') return openBoard('gigs');
+      if (what === 'look') return openBoard('shop');
+      if (what === 'door') return ctx.toast('The town is coming in a later update. Your laptop has this week\'s gigs.');
+      if (what === 'sofa') return ctx.toast('You put your feet up for a minute. Ahh.');
+    },
+  });
+
   // ---------- the board for this week ----------
   function board() {
     const top = ctx.career().venue, w = weekOf(life.day);
@@ -59,12 +74,17 @@ export function createDjLife(ctx, { key }) {
     const k = `${life.cash}|${life.day}|${!!life.gig}|${tonight}`;
     if (k === st.chipKey) return;
     st.chipKey = k;
-    chips.innerHTML = `<button class="pv-chip dl-gigs${tonight && !life.gig ? ' ping' : ''}" data-dl="board" title="DJ Life: your gigs, the shop and your home">${icon('disc', 15)}${life.gig ? 'Tonight\'s gig' : 'Gigs'}</button>
+    chips.innerHTML = `<button class="pv-chip" data-dl="room" title="Walk round your room">${HOUSE}Your room</button>
+      <button class="pv-chip dl-gigs${tonight && !life.gig ? ' ping' : ''}" data-dl="board" title="DJ Life: your gigs, the shop and your home">${icon('disc', 15)}${life.gig ? 'Tonight\'s gig' : 'Gigs'}</button>
       <span class="pv-chip dl-cash" title="Your money">${esc(money(life.cash))}</span>
       <span class="pv-chip dl-day" title="The day in DJ Life">${esc(dayLabel(life.day))}</span>`;
   }
   chips.addEventListener('click', onChipClick);
-  function onChipClick(e) { if (e.target.closest('[data-dl="board"]')) openBoard(); }
+  function onChipClick(e) {
+    if (e.target.closest('[data-dl="board"]')) openBoard();
+    if (e.target.closest('[data-dl="room"]')) openRoom();
+  }
+  function openRoom() { if (!life.intro) return drawIntro(); world.open(); }
 
   // ---------- your room, drawn behind the decks when you're at home ----------
   function renderScene() {
@@ -92,6 +112,7 @@ export function createDjLife(ctx, { key }) {
 
   function renderAll() {
     renderChips(); renderScene();
+    if (world.isOpen()) world.refresh();
     if (!layer.classList.contains('hidden') && layer.dataset.view === 'board') drawBoard();
   }
 
@@ -125,6 +146,7 @@ export function createDjLife(ctx, { key }) {
       </div>
       <button class="pv-x cl-close" data-dl="close" aria-label="Close">${icon('x', 18)}</button>
     </div>
+    ${world.isOpen() ? '' : `<button class="cl-ghost dl-roombtn" data-dl="room">${HOUSE}Go to your room</button>`}
     <nav class="dl-tabs" role="tablist">${TABS.map(([id, name]) => `<button role="tab" aria-selected="${st.tab === id}" data-dl="tab:${id}">${name}${id === 'shop' && affordable(life).length ? '<i class="dl-dot" aria-label="Something you can afford"></i>' : ''}</button>`).join('')}</nav>`;
   }
 
@@ -241,7 +263,8 @@ export function createDjLife(ctx, { key }) {
         <li><b>Pay the rent</b> every Sunday. Can't? Back to your parents'. No game over.</li>
       </ol>
       <p class="dl-empty">Money never buys skill: the beats are only as matched as you make them.</p>
-      <div class="dl-acts"><button class="cl-go" data-dl="intro" data-focus>Open the gig board</button></div>
+      <p class="dl-empty">Walk round your room: click where to go, or use the arrow keys. Walk up to the laptop for gigs, the decks to mix, the wardrobe for the shop.</p>
+      <div class="dl-acts"><button class="cl-go" data-dl="intro" data-focus>Go to your room</button><button class="cl-ghost" data-dl="intro-board">Straight to the gig board</button></div>
     </div>`, 'intro');
   }
 
@@ -303,7 +326,9 @@ export function createDjLife(ctx, { key }) {
     if (a === 'close') return close();
     if (a === 'tab') { st.tab = arg; return drawBoard(); }
     if (a === 'board') { st.tab = 'gigs'; if (st.queue.length) return showCard(st.queue.shift()); return drawBoard(); }
-    if (a === 'intro') { life.intro = true; save(); return drawBoard(); }
+    if (a === 'intro') { life.intro = true; save(); close(); return world.open(); }
+    if (a === 'intro-board') { life.intro = true; save(); return drawBoard(); }
+    if (a === 'room') { close(); return world.open(); }
     if (a === 'booked') { close(); return ctx.openBooked(); }
     if (a === 'day') return moveOn(life.day + 1);
     if (a === 'week') return moveOn((weekOf(life.day) + 1) * 7);
@@ -312,7 +337,7 @@ export function createDjLife(ctx, { key }) {
       if (!o || o.needs.length || o.next || life.gig) return;
       const r = advanceTo(life, o.day);
       life = { ...r.life, gig: startGig(o) }; markPlayed(o.id); save();
-      close(); ctx.showPlay(); ctx.resetVibe(); renderAll();
+      close(); world.close(true); ctx.showPlay(); ctx.resetVibe(); renderAll();
       ctx.toast(`${o.title}: play ${mixes(o.mixes)}. ${o.hosted ? 'Your guests are arriving.' : 'The room is filling up.'} Good luck!`);
       return;
     }
@@ -377,7 +402,7 @@ export function createDjLife(ctx, { key }) {
     resultLine: (line) => { const l = st.lastLine; st.lastLine = ''; return l || line; },
     destroy() {
       save();
-      layer.remove(); css.remove();
+      layer.remove(); css.remove(); world.destroy();
       chips.removeEventListener('click', onChipClick);
       chips.innerHTML = ''; scene.innerHTML = '';
     },

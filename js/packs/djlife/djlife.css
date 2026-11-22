@@ -126,3 +126,26 @@ button.dl-gigs:hover { background: color-mix(in srgb, var(--pv-b) 34%, transpare
 @keyframes dl-spin { to { transform: rotate(360deg); } }
 .dl-sofa { left: 50%; bottom: 96px; width: 260px; height: 56px; margin-left: -130px; border-radius: 20px 20px 8px 8px; background: #3a1631; opacity: .35; }
 @media (prefers-reduced-motion: reduce) { .dl-led, .dl-heads b, .dl-laser b, .dl-disco, .dl-gigs.ping { animation: none; } }
+
+/* ---------- your room (world.js): walk round it ---------- */
+.dl-world { --pv-bg: #0b0816; --pv-card: #171129; --pv-card-2: #211938; --pv-line: #2c2249; --pv-line-2: #3d3063;
+  --pv-ink: #f4f0ff; --pv-ink-2: #c9c0e8; --pv-ink-3: #a59bc9; --pv-a: #22d3ee; --pv-b: #f472b6; --pv-ok: #4ade80; --pv-gold: #facc15;
+  position: fixed; inset: 0; z-index: 44; background: radial-gradient(ellipse at 50% 30%, #1d1236 0%, #07050f 70%); color: var(--pv-ink); outline: none; }
+.dl-world canvas { position: absolute; inset: 0; display: block; touch-action: none; }
+.dl-whud { position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 18px; pointer-events: none; }
+.dl-whud > * { pointer-events: auto; }
+.dl-wl { display: grid; gap: 2px; padding-left: 64px; }
+.dl-wl b { font-size: 20px; font-weight: 850; letter-spacing: -.01em; }
+.dl-wl span { font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--pv-b); }
+.dl-wr { display: flex; gap: 8px; align-items: center; }
+.dl-world .pv-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 99px; border: 1px solid var(--pv-line-2); background: rgba(23,17,41,.85); color: var(--pv-ink); font-weight: 650; font-size: 13px; }
+.dl-world button.pv-chip:hover { background: var(--pv-card-2); }
+.dl-world .pv-x { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--pv-line-2); background: rgba(23,17,41,.85); color: var(--pv-ink); display: grid; place-items: center; padding: 0; }
+.dl-prompt { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 10px 18px 10px 10px; border-radius: 99px; background: rgba(23,17,41,.92); border: 1px solid var(--pv-ok); box-shadow: 0 0 24px color-mix(in srgb, var(--pv-ok) 30%, transparent); font-weight: 700; cursor: pointer; animation: dl-pop .18s ease-out; }
+@keyframes dl-pop { from { transform: translate(-50%, 8px); opacity: 0; } }
+.dl-world kbd { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 8px; background: var(--pv-ink); color: #0b0816; font: 800 13px/1 system-ui, sans-serif; }
+.dl-prompt kbd { background: var(--pv-ok); }
+.dl-whelp { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); color: var(--pv-ink-3); font-size: 12.5px; white-space: nowrap; }
+.dl-whelp kbd { min-width: 20px; height: 20px; font-size: 11px; background: var(--pv-line-2); color: var(--pv-ink); }
+.dl-roombtn { align-self: flex-start; height: 36px !important; font-size: 13px !important; gap: 8px; }
+@media (max-width: 700px) { .dl-wl { padding-left: 0; } .dl-wl b { font-size: 16px; } .dl-wr .pv-chip:not(.dl-cash) { display: none; } .dl-whelp { white-space: normal; text-align: center; width: 90%; } }
