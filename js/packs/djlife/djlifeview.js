@@ -4,13 +4,15 @@ import { icon } from '../../icons.js';
 import { venueById } from '../../career.js';
 import {
   VENUE_GIGS, GOALS, WANTS, HOSTED, DAY_NAMES, money, weekOf, weekday, effects, gearVibe, startGig, gigMix, gigVibe,
-  gigDone, finishGig, leaveGig, advanceTo, buy, equip, moveHome, affordable,
+  gigDone, finishGig, leaveGig, advanceTo, buy, equip, moveHome, affordable, buyHome, buyCar, ownsHome, travelCost,
 } from './economy.js';
 import { makeBoard, boardFor } from './gigs.js';
 import { SLOTS, gearById, gearInSlot } from './gear.js';
 import { HOMES, homeById } from './homes.js';
 import { loadLife } from './save.js';
 import { createWorld } from './world.js';
+import { CARS, carById } from './cars.js';
+import { play as sfx } from './sfx.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const mixes = (n) => `${n} ${n === 1 ? 'mix' : 'mixes'}`;
@@ -19,7 +21,7 @@ const signed = (n) => (n > 0 ? `+${n}` : String(n));
 const dayLabel = (day) => `Week ${weekOf(day) + 1} · ${DAY_NAMES[weekday(day)]}`;
 const STAR = '<svg class="dl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>';
 const HOUSE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7M5 9.5V20h14V9.5M10 20v-5h4v5"/></svg>';
-const TABS = [['gigs', 'Gigs'], ['shop', 'Shop'], ['home', 'Home'], ['diary', 'Diary']];
+const TABS = [['gigs', 'Gigs'], ['shop', 'Shop'], ['home', 'Homes'], ['cars', 'Cars'], ['diary', 'Diary']];
 
 export function createDjLife(ctx, { key }) {
   // ---------- the save ----------
@@ -45,14 +47,31 @@ export function createDjLife(ctx, { key }) {
   const world = createWorld({
     getLife: () => life,
     djName: () => ctx.djName(),
-    use: (what) => {
+    sound: sfx,
+    marks: townMarks,
+    saveMove: (home, id, move) => { life = { ...life, layout: { ...life.layout, [home]: { ...(life.layout[home] || {}), [id]: move } } }; save(); },
+    use: (what, it) => {
       if (what === 'decks') { world.close(true); ctx.showPlay(); return; }
       if (what === 'laptop') return openBoard('gigs');
-      if (what === 'look') return openBoard('shop');
-      if (what === 'door') return ctx.toast('The town is coming in a later update. Your laptop has this week\'s gigs.');
+      if (what === 'look') return openBoard('shop', { slots: ['outfit', 'headphones'], name: 'Your wardrobe', sub: 'What you wear to gigs' });
       if (what === 'sofa') return ctx.toast('You put your feet up for a minute. Ahh.');
+      if (what === 'shop') return openBoard('shop', { slots: it.slots, name: it.name, sub: it.sub });
+      if (what === 'estate') return openBoard('home', { name: it.name, sub: 'Rent somewhere, or buy it and never pay rent again' });
+      if (what === 'cars') return openBoard('cars', { name: it.name, sub: 'A car cuts what you pay to get to gigs' });
+      if (what === 'set') {
+        const g = life.gig;
+        if (g && !g.offer.hosted && g.offer.venue === it.venue) { world.close(true); ctx.showPlay(); ctx.toast(`${g.offer.title}: you're on. Play ${mixes(g.offer.mixes)}.`); return; }
+        return openBoard('gigs', { venue: it.venue, name: venueById(it.venue).name, sub: 'Gigs here this week' });
+      }
     },
   });
+  /** Markers over buildings in town: where tonight's gig is, and which venues have gigs for you this week. */
+  function townMarks() {
+    const out = {};
+    for (const o of board().offers) if (!o.next && !o.hosted && !o.needs.length && o.venue !== 'bedroom') out[o.venue] = 'offer';
+    if (life.gig) out[life.gig.offer.hosted || life.gig.offer.venue === 'bedroom' ? 'home' : life.gig.offer.venue] = 'gig';
+    return out;
+  }
 
   // ---------- the board for this week ----------
   function board() {
@@ -128,8 +147,10 @@ export function createDjLife(ctx, { key }) {
   }
   function showCard(c) { if (c.type === 'week') drawWeek(c.week); else if (c.type === 'pay') drawPay(c); }
 
-  function openBoard(tab) {
+  /** place: a building you walked into ({ name, sub, slots (shop shelves), venue }), or nothing for the whole board. */
+  function openBoard(tab, place = null) {
     if (tab) st.tab = tab;
+    st.place = place;
     if (!life.intro) return drawIntro();
     drawBoard();
   }
@@ -137,7 +158,7 @@ export function createDjLife(ctx, { key }) {
   function head() {
     const h = homeById(life.home);
     return `<div class="dl-head">
-      <div><span class="cl-kick">DJ Life · ${esc(dayLabel(life.day))}</span><h2 id="dlTitle">${esc(ctx.djName() ? `DJ ${ctx.djName()}` : 'Your DJ life')}</h2></div>
+      <div><span class="cl-kick">${esc(st.place?.sub || `DJ Life · ${dayLabel(life.day)}`)}</span><h2 id="dlTitle">${esc(st.place?.name || (ctx.djName() ? `DJ ${ctx.djName()}` : 'Your DJ life'))}</h2></div>
       <div class="dl-stats">
         <span><small>Money</small><b>${esc(money(life.cash))}</b></span>
         <span><small>Reputation</small><b>${life.rep}<i class="dl-meter"><s style="width:${life.rep}%"></s></i></b></span>
@@ -146,12 +167,12 @@ export function createDjLife(ctx, { key }) {
       </div>
       <button class="pv-x cl-close" data-dl="close" aria-label="Close">${icon('x', 18)}</button>
     </div>
-    ${world.isOpen() ? '' : `<button class="cl-ghost dl-roombtn" data-dl="room">${HOUSE}Go to your room</button>`}
-    <nav class="dl-tabs" role="tablist">${TABS.map(([id, name]) => `<button role="tab" aria-selected="${st.tab === id}" data-dl="tab:${id}">${name}${id === 'shop' && affordable(life).length ? '<i class="dl-dot" aria-label="Something you can afford"></i>' : ''}</button>`).join('')}</nav>`;
+    ${world.isOpen() ? '' : `<div class="dl-acts"><button class="cl-ghost dl-roombtn" data-dl="room">${HOUSE}Go to your room</button><button class="cl-ghost dl-roombtn" data-dl="town">${icon('external', 15)}Go into town</button></div>`}
+    ${st.place ? '' : `<nav class="dl-tabs" role="tablist">${TABS.map(([id, name]) => `<button role="tab" aria-selected="${st.tab === id}" data-dl="tab:${id}">${name}${id === 'shop' && affordable(life).length ? '<i class="dl-dot" aria-label="Something you can afford"></i>' : ''}</button>`).join('')}</nav>`}`;
   }
 
   function drawBoard() {
-    const body = { gigs: gigsTab, shop: shopTab, home: homeTab, diary: diaryTab }[st.tab]();
+    const body = { gigs: gigsTab, shop: shopTab, home: homeTab, cars: carsTab, diary: diaryTab }[st.tab]();
     const scroll = layer.querySelector('.dl-body')?.scrollTop || 0;
     show(`<div class="cl-card dl-card" role="dialog" aria-modal="true" aria-labelledby="dlTitle">${head()}<div class="dl-body">${body}</div></div>`, 'board');
     const b = layer.querySelector('.dl-body'); if (b) b.scrollTop = scroll;
@@ -165,7 +186,7 @@ export function createDjLife(ctx, { key }) {
     return `<li class="dl-offer${blocked ? ' locked' : ''}${o.hosted ? ' hosted' : ''}${o.next ? ' next' : ''}">
       <div class="dl-ohead"><span class="dl-when">${esc(when)}</span><span class="dl-pay">${esc(pay)}</span></div>
       <b>${esc(o.title)}</b>
-      <span class="dl-where">${esc(o.hosted ? 'At your place' : `${VENUE_GIGS[o.venue].label} · ${v.name}`)}</span>
+      <span class="dl-where">${esc(o.hosted ? 'At your place' : VENUE_GIGS[o.venue].label === v.name ? v.name : `${VENUE_GIGS[o.venue].label} · ${v.name}`)}</span>
       <ul class="dl-facts">
         <li>${icon('disc', 14)}${mixes(o.mixes)}</li>
         <li>${icon('music', 14)}${esc(WANTS[o.wants].text)}</li>
@@ -177,7 +198,9 @@ export function createDjLife(ctx, { key }) {
   }
   function gigsTab() {
     const b = board(), c = ctx.career();
-    const real = b.offers.filter((o) => !o.next), next = b.offers.find((o) => o.next);
+    const here = st.place?.venue;
+    let real = b.offers.filter((o) => !o.next), next = b.offers.find((o) => o.next);
+    if (here) { real = real.filter((o) => !o.hosted && o.venue === here); next = next?.venue === here ? next : null; }
     let top = '';
     if (life.gig) {
       const g = life.gig, o = g.offer;
@@ -189,6 +212,13 @@ export function createDjLife(ctx, { key }) {
     } else if (c.offer) {
       top = `<div class="dl-now booked"><div><span class="cl-kick ok">Your phone's ringing</span><b>${esc(venueById(c.offer).name)} wants to book you</b><span class="dl-sub">Take it and their gigs start showing up here.</span></div>
         <div class="dl-acts"><button class="cl-go" data-dl="booked" data-focus>See the booking</button></div></div>`;
+    }
+    if (here) {
+      const v = VENUE_GIGS[here];
+      return `${top}
+        <p class="dl-sub">${esc(venueById(here).who)} Gigs here are ${mixes(v.mixes)} long and usually pay about ${esc(money(v.fee))}. Getting here: ${esc(money(travelCost(life, here)))}${life.car ? ` in your ${esc(carById(life.car).name.toLowerCase())}` : ' on the bus'}.</p>
+        ${real.length || next ? `<ul class="dl-offers">${real.map(offerCard).join('')}${next ? offerCard(next) : ''}</ul>` : '<p class="dl-empty">Nothing for you here this week. Try again on Monday, or look at every gig.</p>'}
+        <div class="dl-acts"><button class="cl-ghost" data-dl="allgigs">See every gig this week</button></div>`;
     }
     return `${top}
       <h3 class="dl-h">This week's offers</h3>
@@ -217,7 +247,8 @@ export function createDjLife(ctx, { key }) {
     return out.join(' · ');
   }
   function shopTab() {
-    return SLOTS.map((s) => `<section class="dl-slot"><h3 class="dl-h">${esc(s.name)} <small>${esc(s.blurb)}</small></h3>
+    const slots = st.place?.slots ? SLOTS.filter((s) => st.place.slots.includes(s.id)) : SLOTS;
+    return slots.map((s) => `<section class="dl-slot"><h3 class="dl-h">${esc(s.name)} <small>${esc(s.blurb)}</small></h3>
       <ul class="dl-items">${gearInSlot(s.id).map((g) => {
         const own = life.owned.includes(g.id);
         const on = s.id === 'decor' ? life.decor.includes(g.id) : life.equipped[s.id] === g.id;
@@ -231,17 +262,36 @@ export function createDjLife(ctx, { key }) {
   // ---------- home ----------
   function homeTab() {
     const h = homeById(life.home);
-    const perks = (x) => [x.rent ? `${money(x.rent)} a week` : 'Free', x.host ? `Parties for up to ${x.guests}` : 'No parties', x.fans ? `About ${x.fans} new fans a week from mixtapes` : '', `${x.decor} decor spots`].filter(Boolean);
+    const perks = (x) => [ownsHome(life, x.id) ? (x.id === 'parents' ? 'Free' : 'Yours: no rent') : x.rent == null ? 'For sale only' : `${money(x.rent)} a week`, x.host ? `Parties for up to ${x.guests}` : 'No parties', x.fans ? `About ${x.fans} new fans a week from mixtapes` : '', `${x.decor} decor spots`].filter(Boolean);
     return `<div class="dl-now"><div><span class="cl-kick ok">You live in</span><b>${esc(h.name)}</b><span class="dl-sub">${esc(h.blurb)}</span>
         <span class="dl-sub">${perks(h).map(esc).join(' · ')} · Decor up: ${life.decor.length} of ${h.decor}</span></div></div>
       <h3 class="dl-h">Places to live</h3>
       <ul class="dl-homes">${HOMES.map((x) => {
-        const here = x.id === life.home;
-        const btn = here ? '<span class="dl-tag ok">Home</span>'
-          : `<button class="${x.rent > h.rent ? 'cl-go' : 'cl-ghost'}" data-dl="move:${x.id}" ${life.cash < x.deposit || life.gig ? 'disabled' : ''}>${x.deposit ? `Move in · ${esc(money(x.deposit))} deposit` : 'Move back'}</button>`;
-        return `<li class="dl-home${here ? ' on' : ''}" data-home="${x.id}"><div><b>${esc(x.name)}</b><span>${esc(x.blurb)}</span><small>${perks(x).map(esc).join(' · ')}</small></div>${btn}</li>`;
+        const here = x.id === life.home, own = ownsHome(life, x.id);
+        const btns = [];
+        if (here) btns.push('<span class="dl-tag ok">Home</span>');
+        else if (own) btns.push(`<button class="cl-ghost" data-dl="move:${x.id}" ${life.gig ? 'disabled' : ''}>${x.id === 'parents' ? 'Move back' : 'Move in (it\'s yours)'}</button>`);
+        else if (x.rent != null) btns.push(`<button class="cl-ghost" data-dl="move:${x.id}" ${life.cash < x.deposit || life.gig ? 'disabled' : ''}>Rent · ${esc(money(x.deposit))} deposit</button>`);
+        if (!own) btns.push(`<button class="cl-go" data-dl="buyhome:${x.id}" ${life.cash < x.price || life.gig ? 'disabled' : ''}>Buy · ${esc(money(x.price))}</button>`);
+        else if (here && x.id !== 'parents') btns.push('<span class="dl-tag ok">Owned</span>');
+        return `<li class="dl-home${here ? ' on' : ''}" data-home="${x.id}"><div><b>${esc(x.name)}</b><span>${esc(x.blurb)}</span><small>${perks(x).map(esc).join(' · ')}</small></div><div class="dl-btns">${btns.join('')}</div></li>`;
       }).join('')}</ul>
-      <p class="dl-empty">Rent is paid every Sunday night. If you can't pay, you move back to your parents' and keep all your gear.</p>`;
+      <p class="dl-empty">Rent is paid every Sunday night. If you can't pay, you move back to your parents' and keep all your gear. A home you buy is yours for good: no rent, and you can move back in any time for free.</p>`;
+  }
+
+  // ---------- cars ----------
+  function carsTab() {
+    const cur = carById(life.car);
+    const fx = (c) => [c.travel === 0 ? 'Free travel to gigs' : `Travel to gigs ${pct(1 - c.travel)} cheaper`, c.rep ? `+${c.rep} reputation after good gigs` : ''].filter(Boolean).join(' · ');
+    return `<div class="dl-now"><div><span class="cl-kick ok">You get about</span><b>${esc(cur ? cur.name : 'On the bus')}</b>
+        <span class="dl-sub">Getting to a club night costs you ${esc(money(travelCost(life, 'warehouse')))}, the main room ${esc(money(travelCost(life, 'main')))}.</span></div></div>
+      <ul class="dl-homes">${CARS.map((c) => {
+        const own = (life.carsOwned || []).includes(c.id), on = life.car === c.id;
+        const btn = on ? '<span class="dl-tag ok">Driving</span>' : own ? `<button class="cl-ghost" data-dl="car:${c.id}">Drive it</button>`
+          : `<button class="cl-go" data-dl="car:${c.id}" ${life.cash < c.price ? 'disabled' : ''}>Buy · ${esc(money(c.price))}</button>`;
+        return `<li class="dl-home${on ? ' on' : ''}"><i class="dl-swatch" style="--c:${c.body}"></i><div><b>${esc(c.name)}</b><span>${esc(c.blurb)}</span><small>${esc(fx(c))}</small></div>${btn}</li>`;
+      }).join('')}</ul>
+      <p class="dl-empty">Your car waits on the drive outside your home in town.</p>`;
   }
 
   // ---------- diary ----------
@@ -276,7 +326,7 @@ export function createDjLife(ctx, { key }) {
       !o.hosted && [`Fee (${pct(0.5 + 0.5 * pay.perf)} of ${money(o.fee)} for how you played)`, pay.fee],
       [o.hosted ? `Door: ${o.guests} guests` : 'Tips from the crowd', pay.tips],
       pay.goalMet && [`Bonus: ${GOALS[o.goal].text}`, pay.bonus],
-      pay.costs && ['Snacks and drinks', -pay.costs],
+      pay.costs && [o.hosted ? 'Snacks and drinks' : life.car ? `Fuel (${carById(life.car).name})` : 'Bus and taxi there and back', -pay.costs],
     ].filter(Boolean);
     show(`<div class="cl-card dl-card dl-small dl-payday" role="dialog" aria-modal="true" aria-labelledby="dlTitle">
       <span class="cl-kick ok">Payday · ${esc(o.title)}</span>
@@ -292,10 +342,12 @@ export function createDjLife(ctx, { key }) {
       <div class="dl-acts"><button class="cl-go" data-dl="board" data-focus>To the gig board</button><button class="cl-ghost" data-dl="close">Keep practising</button></div>
     </div>`, 'pay');
     for (const w of weeks || []) st.queue.push({ type: 'week', week: w });
+    sfx('cash');
   }
 
   // ---------- end of the week ----------
   function drawWeek(w) {
+    sfx('week');
     show(`<div class="cl-card dl-card dl-small" role="dialog" aria-modal="true" aria-labelledby="dlTitle">
       <span class="cl-kick">Sunday night</span><h2 id="dlTitle">Week ${w.week + 1} done</h2>
       <table class="dl-sum">
@@ -324,8 +376,10 @@ export function createDjLife(ctx, { key }) {
     const b = e.target.closest('[data-dl]'); if (!b || b.disabled) return;
     const [a, arg] = b.dataset.dl.split(':');
     if (a === 'close') return close();
-    if (a === 'tab') { st.tab = arg; return drawBoard(); }
-    if (a === 'board') { st.tab = 'gigs'; if (st.queue.length) return showCard(st.queue.shift()); return drawBoard(); }
+    if (a === 'tab') { st.tab = arg; st.place = null; return drawBoard(); }
+    if (a === 'allgigs') { st.tab = 'gigs'; st.place = null; return drawBoard(); }
+    if (a === 'town') { close(); return world.open('town'); }
+    if (a === 'board') { st.tab = 'gigs'; st.place = null; if (st.queue.length) return showCard(st.queue.shift()); return drawBoard(); }
     if (a === 'intro') { life.intro = true; save(); close(); return world.open(); }
     if (a === 'intro-board') { life.intro = true; save(); return drawBoard(); }
     if (a === 'room') { close(); return world.open(); }
@@ -337,7 +391,15 @@ export function createDjLife(ctx, { key }) {
       if (!o || o.needs.length || o.next || life.gig) return;
       const r = advanceTo(life, o.day);
       life = { ...r.life, gig: startGig(o) }; markPlayed(o.id); save();
-      close(); world.close(true); ctx.showPlay(); ctx.resetVibe(); renderAll();
+      close(); ctx.resetVibe(); renderAll();
+      const atHome = o.hosted || o.venue === 'bedroom';
+      if (world.isOpen()) {
+        // you're walking round: go there yourself. Your decks at home, or the venue with the pink marker.
+        world.go(atHome ? 'room' : 'town', 'home');
+        ctx.toast(atHome ? `${o.title}: walk to your decks when you're ready. Play ${mixes(o.mixes)}.` : `${o.title}: head to ${venueById(o.venue).name} (the pink marker) and step up to the decks. Or press Decks to start now.`);
+        return;
+      }
+      world.close(true); ctx.showPlay();
       ctx.toast(`${o.title}: play ${mixes(o.mixes)}. ${o.hosted ? 'Your guests are arriving.' : 'The room is filling up.'} Good luck!`);
       return;
     }
@@ -351,14 +413,29 @@ export function createDjLife(ctx, { key }) {
     if (a === 'buy') {
       const r = buy(life, arg);
       if (!r.ok) return ctx.toast(r.why);
-      life = r.life; save(); renderAll(); ctx.toast(`${gearById(arg).name}: yours.`);
+      life = r.life; save(); renderAll(); sfx('buy'); ctx.toast(`${gearById(arg).name}: yours.`);
       return drawBoard();
     }
     if (a === 'equip') { life = equip(life, arg); save(); renderAll(); return drawBoard(); }
     if (a === 'move') {
       const r = moveHome(life, arg);
       if (!r.ok) return ctx.toast(r.why);
-      life = r.life; save(); renderAll(); ctx.toast(`Welcome to your new place: ${homeById(arg).name}.`);
+      life = r.life; save(); renderAll(); sfx('door'); ctx.toast(`Welcome to your new place: ${homeById(arg).name}.`);
+      return drawBoard();
+    }
+    if (a === 'buyhome') {
+      const h = homeById(arg);
+      if (!confirm(`Buy ${h.name} for ${money(h.price)}? You'll move in straight away and never pay rent there.`)) return;
+      const r = buyHome(life, arg);
+      if (!r.ok) return ctx.toast(r.why);
+      life = r.life; save(); renderAll(); sfx('cash'); ctx.toast(`The keys are yours: ${h.name}.`);
+      return drawBoard();
+    }
+    if (a === 'car') {
+      const c = carById(arg), had = (life.carsOwned || []).includes(arg);
+      const r = buyCar(life, arg);
+      if (!r.ok) return ctx.toast(r.why);
+      life = r.life; save(); renderAll(); sfx(had ? 'pick' : 'cash'); ctx.toast(had ? `You're driving the ${c.name.toLowerCase()}.` : `${c.name}: yours. It's on your drive.`);
       return drawBoard();
     }
   });

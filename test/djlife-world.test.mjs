@@ -78,3 +78,92 @@ test('facing follows the step', () => {
   assert.equal(facing({ x: 1, y: 1 }, { x: 1, y: 2 }), 'sw');
   assert.equal(facing({ x: 1, y: 1 }, { x: 1, y: 0 }), 'ne');
 });
+
+// ---------- the town ----------
+import { TOWN, BUILDINGS, townLayout, townBlocked, outside, groundAt, isRoad } from '../js/packs/djlife/town.js';
+import { VENUES } from '../js/career.js';
+
+test('town: buildings sit inside the map, off the roads, and never overlap', () => {
+  for (const b of BUILDINGS) {
+    assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.w <= TOWN.w && b.y + b.h <= TOWN.h, b.id);
+    for (let i = 0; i < b.w; i++) for (let j = 0; j < b.h; j++) assert.ok(!isRoad(b.x + i, b.y + j), `${b.id} on a road`);
+    assert.ok(b.door >= b.x && b.door < b.x + b.w, `${b.id} door on its front`);
+  }
+  for (let i = 0; i < BUILDINGS.length; i++) for (let j = i + 1; j < BUILDINGS.length; j++) {
+    const a = BUILDINGS[i], b = BUILDINGS[j];
+    assert.ok(!(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h), `${a.id} / ${b.id}`);
+  }
+});
+
+test('town: every venue past your bedroom has a building, plus the shops, the estate agent and the showroom', () => {
+  for (const v of VENUES.filter((x) => x.id !== 'bedroom')) assert.ok(BUILDINGS.some((b) => b.venue === v.id), v.id);
+  for (const u of ['home', 'estate', 'cars', 'shop']) assert.ok(BUILDINGS.some((b) => b.use === u), u);
+  const shelves = BUILDINGS.filter((b) => b.use === 'shop').flatMap((b) => b.slots);
+  for (const s of ['controller', 'headphones', 'speakers', 'lights', 'outfit', 'decor']) assert.ok(shelves.includes(s), s);
+});
+
+test('town: from your front door you can walk to every door, with or without a car on the drive', () => {
+  for (const life of [newLife(), { ...newLife(), car: 'car-van', carsOwned: ['car-van'] }]) {
+    const items = townLayout(life), block = townBlocked(items), start = outside(items);
+    assert.ok(!block.has(`${start.x},${start.y}`));
+    for (const b of items.filter((i) => i.kind === 'building')) {
+      assert.ok(!block.has(`${b.stand.x},${b.stand.y}`), `${b.id}: outside the door is free`);
+      assert.ok(findPath(start, b.stand, TOWN, block), `a way to ${b.id}`);
+      assert.ok(nextTo(b.stand, b), `${b.id}: standing at the door counts as next to it`);
+    }
+  }
+});
+
+test('town: roads, then pavement beside them, then grass', () => {
+  assert.equal(groundAt(5, 10), 'road');
+  assert.equal(groundAt(5, 9), 'path');
+  assert.equal(groundAt(5, 1), 'grass');
+});
+
+// ---------- inside venues ----------
+import { venueLayout, VENUE_ROOM } from '../js/packs/djlife/venue.js';
+
+test('venues: a room for every venue with a building, and you can walk from the door to the booth', () => {
+  for (const b of BUILDINGS.filter((x) => x.use === 'venue')) {
+    assert.ok(VENUE_ROOM[b.venue], b.venue);
+    const { room, items, crowd } = venueLayout(b.venue);
+    const block = blocked(items);
+    const door = items.find((i) => i.id === 'door'), booth = items.find((i) => i.id === 'booth');
+    const start = standSpot(door, room, block);
+    const spot = standSpot(booth, room, block, start);
+    assert.ok(start && spot && findPath(start, spot, room, block), `${b.venue}: door to booth`);
+    assert.ok(crowd.length > 0, 'a crowd');
+    assert.ok(crowd.every((p) => p.x >= 0 && p.y >= 0 && p.x < room.w && p.y < room.h), 'crowd inside');
+  }
+  assert.equal(venueLayout('main', 48).crowd.length, 48);
+});
+
+// ---------- build mode ----------
+import { applyMoves, canReachAll, movable, turned } from '../js/packs/djlife/iso.js';
+
+test('build mode: moved things stay where you put them, turned round', () => {
+  const l = { ...newLife(), home: 'flat', layout: { flat: { bed: { x: 0, y: 2, turn: 1 } } } };
+  const bed = layout(l).find((i) => i.id === 'bed');
+  assert.deepEqual([bed.x, bed.y, bed.w, bed.h, bed.turn], [0, 2, 3, 2, 1]);
+});
+
+test('build mode: a move that doesn\'t fit, or walls you in, is ignored', () => {
+  const base = { ...newLife(), home: 'parents' };
+  const plain = layout(base).find((i) => i.id === 'bed');
+  for (const move of [{ x: 6, y: 5 }, { x: 2, y: 0 }, { x: -1, y: 0 }]) {
+    const bed = layout({ ...base, layout: { parents: { bed: move } } }).find((i) => i.id === 'bed');
+    assert.deepEqual([bed.x, bed.y], [plain.x, plain.y], JSON.stringify(move));
+  }
+  // a bed across the doorway would cut you off from everything
+  const items = layout(base);
+  const door = items.find((i) => i.kind === 'door');
+  const blocking = items.map((i) => (i.id === 'bed' ? { ...turned(i, 1), x: 0, y: door.y - 1 } : i));
+  assert.equal(canReachAll(blocking, roomSize('parents')), false);
+  assert.ok(canReachAll(items, roomSize('parents')));
+});
+
+test('build mode: the door can\'t be moved; furniture can', () => {
+  const items = layout({ ...newLife(), home: 'flat' });
+  assert.ok(!movable(items.find((i) => i.kind === 'door')));
+  assert.ok(movable(items.find((i) => i.kind === 'bed')) && movable(items.find((i) => i.kind === 'booth')));
+});

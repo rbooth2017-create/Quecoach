@@ -2,7 +2,7 @@
 
 > **Status (22 Nov 2026):** milestones 1–8 are built. Hooks: `js/packs.js`. Pack: `js/packs/djlife/`. Tests: `test/djlife.test.mjs`. Switch it on in Settings → Expansion packs. Still to do: milestone 9 (payday sounds, a fans feed, a balancing pass after real play).
 >
-> **World, stage 1 built:** an isometric room you walk round (section 7). Stages 2–5 to come.
+> **World built (stages 1–4):** your room with build mode, the town, and venue interiors (section 7). Stage 5 (building walls) is left out on purpose; see 7.
 
 *Draft, 22 Nov 2026. A plan for an add-on that turns Cue Coach's Play view into a DJ life sim: you play gigs to earn money, pay rent, upgrade your home and gear, and build a reputation from the bedroom to the main room.*
 
@@ -272,10 +272,40 @@ Files: `js/packs/djlife/iso.js` (tiles to screen, room layouts, path-finding; te
 `js/packs/djlife/art/`, add its name to `art/art.js`, and it replaces the shape. `art/README.md` lists the names
 and sizes. Start with `dj.png`.
 
-**Still to come**
+**Stage 2 (built): build mode.** In your room press **B** (or "Move things"), click something to pick it up, **R**
+turns it, click to put it down. It goes green where it fits and red where it doesn't; you can't wall yourself in
+(the decks, laptop, wardrobe and door must stay reachable). Each home remembers its own layout.
 
-2. **Build mode:** pick up and move the things in your room, turn them, lay out your own deck setup.
-3. **The town:** walk out of the door to a street with the venues and the shop.
-4. **Gigs inside venues:** your character behind the decks, the crowd as little dancing people, busier when the vibe
-   is high.
-5. **Building:** walls and rooms in the bigger homes.
+**Stage 3 (built): the town.** Walk out of your door into a few streets at night:
+
+| Building | What's inside |
+|---|---|
+| Your home | Back to your room. It looks different from the street depending on where you live (a penthouse is a glass tower). |
+| Keys & Co | The estate agent: rent somewhere, or **buy** it and never pay rent there again. Two new homes are for sale only: the Penthouse (£25,000) and the Mansion (£50,000). |
+| Deck Dept | Controllers, headphones, speakers, lights |
+| Thread | Clothes |
+| Home & Glow | Decor |
+| Wheels | The car showroom: scooter, hatchback, DJ van, sports car |
+| Sam's house, The Basement, Warehouse, The Dome | The venues on your career road |
+
+Cars are new: without one you pay to get to every gig (£4 to a house party, £30 to the main room). A car cuts or
+removes that, and the van and sports car add reputation after good gigs. Your car is parked outside your home.
+
+Green **GIGS** markers float over venues with gigs for you this week; a pink **YOUR GIG** marker shows where
+tonight's gig is, with an arrow at the edge of the screen when it's out of view. Big buildings go see-through when
+you walk behind them.
+
+**Stage 4 (built): venues.** Walk into a venue to see the stage, the decks, the bar and the crowd. On your gig night
+it's packed and everyone's dancing with their hands up; other nights it's quieter. Step up to the decks to start your
+set (straight into the Play view), or, on other nights, to see the gigs they have for you.
+
+Take a gig while you're walking round and you go there yourself (the marker shows the way), or press Decks to start
+straight away. Payday now has a little cash-register sound, and the end of each week a chime.
+
+**Stage 5 (left out): building walls.** Moving furniture covers most of what "building" was for, and free-form walls
+would need a much bigger editor. A good next step if your son wants more: let each home have a second room, or a
+garden, as fixed layouts he designs.
+
+**Files:** `town.js` (the map, tested), `venue.js` (venue interiors, tested), `townsprites.js` (drawing the town,
+cars and people), `cars.js` (the showroom), `sfx.js` (sound effects), and `world.js` (now three places and build
+mode).

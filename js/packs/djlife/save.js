@@ -3,6 +3,7 @@
 import { newLife, weekOf } from './economy.js';
 import { gearById } from './gear.js';
 import { HOMES, homeById } from './homes.js';
+import { carById } from './cars.js';
 
 const num = (x, d = 0, min = 0, max = Infinity) => (Number.isFinite(x) ? Math.max(min, Math.min(max, x)) : d);
 
@@ -29,6 +30,12 @@ export function loadLife(saved) {
   l.history = Array.isArray(l.history) ? l.history.slice(0, 30) : [];
   l.week = { earned: 0, spent: 0, gigs: 0, ...(l.week && typeof l.week === 'object' ? l.week : {}) };
   l.intro = !!l.intro;
+  l.homesOwned = [...new Set((Array.isArray(l.homesOwned) ? l.homesOwned : []).filter((id) => id !== 'parents' && HOMES.some((h) => h.id === id)))];
+  l.carsOwned = [...new Set((Array.isArray(l.carsOwned) ? l.carsOwned : []).filter((id) => carById(id)))];
+  if (!l.carsOwned.includes(l.car)) l.car = null;
+  l.layout = l.layout && typeof l.layout === 'object' && !Array.isArray(l.layout) ? l.layout : {};
+  // a home you can only buy, but don't own (a hand-edited save): back to your parents'
+  if (homeById(l.home).rent == null && !l.homesOwned.includes(l.home)) l.home = 'parents';
   if (l.board && l.board.week !== weekOf(l.day)) l.board = null;
   return l;
 }

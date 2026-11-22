@@ -20,6 +20,13 @@ export const PALETTE = {
   studio: { floorA: '#2c2a38', floorB: '#282633', wall: '#2d1f45', wallTop: '#432e66', trim: '#5b3f8a' },
   loft: { floorA: '#3a3633', floorB: '#34302d', wall: '#4a2a22', wallTop: '#6a3b30', trim: '#7c4536' },
   house: { floorA: '#2f2a24', floorB: '#2a2520', wall: '#1d2b3a', wallTop: '#2b3f55', trim: '#d4a64a' },
+  penthouse: { floorA: '#d9d4e8', floorB: '#cfc9e0', wall: '#1b2a44', wallTop: '#2b4266', trim: '#94a3b8', glass: true },
+  mansion: { floorA: '#e8e0cf', floorB: '#ded5c2', wall: '#3a2a4a', wallTop: '#55406a', trim: '#d4a64a' },
+  // venues
+  party: { floorA: '#4a3a2e', floorB: '#44352a', wall: '#3b2a44', wallTop: '#553d62', trim: '#6b4f6a' },
+  bar: { floorA: '#3a2a20', floorB: '#33251c', wall: '#2a1a14', wallTop: '#4a2e22', trim: '#b45309' },
+  club: { floorA: '#16131f', floorB: '#1a1625', wall: '#120e1d', wallTop: '#2a2238', trim: '#f472b6' },
+  arena: { floorA: '#141a26', floorB: '#171e2c', wall: '#0e1422', wallTop: '#22304a', trim: '#22d3ee' },
 };
 export const WALL_H = 96;
 
@@ -64,6 +71,16 @@ export function drawRoom(ctx, room, home, t, lights) {
     ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1;
     for (const [a, b] of [[pt(0, 0, z), pt(room.w, 0, z)], [pt(0, 0, z), pt(0, room.h, z)]]) { ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke(); }
   }
+  if (c.glass) { // floor-to-ceiling windows: the city at night
+    for (const [a, b, n] of [[(u, z) => pt(u, 0, z), room.w, 0], [(u, z) => pt(0, u, z), room.h, 1]]) {
+      for (let u = 0.2; u < b - 0.2; u += 0.37) {
+        const top = 14 + ((u * 97 + n * 31) % 50);
+        const p0 = a(u, 10), p1 = a(u, top);
+        ctx.fillStyle = (u * 13 + n) % 3 < 1.2 ? 'rgba(250,204,21,.55)' : 'rgba(34,211,238,.35)';
+        ctx.fillRect(p0.sx - 2, p1.sy, 4, p0.sy - p1.sy);
+      }
+    }
+  }
   // skirting
   poly(ctx, [pt(0, 0), pt(room.w, 0), pt(room.w, 0, 6), pt(0, 0, 6)], c.trim);
   poly(ctx, [pt(0, 0), pt(0, room.h), pt(0, room.h, 6), pt(0, 0, 6)], c.trim);
@@ -103,8 +120,9 @@ export function drawThing(ctx, it, t, name, room) {
       box(ctx, x, y, w, h, 0, 26, '#1f1a33', { top: '#2c2449' });
       const col = ['#6b7280', '#22d3ee', '#a78bfa', '#f472b6'][it.tier || 0];
       box(ctx, x + 0.15, y + 0.15, w - 0.3, h - 0.3, 26, 4, '#111', { top: '#1b1b22' });
-      for (const cx of [x + 0.55, x + w - 0.55]) {
-        const c = pt(cx, y + h / 2, 31);
+      const wheels = w >= h ? [[x + 0.55, y + h / 2], [x + w - 0.55, y + h / 2]] : [[x + w / 2, y + 0.55], [x + w / 2, y + h - 0.55]];
+      for (const [cx, cy] of wheels) {
+        const c = pt(cx, cy, 31);
         ctx.save(); ctx.translate(c.sx, c.sy); ctx.scale(1, 0.5);
         ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.fillStyle = '#2a2a33'; ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 8; ctx.stroke();
@@ -144,16 +162,25 @@ export function drawThing(ctx, it, t, name, room) {
       }
       return;
     }
-    case 'shelf':
-      box(ctx, x + 0.05, y + 0.2, w - 0.1, 0.6, 0, 40, '#3a2a1e');
+    case 'shelf': {
+      const along = w >= h;
+      if (along) box(ctx, x + 0.05, y + 0.2, w - 0.1, 0.6, 0, 40, '#3a2a1e'); else box(ctx, x + 0.2, y + 0.05, 0.6, h - 0.1, 0, 40, '#3a2a1e');
       for (let i = 0; i < 9; i++) {
-        const a = pt(x + 0.15 + i * 0.19, y + 0.8, 4), hue = (i * 47) % 360;
+        const a = along ? pt(x + 0.15 + i * 0.19, y + 0.8, 4) : pt(x + 0.8, y + 0.15 + i * 0.19, 4), hue = (i * 47) % 360;
         ctx.fillStyle = `hsl(${hue},55%,45%)`; ctx.fillRect(a.sx - 2, a.sy - 30, 4, 26);
       }
       return;
+    }
     case 'sofa':
-      box(ctx, x, y + 0.1, w, 0.8, 0, 14, '#3a1631');
-      box(ctx, x, y + 0.1, w, 0.25, 14, 16, '#4a1d3f');
+      if (w >= h) { box(ctx, x, y + 0.1, w, 0.8, 0, 14, '#3a1631'); box(ctx, x, y + 0.1, w, 0.25, 14, 16, '#4a1d3f'); }
+      else { box(ctx, x + 0.1, y, 0.8, h, 0, 14, '#3a1631'); box(ctx, x + 0.1, y, 0.25, h, 14, 16, '#4a1d3f'); }
+      return;
+    case 'bar':
+      box(ctx, x, y + 0.1, w, 0.8, 0, 30, '#5a3b2a', { top: '#7c5235' });
+      for (let i = 0; i < w * 3; i++) { const p = pt(x + 0.2 + i * 0.33, y + 0.4, 30); ctx.fillStyle = `hsla(${(i * 70) % 360},70%,60%,.85)`; ctx.fillRect(p.sx - 1.5, p.sy - 10, 3, 10); }
+      return;
+    case 'stage':
+      box(ctx, x, y, w, h, 0, 8, '#2a2238', { top: '#332a47' });
       return;
     case 'disco': {
       const c = pt(x + 0.5, y + 0.5, WALL_H + 10), top = pt(x + 0.5, y + 0.5, WALL_H + 50);

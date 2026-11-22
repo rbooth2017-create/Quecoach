@@ -26,6 +26,8 @@ export const ROOM_SIZE = {
   studio: { w: 9, h: 8 },
   loft: { w: 12, h: 9 },
   house: { w: 13, h: 10 },
+  penthouse: { w: 14, h: 11 },
+  mansion: { w: 16, h: 12 },
 };
 export const roomSize = (home) => ROOM_SIZE[home] || ROOM_SIZE.parents;
 
@@ -52,6 +54,9 @@ export const KINDS = {
   neon: { w: 2, h: 1, tall: 30, wall: true },
   led: { w: 1, h: 1, tall: 0, wall: true, strip: true },
   heads: { w: 1, h: 1, tall: 0, hang: true },
+  // at venues
+  bar: { w: 3, h: 1, tall: 30 },
+  stage: { w: 4, h: 2, tall: 8, deco: true },
 };
 
 /** Which decor item becomes which thing in the room. */
@@ -96,7 +101,37 @@ export function layout(life) {
     const spot = floorSpots.find(([x, y]) => fits({ x, y, w: k.w, h: k.h }, items, w, h));
     if (spot) add(id, kind, spot[0], spot[1]);
   }
-  return items;
+  return applyMoves(items, life.layout?.[life.home], w, h);
+}
+
+/** Things you can pick up and move in build mode: anything on the floor except the door. */
+export const movable = (it) => blocksFloor(it) && it.kind !== 'door';
+
+/** A thing turned a quarter (its footprint swaps round). */
+export const turned = (it, turn) => (turn % 2 ? { ...it, w: KINDS[it.kind].h, h: KINDS[it.kind].w, turn: turn % 4 } : { ...it, w: KINDS[it.kind].w, h: KINDS[it.kind].h, turn: turn % 4 });
+
+/**
+ * Put things where you moved them in build mode (moves: { id: { x, y, turn } }). A move that no longer fits (a
+ * smaller home, new furniture in the way) is skipped and the thing stays where it would go anyway.
+ */
+export function applyMoves(items, moves, w, h) {
+  if (!moves) return items;
+  let out = items;
+  for (const [id, m] of Object.entries(moves)) {
+    const it = out.find((i) => i.id === id); if (!it || !movable(it)) continue;
+    const moved = { ...turned(it, m.turn || 0), x: m.x, y: m.y };
+    const rest = out.filter((i) => i !== it);
+    if (fits(moved, rest.filter(blocksFloor), w, h) && canReachAll([...rest, moved], { w, h })) out = [...rest, moved];
+  }
+  return out;
+}
+
+/** From inside the door, can you still walk to everything you can use? (So build mode can't wall you in.) */
+export function canReachAll(items, room) {
+  const block = blocked(items), door = items.find((i) => i.kind === 'door');
+  const start = door ? standSpot(door, room, block, { x: 1, y: door.y }) : { x: 0, y: 0 };
+  if (!start) return false;
+  return items.filter((i) => i.use).every((it) => { const s = standSpot(it, room, block, start); return s && findPath(start, s, room, block); });
 }
 
 /** Does a floor thing fit at its spot: inside the room and not on top of another floor thing? */
@@ -106,7 +141,7 @@ export function fits(it, items, w, h) {
 }
 
 /** Things that stand on the floor (not on a wall, not hanging from the ceiling). */
-export const blocksFloor = (it) => !it.wall && !KINDS[it.kind].hang;
+export const blocksFloor = (it) => !it.wall && !KINDS[it.kind]?.hang && !KINDS[it.kind]?.deco && !it.deco;
 
 /** The tiles you can't walk on: a Set of "x,y". */
 export function blocked(items) {
@@ -120,6 +155,7 @@ export function blocked(items) {
 
 /** Where you stand to use a thing: the free tile in front of it nearest to `from`. */
 export function standSpot(it, room, block, from = { x: room.w - 1, y: room.h - 1 }) {
+  if (it.stand) return block.has(`${it.stand.x},${it.stand.y}`) ? null : { ...it.stand }; // a building: outside its door
   const spots = [];
   if (it.wall === 'right') spots.push({ x: 0, y: it.y });
   else if (it.wall === 'left') spots.push({ x: it.x, y: 0 });
@@ -134,6 +170,7 @@ export function standSpot(it, room, block, from = { x: room.w - 1, y: room.h - 1
 
 /** Is a tile next to a thing (so you can use it from there)? */
 export function nextTo(p, it) {
+  if (it.stand) return p.x === it.stand.x && p.y === it.stand.y;
   if (it.wall === 'right') return p.x === 0 && p.y === it.y;
   if (it.wall === 'left') return p.y === 0 && p.x === it.x;
   const dx = Math.max(it.x - p.x, 0, p.x - (it.x + it.w - 1)), dy = Math.max(it.y - p.y, 0, p.y - (it.y + it.h - 1));

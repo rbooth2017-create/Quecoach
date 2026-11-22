@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   newLife, effects, gearVibe, startGig, gigMix, gigVibe, gigDone, payout, finishGig, leaveGig, advanceTo, buy, equip, moveHome,
-  starsOf, VENUE_GIGS, START_CASH, weekOf, tierIn,
+  starsOf, VENUE_GIGS, START_CASH, weekOf, tierIn, buyHome, buyCar, travelCost, ownsHome, TRAVEL,
 } from '../js/packs/djlife/economy.js';
+import { CARS } from '../js/packs/djlife/cars.js';
 import { makeBoard, boardFor, blockers, rng } from '../js/packs/djlife/gigs.js';
 import { loadLife } from '../js/packs/djlife/save.js';
 import { GEAR, SLOTS, STARTER_KIT } from '../js/packs/djlife/gear.js';
@@ -39,7 +40,9 @@ test('gear: unique ids, a free starter piece in every slot but decor, prices go 
     }
   }
   for (const g of GEAR) assert.ok((g.lift || 0) <= 0.15 && (g.focus || 0) <= 0.15, `${g.id} bonus stays small`);
-  for (let i = 1; i < HOMES.length; i++) assert.ok(HOMES[i].rent > HOMES[i - 1].rent);
+  for (let i = 1; i < HOMES.length; i++) assert.ok(HOMES[i].price > HOMES[i - 1].price, 'prices go up');
+  const rentable = HOMES.filter((h) => h.rent != null);
+  for (let i = 1; i < rentable.length; i++) assert.ok(rentable[i].rent > rentable[i - 1].rent, 'rents go up');
 });
 
 // ---------- a new life ----------
@@ -162,6 +165,54 @@ test('gear helps the crowd a little: faster up, slower down; home gear only coun
   assert.equal(gearVibe(0.99, 1.2, { lift: 0.5, focus: 0 }), 1);
 });
 
+test('buying a home: costs the price, you move in, and there\'s no rent there ever again', () => {
+  let l = { ...newLife(), cash: 2000, home: 'flat' };
+  assert.ok(!buyHome(l, 'studio').ok, 'not enough');
+  const b = buyHome(l, 'flat');
+  assert.ok(b.ok); l = b.life;
+  assert.equal(l.cash, 500); assert.ok(ownsHome(l, 'flat'));
+  const { life } = advanceTo(l, 7);
+  assert.equal(life.cash, 500, 'no rent on a home you own');
+  assert.ok(!buyHome(life, 'flat').ok, 'not twice');
+});
+
+test('homes you own: move between them for free; buy-only homes can\'t be rented', () => {
+  let l = { ...newLife(), cash: 30000, homesOwned: ['loft'] };
+  const m = moveHome(l, 'loft');
+  assert.ok(m.ok); assert.equal(m.life.cash, 30000);
+  assert.ok(!moveHome(l, 'penthouse').ok);
+  assert.match(moveHome(l, 'penthouse').why, /only for sale/);
+  l = buyHome(l, 'penthouse').life;
+  assert.equal(l.home, 'penthouse'); assert.equal(l.cash, 5000);
+  assert.ok(moveHome(l, 'parents').ok, 'home to your parents\' is always free');
+});
+
+test('no moving house in the middle of a gig', () => {
+  const l = { ...newLife(), cash: 9999, gig: startGig(offer()) };
+  assert.ok(!moveHome(l, 'flat').ok); assert.ok(!buyHome(l, 'flat').ok);
+});
+
+test('travel: the bus costs money, a car cuts it, and a flash car adds reputation', () => {
+  const l = newLife();
+  assert.equal(travelCost(l, 'bedroom'), 0);
+  assert.equal(travelCost(l, 'main'), TRAVEL.main);
+  const g = play(offer({ venue: 'warehouse', fee: 180, mixes: 4 }), [90, 90, 90, 90]);
+  const bus = payout(g, l);
+  assert.equal(bus.costs, TRAVEL.warehouse);
+  let rich = { ...l, cash: 20000 };
+  rich = buyCar(rich, 'car-scooter').life;
+  assert.equal(travelCost(rich, 'warehouse'), Math.round(TRAVEL.warehouse * 0.5));
+  rich = buyCar(rich, 'car-sports').life;
+  const sport = payout(g, rich);
+  assert.equal(sport.costs, 0);
+  assert.equal(sport.rep, bus.rep + 3);
+  assert.equal(rich.cash, 20000 - 250 - 9000);
+  const back = buyCar(rich, 'car-scooter');
+  assert.ok(back.ok); assert.equal(back.life.cash, rich.cash, 'switching to a car you own is free');
+  assert.ok(!buyCar(l, 'car-van').ok);
+  for (let i = 1; i < CARS.length; i++) assert.ok(CARS[i].price > CARS[i - 1].price && CARS[i].travel <= CARS[i - 1].travel);
+});
+
 // ---------- the board ----------
 test('the board: same week, same offers; venues only up to your career', () => {
   const l = newLife();
@@ -212,6 +263,8 @@ test('loading a save: fills gaps, drops junk, keeps what\'s valid', () => {
   assert.ok(l.owned.includes('hp-basic') && !l.owned.includes('gold-mic'));
   assert.equal(l.equipped.headphones, 'hp-basic'); assert.equal(l.equipped.controller, 'ctl-toy');
   assert.deepEqual(l.decor, []); assert.equal(l.gig, null);
+  const odd = loadLife({ home: 'mansion', homesOwned: ['parents', 'castle'], car: 'car-van', carsOwned: [] });
+  assert.equal(odd.home, 'parents', 'a buy-only home you don\'t own'); assert.deepEqual(odd.homesOwned, []); assert.equal(odd.car, null);
 });
 
 test('stars match the Play view', () => {

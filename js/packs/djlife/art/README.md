@@ -30,5 +30,25 @@ the front corner of the thing points down at you.
 | `shelf` | Record shelf | 2 × 1 | 96 px |
 | `sofa` | Sofa | 2 × 1 | 96 px |
 | `poster` | Gig poster (hangs on the wall) | | about 32 × 40 px |
+| `person` | Someone in the crowd at a venue (drawn facing right) | one tile | about 34 px wide, 58 px tall |
+
+### In town
+
+| Name | What it is | Floor space | Picture width |
+|---|---|---|---|
+| `building-home` | Your home from the street | 5 × 6 | 352 px |
+| `building-estate` | Keys & Co, the estate agent | 3 × 4 | 224 px |
+| `building-gear` | Deck Dept, the DJ gear shop | 4 × 5 | 288 px |
+| `building-clothes` | Thread, the clothes shop | 3 × 4 | 224 px |
+| `building-decor` | Home & Glow | 3 × 4 | 224 px |
+| `building-cars` | Wheels, the car showroom | 4 × 5 | 288 px |
+| `building-party` | Sam's house | 5 × 6 | 352 px |
+| `building-basement` | The Basement | 5 × 6 | 352 px |
+| `building-warehouse` | Warehouse | 8 × 9 | 544 px |
+| `building-main` | The Dome | 9 × 10 | 608 px |
+| `tree`, `lamp` | Trees and street lamps | 1 × 1 | 64 px |
+| `car-scooter`, `car-hatch`, `car-van`, `car-sports` | Your car on the drive (parked along the street) | 2 × 1 | 96 px |
+
+A building picture replaces the whole building, including its sign, so draw the name on it.
 
 Tip: start with `dj.png`. It's the one you'll see the most.

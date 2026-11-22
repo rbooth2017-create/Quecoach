@@ -3,6 +3,7 @@
 
 import { gearById, GEAR, STARTER_KIT } from './gear.js';
 import { homeById } from './homes.js';
+import { carById } from './cars.js';
 
 /** Stars for one mix score (the same as the Play view: 90 → 3, 75 → 2, 55 → 1). */
 export const starsOf = (score) => (score >= 90 ? 3 : score >= 75 ? 2 : score >= 55 ? 1 : 0);
@@ -24,6 +25,11 @@ export const VENUE_GIGS = {
   warehouse: { label: 'Club night', mixes: 5, fee: 180, rep: 50, ctl: 2, hp: 1, people: 400, tip: 0.08, weight: 6 },
   main: { label: 'Main room headline', mixes: 6, fee: 600, rep: 80, ctl: 2, hp: 3, people: 2000, tip: 0.04, weight: 8 },
 };
+/** Getting to a gig and back with your kit, without a car (bus, or a taxi for the bigger nights). */
+export const TRAVEL = { bedroom: 0, party: 4, basement: 8, warehouse: 15, main: 30 };
+/** What getting to this venue costs you, after your car. */
+export const travelCost = (life, venue) => Math.round((TRAVEL[venue] || 0) * (carById(life.car)?.travel ?? 1));
+
 /** A party you throw at your own place. Guests pay at the door; you buy the snacks. */
 export const HOSTED = { mixes: 3, door: 3, supplies: 15, weight: 3 };
 
@@ -57,6 +63,7 @@ export function newLife() {
   return {
     v: 1, cash: START_CASH, day: 0, rep: 0, fans: 0, home: 'parents',
     owned: [...STARTER_KIT], equipped, decor: [],
+    homesOwned: [], car: null, carsOwned: [], layout: {},
     board: null, gig: null, lastGigWeek: -1, history: [], week: { earned: 0, spent: 0, gigs: 0 }, intro: false,
   };
 }
@@ -69,6 +76,7 @@ export function effects(life, where = 'gig') {
     if (g.where === 'home' && where !== 'home') continue;
     out.lift += g.lift || 0; out.focus += g.focus || 0; out.rep += g.rep || 0;
   }
+  if (where !== 'home') out.rep += carById(life.car)?.rep || 0;
   return out;
 }
 
@@ -122,6 +130,7 @@ export function payout(gig, life) {
     fee = Math.round(o.fee * (0.5 + 0.5 * perf));
     tips = Math.round(v.people * vibe * v.tip * (0.75 + 0.5 * fit));
     weight = v.weight;
+    costs = travelCost(life, o.venue);
   }
   const bonus = goalMet ? Math.round((o.fee || tips) * GOAL_BONUS) : 0;
   let rep = Math.round((avgStars - 1.5) * weight);
@@ -163,7 +172,7 @@ export function advanceTo(life, day) {
   const weeks = [];
   while (weekOf(day) > weekOf(l.day)) {
     const w = weekOf(l.day), h = homeById(l.home);
-    const rent = h.rent;
+    const rent = (l.homesOwned || []).includes(h.id) ? 0 : h.rent || 0;
     const paid = l.cash >= rent;
     const fans = Math.round(h.fans * (0.5 + l.rep / 100));
     const repFade = l.lastGigWeek < w && l.rep > 0 ? Math.min(2, l.rep) : 0;
@@ -201,12 +210,39 @@ export function equip(life, id) {
   return { ...life, decor: [...life.decor, id] };
 }
 
-/** Move house: pay the deposit (and keep paying rent every Sunday). Returns { life, ok, why }. */
+/** Do you own this home? (Your parents' is always free.) */
+export const ownsHome = (life, id) => id === 'parents' || (life.homesOwned || []).includes(id);
+
+/** Move house to rent it: pay the deposit (and rent every Sunday). A home you own: move in for free. Returns { life, ok, why }. */
 export function moveHome(life, id) {
   const h = homeById(id);
   if (h.id === life.home) return { life, ok: false, why: 'You already live here.' };
+  if (life.gig) return { life, ok: false, why: 'Finish tonight\'s gig first.' };
+  if (ownsHome(life, h.id)) return { life: { ...life, home: h.id, decor: life.decor.slice(0, h.decor) }, ok: true, why: '' };
+  if (h.rent == null) return { life, ok: false, why: `${h.name} is only for sale.` };
   if (life.cash < h.deposit) return { life, ok: false, why: `The deposit is ${money(h.deposit)}. You need ${money(h.deposit - life.cash)} more.` };
   const next = { ...life, home: h.id, cash: life.cash - h.deposit, decor: life.decor.slice(0, h.decor), week: { ...life.week, spent: life.week.spent + h.deposit } };
+  return { life: next, ok: true, why: '' };
+}
+
+/** Buy a home outright and move in: no more rent there, ever. Returns { life, ok, why }. */
+export function buyHome(life, id) {
+  const h = homeById(id);
+  if (ownsHome(life, h.id)) return { life, ok: false, why: 'It\'s already yours.' };
+  if (life.gig) return { life, ok: false, why: 'Finish tonight\'s gig first.' };
+  if (life.cash < h.price) return { life, ok: false, why: `It costs ${money(h.price)}. You need ${money(h.price - life.cash)} more.` };
+  const next = { ...life, cash: life.cash - h.price, homesOwned: [...(life.homesOwned || []), h.id], home: h.id,
+    decor: life.decor.slice(0, h.decor), week: { ...life.week, spent: life.week.spent + h.price } };
+  return { life: next, ok: true, why: '' };
+}
+
+/** Buy a car (you drive it straight away), or switch to one you already own. Returns { life, ok, why }. */
+export function buyCar(life, id) {
+  const c = carById(id);
+  if (!c) return { life, ok: false, why: 'That isn\'t in the showroom.' };
+  if ((life.carsOwned || []).includes(id)) return { life: { ...life, car: id }, ok: true, why: '' };
+  if (life.cash < c.price) return { life, ok: false, why: `You need ${money(c.price - life.cash)} more.` };
+  const next = { ...life, cash: life.cash - c.price, carsOwned: [...(life.carsOwned || []), id], car: id, week: { ...life.week, spent: life.week.spent + c.price } };
   return { life: next, ok: true, why: '' };
 }
 

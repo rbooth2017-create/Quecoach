@@ -149,3 +149,10 @@ button.dl-gigs:hover { background: color-mix(in srgb, var(--pv-b) 34%, transpare
 .dl-whelp kbd { min-width: 20px; height: 20px; font-size: 11px; background: var(--pv-line-2); color: var(--pv-ink); }
 .dl-roombtn { align-self: flex-start; height: 36px !important; font-size: 13px !important; gap: 8px; }
 @media (max-width: 700px) { .dl-wl { padding-left: 0; } .dl-wl b { font-size: 16px; } .dl-wr .pv-chip:not(.dl-cash) { display: none; } .dl-whelp { white-space: normal; text-align: center; width: 90%; } }
+
+/* ---------- town, homes for sale, cars, build mode ---------- */
+.dl-btns { display: flex; flex-direction: column; gap: 6px; align-items: stretch; flex: none; }
+.dl-swatch { width: 36px; height: 22px; border-radius: 8px 12px 6px 6px; background: var(--c); flex: none; box-shadow: inset 0 -5px 0 rgba(0,0,0,.25), 0 0 14px color-mix(in srgb, var(--c) 40%, transparent); }
+.dl-world .pv-chip.on { background: color-mix(in srgb, var(--pv-ok) 25%, transparent); border-color: var(--pv-ok); }
+.dl-world .pv-chip[hidden] { display: none; }
+.dl-card > .dl-acts .dl-roombtn { align-self: auto; }
