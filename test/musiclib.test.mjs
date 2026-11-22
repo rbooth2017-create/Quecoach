@@ -114,7 +114,14 @@ test('beat hints and the alignment timer', () => {
   assert.equal(beatHint({ ...s, bpmDiff: -0.2 }).text, 'B is 0.20 BPM slower: speed it up a touch');
   // speed advice comes before the right deck is even playing
   assert.equal(beatHint({ ...s, right: { loaded: true, playing: false }, bpmDiff: 0.3 }).tone, 'close');
-  assert.equal(beatHint({ ...s, right: { loaded: true, playing: false }, bpmDiff: 0.02 }).text, 'Speeds match. Now start deck B');
+  assert.equal(beatHint({ ...s, right: { loaded: true, playing: false }, bpmDiff: 0.02 }).text, 'Speeds match. Now start deck B on the 1');
+  // when A is the one coming in, the hint talks about A, and the directions flip
+  assert.equal(beatHint({ ...s, inc: 'left', bpmDiff: 1.5 }).text, 'A is 1.50 BPM slower: speed it up');
+  assert.equal(beatHint({ ...s, inc: 'left' }).text, 'A is 40 ms early: nudge it back');
+  assert.equal(beatHint({ ...s, inc: 'left', left: { loaded: true, playing: false }, bpmDiff: 0 }).text, 'Speeds match. Now start deck A on the 1');
+  // the Play view counts "lined up" as its lock ring does
+  assert.equal(beatHint({ ...s, offsetMs: 20 }).tone, 'close');
+  assert.equal(beatHint({ ...s, offsetMs: 20 }, { alignMs: 25 }).tone, 'ok');
   assert.equal(updateAligned(1, s, 0.1), 0);
   assert.ok(Math.abs(updateAligned(1, { ...s, offsetMs: 5 }, 0.1) - 1.1) < 1e-9);
 });

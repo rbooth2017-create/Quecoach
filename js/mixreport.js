@@ -29,6 +29,17 @@ export const CLEAN_SCORE = 75;
 export function newRecorder() { return { mix: null, solo: null, outFor: 0 }; }
 
 /**
+ * Where the new song sits against the old one's phrase when the room first hears it: bars between the two phrase
+ * counters (0 = the same bar of the phrase). A song started on the 1 with its volume down and faded up stays on
+ * the phrase however long the fade takes. Without the new song's grid, it's how far into a phrase the old one was.
+ */
+function phraseGap(fromPos, toPos) {
+  if (fromPos == null) return null;
+  if (toPos == null) return fromPos;
+  return (((fromPos - toPos) % 16) + 16) % 16;
+}
+
+/**
  * Feed one frame. sample:
  * { left: { gain, playing, low (bass EQ dB), phrasePos (bars into the 16-bar phrase, 0..16) },
  *   right: {…}, offsetMs (beat offset when both play, or null), barOffset (beats between the "1"s), keyScore, bassTool, bpm,
@@ -42,7 +53,7 @@ export function feed(rec, s, dt) {
   if (!rec.mix) {
     if (!both) { if (on('left') && !on('right')) rec.solo = 'left'; else if (on('right') && !on('left')) rec.solo = 'right'; return null; }
     const from = rec.solo || 'left', to = from === 'left' ? 'right' : 'left';
-    rec.mix = { from, to, t: 0, startPhrase: s[from].phrasePos, aligned: 0, wreck: 0, timed: 0, ones: 0, offSum: 0, clash: 0, dip: 0, keyScore: s.keyScore ?? 0.5, energyStep: Number.isFinite(s.energyStep) ? s.energyStep : null, bassTool: !!s.bassTool, bpm: s.bpm || 120, bassCutAtStart: s[to].low <= -12 };
+    rec.mix = { from, to, t: 0, startPhrase: phraseGap(s[from].phrasePos, s[to].phrasePos), aligned: 0, wreck: 0, timed: 0, ones: 0, offSum: 0, clash: 0, dip: 0, keyScore: s.keyScore ?? 0.5, energyStep: Number.isFinite(s.energyStep) ? s.energyStep : null, bassTool: !!s.bassTool, bpm: s.bpm || 120, bassCutAtStart: s[to].low <= -12 };
     rec.outFor = 0;
     return null;
   }

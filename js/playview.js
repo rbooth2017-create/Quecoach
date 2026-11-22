@@ -3,7 +3,7 @@
 // from the bedroom to the main room (js/career.js); the venue map and the booking screen live here too.
 // learn.js owns the decks and the mix guide and hands this view a small api.
 import { icon } from './icons.js';
-import { lockAmount, speedAdvice, nudgeAdvice, vibeStep, vibeWords, starsFor } from './playscore.js';
+import { lockAmount, speedAdvice, nudgeAdvice, vibeStep, vibeWords, starsFor, LOCK } from './playscore.js';
 import { VENUES, venueById, venueIndex, gigProgress, GIG } from './career.js';
 import { emit, filter } from './packs.js';
 
@@ -279,9 +279,12 @@ export function createPlayView({ root, layer, api }) {
     if (L.playing !== R.playing) { const f = L.playing ? 'left' : 'right'; return { floor: f, inc: OTHER[f] }; }
     if (L.buffer && !R.buffer) return { floor: 'left', inc: 'right' };
     if (R.buffer && !L.buffer) return { floor: 'right', inc: 'left' };
-    const f = api.xfader() <= 0.5 ? 'left' : 'right';
+    // both playing, no mix on: the room is on the louder one (with the Vol sliders the handover sits in the middle)
+    const gl = api.gain('left'), gr = api.gain('right');
+    const f = Math.abs(gl - gr) > 0.05 ? (gl > gr ? 'left' : 'right') : api.xfader() <= 0.5 ? 'left' : 'right';
     return { floor: f, inc: OTHER[f] };
   }
+  const NARROW = matchMedia('(max-width: 980px)'); // the same width learn.html hides Play next at
   const pickSide = () => (!D[st.roles.floor].buffer ? st.roles.floor : st.roles.inc);
   const songName = (side) => D[side].track?.title || 'the other song';
 
@@ -308,6 +311,8 @@ export function createPlayView({ root, layer, api }) {
     const cue = n?.cue;
     switch (id) {
       case 'pick': case 'load':
+        // narrow windows hide the Play next list (see learn.html), so the big button opens the picker instead
+        if (NARROW.matches) return { kicker, title: 'Pick the next song', detail: 'Tap "Choose a song". The best matches for this one are at the top.', cta: 'pick', step: 'pick' };
         return { kicker, title: 'Pick the next song', detail: 'Choose one from Play next on the right. The green ones mix best with this one.', step: 'pick' };
       case 'match': {
         if (!byEar()) {
@@ -324,8 +329,8 @@ export function createPlayView({ root, layer, api }) {
         const c = api.controls();
         if (!c.volume) return { kicker, title: `Slide the handover to ${floor}`, detail: `All the way, so nobody hears ${inc} yet.`, step: 'levels', hl: ['hand'], tips: { hand: `${arrow(r.floor)} All the way` } };
         const volDown = api.vol(r.inc) <= 0.1, bassDown = !c.low || api.bass(r.inc) <= -20;
-        if (!handMid && !volDown) return { kicker, title: 'Put the handover in the middle', detail: 'The Vol sliders do the mixing from now on.', step: 'levels', hl: ['hand'], tips: { hand: 'Slide to the middle' } };
         if (!volDown) return { kicker, title: `Cut ${own(inc)} volume`, detail: 'Pull its Vol slider, next to its disc, all the way down. Then nobody hears it yet.', step: 'levels', hl: [`vol:${r.inc}`], tips: { [`vol:${r.inc}`]: '⬇ Cut the volume' } };
+        if (!handMid) return { kicker, title: 'Put the handover in the middle', detail: 'You mix with the two Vol sliders now, so the handover just stays in the middle.', step: 'levels', hl: ['hand'], tips: { hand: 'Slide to the middle' } };
         if (!bassDown) return { kicker, title: `Cut ${own(inc)} bass`, detail: `Slide the Bass slider all the way to ${floor}. Two basslines at once sound muddy.`, step: 'levels', hl: ['bass'], tips: { bass: `${arrow(r.floor)} All the way` } };
         return { kicker, title: 'All set', detail: `${inc} is hidden and ready.`, step: 'levels' };
       }
@@ -343,7 +348,7 @@ export function createPlayView({ root, layer, api }) {
         return { kicker, title: `Slide the handover to ${inc}, slowly`, detail: note(g) || 'A little every bar. Halfway when the countdown ends.', count: deadline(g), step: 'fade', slide: true, hl: ['hand'], tips: { hand: `${arrow(r.inc)} Slowly` } };
       }
       case 'swap':
-        return { kicker, title: `Swap the bass on bar ${cur.bar}`, detail: note(g) || `When the count hits the 1, slide the Bass slider all the way to ${inc}, in one go.`, count: deadline(g), step: 'swap', slide: true, hl: ['bass'], tips: { bass: `${arrow(r.inc)} All the way, in one go` } };
+        return { kicker, title: 'Swap the bass', detail: note(g) || `When the countdown runs out, slide the Bass slider all the way to ${inc}, in one go.`, count: deadline(g), step: 'swap', slide: true, hl: ['bass'], tips: { bass: `${arrow(r.inc)} All the way, in one go` } };
       case 'out': {
         if (volMode) return { kicker, title: `Turn ${floor} down, slowly`, detail: note(g) || 'Pull its Vol slider down a little every bar, until you can\'t hear it.', count: deadline(g), step: 'out', slide: true, hl: [`vol:${r.floor}`], tips: { [`vol:${r.floor}`]: '⬇ Down, slowly' } };
         return { kicker, title: `Slide the handover to ${inc}`, detail: note(g) || `Keep going until it's all ${inc}. Then ${floor} can stop.`, count: deadline(g), step: 'out', slide: true, hl: ['hand'], tips: { hand: `${arrow(r.inc)} All the way` } };
@@ -384,7 +389,7 @@ export function createPlayView({ root, layer, api }) {
       de.classList.toggle('empty', !loaded); de.classList.toggle('playing', loaded && d.playing);
       de.classList.toggle('floor', side === r.floor);
       const audible = loaded && d.playing && api.gain(side) > 0.12;
-      const role = !loaded ? 'Empty' : audible ? 'On the floor' : d.playing ? 'In your headphones' : side === r.inc && F.playing ? 'Up next' : 'Ready';
+      const role = !loaded ? 'Empty' : audible ? 'On the floor' : d.playing ? 'In your headphones' : api.playedOut?.(side) ? 'Played' : side === r.inc && F.playing ? 'Up next' : 'Ready';
       setText($('[data-role]', de), role);
       setText($('[data-name]', de), loaded ? d.track.title : side === pickSide() ? 'Choose a song' : '');
       const left = loaded ? Math.max(0, d.buffer.duration - pos) : 0;
@@ -424,21 +429,23 @@ export function createPlayView({ root, layer, api }) {
     }
 
     // the lock
+    const s = say(n, r, bm);
+    const over = !!bm && s.cta === 'pick'; // mix done: the old song is on its way out, nothing left to match
     const lk = el('lock');
     const ear = byEar();
     lk.style.setProperty('--sep', String(ear && bm ? 0.45 : 1 - lock));
     lk.dataset.state = !bm ? 'off' : ear ? 'ear' : lock >= 0.99 ? 'locked' : lock >= 0.8 ? 'close' : 'apart';
     lk.classList.toggle('flip', r.floor === 'right');
     setText(el('locktext'), !bm ? '' : ear ? 'BY EAR' : lock >= 0.99 ? (bm.both ? 'LOCKED' : '100%') : `${Math.round(lock * 100)}%`);
-    lk.hidden = !!(ear && bm); // the meters below do the job when there are no speed tips
+    lk.hidden = !!(ear && bm) || over; // the meters below do the job when there are no speed tips
     // speed and beat meters: the facts, no advice. Speed when there are no tips; the kick meter whenever both play.
     const gs = el('gauges');
-    gs.hidden = !bm || (!ear && !bm.both);
+    gs.hidden = !bm || over || (!ear && !bm.both);
     if (!gs.hidden) {
       const incName = songName(r.inc);
       const sp = el('gspeed'); sp.hidden = !ear;
       if (ear) {
-        const diff = bm.bpmDiff, same = Math.abs(diff) < 0.05;
+        const diff = bm.bpmDiff, same = Math.abs(diff) <= LOCK.bpm;
         sp.style.setProperty('--x', String(Math.max(-1, Math.min(1, diff / 4))));
         sp.dataset.tone = same ? 'ok' : Math.abs(diff) < 0.5 ? 'close' : 'warn';
         setText(el('gspeedtext'), same ? 'Same speed ✓' : `${Math.abs(diff).toFixed(1)} BPM ${diff > 0 ? 'faster' : 'slower'}`);
@@ -449,8 +456,8 @@ export function createPlayView({ root, layer, api }) {
         const ms = offsetMs, a = Math.abs(ms);
         const px = Math.max(-1, Math.min(1, bm.phase * 2));
         bt.style.setProperty('--x', (Math.sign(px) * Math.sqrt(Math.abs(px))).toFixed(3)); // stretched near the line, so a few ms still shows
-        bt.dataset.tone = a < 15 ? 'ok' : a < 45 ? 'close' : 'warn';
-        setText(el('gbeattext'), a < 15 ? 'Together ✓' : `${Math.round(a / 5) * 5} ms ${ms > 0 ? 'ahead' : 'behind'}`);
+        bt.dataset.tone = a <= LOCK.ms ? 'ok' : a < 45 ? 'close' : 'warn'; // the same "together" as the lock ring and the score
+        setText(el('gbeattext'), a <= LOCK.ms ? 'Together ✓' : `${Math.round(a / 5) * 5} ms ${ms > 0 ? 'ahead' : 'behind'}`);
         // each kick flashes: the line for the song playing, the dot for the one coming in
         bt.style.setProperty('--pf', ((1 - F.beatPhase()) ** 3).toFixed(3));
         bt.style.setProperty('--pt', ((1 - T.beatPhase()) ** 3).toFixed(3));
@@ -458,14 +465,13 @@ export function createPlayView({ root, layer, api }) {
     }
 
     // what to say, and which controls matter now
-    const s = say(n, r, bm);
     const key = `${s.kicker}|${s.title}|${s.detail}`;
     if (key !== st.sayKey) { st.sayKey = key; setText(el('kicker'), s.kicker); setText(el('title'), s.title); setText(el('detail'), s.detail); }
     const cnt = el('count'); cnt.hidden = !s.count;
     if (s.count) { setText(el('big'), s.count.big); setText(el('unit'), s.count.unit); cnt.dataset.phase = s.count.phase; }
     $('[data-pv="ready"]', root).hidden = s.cta !== 'ready' || !T.buffer;
     $('[data-pv="pick"]', root).hidden = s.cta !== 'pick';
-    const sp = el('speed'); sp.hidden = !T.buffer || !F.buffer;
+    const sp = el('speed'); sp.hidden = !T.buffer || !F.buffer || over;
     if (!sp.hidden) {
       const adv = !ear && bm && Math.abs(bm.bpmDiff) > 0.1 ? speedAdvice(bm.bpmDiff) : null;
       const nud = !ear && !adv && bm?.both ? nudgeAdvice(offsetMs) : null;
@@ -515,7 +521,7 @@ export function createPlayView({ root, layer, api }) {
 
     // the phrase counter, and lining the phrases up
     const prow = el('phrase');
-    prow.hidden = !(D.left.buffer && D.right.buffer);
+    prow.hidden = !(D.left.playing && D.right.playing) || over;
     if (!prow.hidden) {
       for (const side of SIDES) {
         const c = api.count(side), pc = $(`[data-pv-pc="${side}"]`, prow);

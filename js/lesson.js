@@ -58,18 +58,22 @@ export function currentStep(s, skipped = new Set()) {
   return STEPS.length;
 }
 
-/** A plain-words hint for the beat lane. */
-export function beatHint(s) {
+/**
+ * A plain-words hint for the beat lane, about the deck coming in: s.inc ('left' = A, else B). bpmDiff and offsetMs
+ * are always B against A, so they flip when A is the one coming in. alignMs: how close counts as lined up.
+ */
+export function beatHint(s, { alignMs = ALIGN_MS } = {}) {
   if (!s.left.loaded || !s.right.loaded) return null;
+  const a = s.inc === 'left', name = a ? 'A' : 'B', flip = a ? -1 : 1;
   if (s.bpmDiff != null && Math.abs(s.bpmDiff) > TEMPO_OK) {
     const d = Math.abs(s.bpmDiff);
-    return { tone: d < 0.5 ? 'close' : 'warn', text: `B is ${d.toFixed(2)} BPM ${s.bpmDiff > 0 ? 'faster: slow it down' : 'slower: speed it up'}${d < 0.5 ? ' a touch' : ''}` };
+    return { tone: d < 0.5 ? 'close' : 'warn', text: `${name} is ${d.toFixed(2)} BPM ${s.bpmDiff * flip > 0 ? 'faster: slow it down' : 'slower: speed it up'}${d < 0.5 ? ' a touch' : ''}` };
   }
-  if (!s.left.playing || !s.right.playing) return s.bpmDiff != null ? { tone: 'ok', text: 'Speeds match. Now start deck B' } : null;
+  if (!s.left.playing || !s.right.playing) return s.bpmDiff != null ? { tone: 'ok', text: `Speeds match. Now start deck ${name} on the 1` } : null;
   if (s.offsetMs == null) return null;
   const off = Math.abs(s.offsetMs);
-  if (off <= ALIGN_MS) return { tone: 'ok', text: s.barOffset ? 'Beats lined up · the big "1" dots are apart' : 'Beats lined up' };
-  return { tone: off < 60 ? 'close' : 'warn', text: `B is ${off.toFixed(0)} ms ${s.offsetMs > 0 ? 'early: nudge it back' : 'late: nudge it forward'}` };
+  if (off <= alignMs) return { tone: 'ok', text: s.barOffset ? 'Beats lined up · the big "1" dots are apart' : 'Beats lined up' };
+  return { tone: off < 60 ? 'close' : 'warn', text: `${name} is ${off.toFixed(0)} ms ${s.offsetMs * flip > 0 ? 'early: nudge it back' : 'late: nudge it forward'}` };
 }
 
 /** Track how long the beats have stayed lined up. */

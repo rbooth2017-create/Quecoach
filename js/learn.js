@@ -45,7 +45,7 @@ import { energyFeatures, estimateEnergy, energyOf } from './energy.js';
 import { newRecorder, feed as feedMix, addToHistory, progressStats, sparkSVG, CLEAN_SCORE, skillStats, levelAdvice } from './mixreport.js';
 import { createPlayView } from './playview.js';
 import * as packs from './packs.js';
-import { starsFor } from './playscore.js';
+import { starsFor, LOCK } from './playscore.js';
 import { loadCareer, recordMix as careerMix, takeBooking as careerTake, venueById, levelCap, dayNumber, dailyChallenge, CHALLENGE_BONUS } from './career.js';
 
 const THEMES = [
@@ -95,6 +95,7 @@ const state = {
   lessonId: store.get('lesson', 'decks'), completed: store.get('completed', []), paneOpen: store.get('paneOpen', true),
   ticked: new Set(), did: new Set(), skippedAny: false, lessonDone: false, played: { left: 0, right: 0 }, blend: null,
   mixDir: null, mixStartBar: null, mixDone: new Set(), // the next-mix guide: direction, where B really started, steps ticked
+  mixedOut: null, // { side, id }: the song the last mix left, so it isn't planned as the next one
   // side panel tab (null: the level decides), set list + AI
   paneTab: store.get('paneTab', null), refineText: '', setFrom: store.get('setFrom', 'all'),
   setEvent: store.get('setEvent', 'club'), setAudience: store.get('setAudience', 'mixed'),
@@ -445,6 +446,13 @@ function drawMeters() {
   }
 }
 
+/** The deck coming in: the other side from the one playing, or mid-blend the way the mix is going (as currentPlan sees it). */
+function incomingSide() {
+  const L = decks.left.playing, R = decks.right.playing;
+  const from = L !== R ? (L ? 'left' : 'right') : L && state.mixDir ? state.mixDir : state.xfader <= 0.5 ? 'left' : 'right';
+  return from === 'left' ? 'right' : 'left';
+}
+
 /** The coach's view of the mix, used by the lesson and the hint. */
 function mixState(dt) {
   const L = decks.left, R = decks.right;
@@ -457,6 +465,7 @@ function mixState(dt) {
     offsetMs: bm && bm.both ? (bm.phase * 60000) / L.bpm : null,
     barOffset: bm && bm.both ? bm.barOffsetBeats : null,
     xfader: state.xfader, alignedFor: 0,
+    inc: incomingSide(),
     mixCount: state.lessonMixes?.length || 0, bestMix: Math.max(0, ...(state.lessonMixes || [])),
     keyScore: L.track && R.track ? keyRelation(L.track.camelot, R.track.camelot).score : 0,
     bReady: (() => { const p = currentPlan(); if (!p || p.to !== 'right' || R.playing) return false; return Math.abs(R.position() - p.bStart) < 0.3 && bm && Math.abs(bm.bpmDiff) <= TEMPO_OK; })(),
@@ -1321,6 +1330,7 @@ function onMixReport(r, clip = null) {
   if (clip) clip.stop().then((blob) => { if (blob && state.report && state.report.at === at) { state.report.clip = URL.createObjectURL(blob); state.report.clipMime = clip.mime; renderReport(); } });
   const at = Date.now();
   state.mixHistory = addToHistory(state.mixHistory, r); store.set('mixHistory', state.mixHistory);
+  state.mixedOut = { side: r.from, id: decks[r.from].track?.id }; // that song's done: the next mix needs a new one
   (state.lessonMixes ||= []).push(r.score);
   // clean mixes count towards the next level (the first-mix lesson counts its own)
   if (r.score >= CLEAN_SCORE && state.lessonId !== 'first-mix') { state.cleanMixes += 1; store.set('cleanMixes', state.cleanMixes); }
@@ -1981,6 +1991,7 @@ const playView = createPlayView({
       return Math.max(FINE, Math.floor((Math.abs(need) / 2) / FINE) * FINE);
     },
     hints: () => ({ speed: !!state.f.offsetHint }),
+    playedOut: (side) => playedOut(side),
     /** Headphone cue ("Listen"): hear a deck yourself before the room does. */
     listening: (side) => !!decks[side].listening,
     setListen: (side, on) => setListen(side, on),
@@ -2138,11 +2149,15 @@ function frame(now) {
   const s = mixState(dt);
   trackHistory(dt);
   recordMix(s, dt);
-  const hint = beatHint(s);
+  // the Play view's ring says LOCKED within LOCK.ms; once its mix is done (or the other deck holds the song it just
+  // left) there's nothing to line up until the next song is in
+  const gd = state.guideNow?.guide, mixOver = playOn() && (!!(gd && !gd.current && !gd.next) || playedOut(s.inc));
+  const hint = mixOver ? null : beatHint(s, playOn() ? { alignMs: LOCK.ms } : undefined);
   const hel = $('#hint');
   const checking = performance.now() < state.checkUntil;
   if (hint && ((state.f.offsetHint && !(lesson().hidesLane && !state.lessonDone)) || checking)) { hel.className = `hint ${hint.tone}`; hel.textContent = hint.text; }
   else if (hint) { hel.className = state.f.beatLane && !state.f.offsetHint ? 'hidden' : 'hint'; hel.textContent = 'Trust your ears'; }
+  else if (mixOver) hel.className = 'hidden';
   else { hel.className = 'hint'; hel.textContent = 'Play both decks to compare beats'; }
   drawLane(hint);
   scheduleClicks();
@@ -2253,6 +2268,11 @@ function moveXfader(x) {
   }
 }
 // ---------- next mix: when to start the next track ----------
+/** The song on this deck was just mixed out and is stopped: it's not the next song, a new one goes there. */
+function playedOut(side) {
+  const m = state.mixedOut, d = decks[side];
+  return !!m && m.side === side && !d.playing && !!d.track && d.track.id === m.id;
+}
 /** The planned mix from the deck the room hears into the other one (null until both have tracks). */
 function currentPlan() {
   // Mid-blend the crossfader crosses the middle, so keep the direction while both decks play.
@@ -2261,7 +2281,7 @@ function currentPlan() {
   state.mixDir = from;
   const to = from === 'left' ? 'right' : 'left';
   const F = decks[from], T = decks[to];
-  if (!F.buffer || !T.buffer || !F.track?.grid || !T.track?.grid) return null;
+  if (!F.buffer || !T.buffer || !F.track?.grid || !T.track?.grid || playedOut(to)) return null;
   const key = `${F.track.id}|${T.track.id}|${F.track.grid.firstDownbeat}|${T.track.grid.firstDownbeat}|${F.track.phrases?.length}|${T.track.phrases?.length}|${state.level}`; // a new level asks for different moves
   if (state.planKey !== key) { state.planKey = key; state.mixStartBar = null; state.mixDone = new Set(); state.plan = planMix({ ...F.track, duration: F.buffer.duration }, { ...T.track, duration: T.buffer.duration }); }
   return state.plan ? { ...state.plan, from, to } : null;
@@ -2310,7 +2330,8 @@ function mixGuideNow(plan, bar) {
 function waitingForNext() {
   if (!state.f.mixGuide || !guideDetailed()) return null;
   const L = decks.left, R = decks.right;
-  const from = L.playing && !R.buffer ? 'left' : R.playing && !L.buffer ? 'right' : null;
+  const free = (side) => !decks[side].buffer || playedOut(side); // empty, or holding the song just mixed out
+  const from = L.playing && free('right') ? 'left' : R.playing && free('left') ? 'right' : null;
   return from && { from, to: from === 'left' ? 'right' : 'left' };
 }
 

@@ -132,3 +132,28 @@ test('track choice scores the key and the energy step together', async () => {
   assert.ok(drop.tips.some((t) => /energy dropped/.test(t.text)));
   assert.equal(part(scoreMix({ ...base })).score, 100, 'no energy data: the key alone');
 });
+
+test('a song started on the phrase with its volume down and faded in slowly still counts as on the phrase', () => {
+  // A plays alone; B starts silently on bar 0 of its phrase with A on bar 0 of its own, then fades up over 8 bars
+  const rec = newRecorder(); let report = null;
+  const bpm = 120, bar = 2; // seconds per bar
+  let t = 0;
+  const frame = (gainB, playingB) => {
+    const posA = ((((t - 10) / bar) % 16) + 16) % 16, posB = playingB ? ((t - 10) / bar) % 16 : 0; // t = 10: bar 1 of A's phrase
+    const s = {
+      left: { gain: playingB && gainB > 0.9 ? Math.max(0, 1 - (t - 30) / 6) : 1, playing: true, low: gainB > 0.6 ? -30 : 0, phrasePos: posA },
+      right: { gain: gainB, playing: playingB, low: gainB > 0.6 ? 0 : -30, phrasePos: posB },
+      offsetMs: playingB ? 3 : null, barOffset: 0, keyScore: 1, bassTool: true, bpm,
+    };
+    t += dt;
+    return feed(rec, s, dt) || null;
+  };
+  while (t < 10) frame(0, false);                                    // A alone, B waiting on its first beat
+  while (t < 26) frame(Math.min(1, (t - 10) / 16), true);           // B starts on A's phrase, fades in over 8 bars
+  while (t < 40) report = frame(1, true) || report;                  // A fades out
+  for (let i = 0; i < 40; i++) report = frame(1, true) || report;
+  assert.ok(report, 'a report comes out');
+  const phrase = report.parts.find((p) => p.id === 'phrase');
+  assert.equal(phrase.score, 100, JSON.stringify(report.parts));
+  assert.ok(!report.tips.some((x) => x.id === 'phrase'));
+});
