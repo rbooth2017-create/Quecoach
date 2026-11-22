@@ -189,3 +189,11 @@ export function scaleLoop(loop, factor, grid) {
   const beats = Math.max(0.125, Math.min(64, loop.beats * factor));
   return { start: loop.start, end: loop.start + beats * beat, beats };
 }
+
+/** A Camelot key moved by some semitones (each semitone is 7 steps round the wheel): shiftCamelot('8A', 1) → '3A'. */
+export function shiftCamelot(code, semis) {
+  const m = /^(\d{1,2})([AB])$/i.exec(String(code || '').trim());
+  if (!m || !semis) return code || null;
+  const n = ((((+m[1] - 1) + 7 * Math.round(semis)) % 12) + 12) % 12 + 1;
+  return `${n}${m[2].toUpperCase()}`;
+}

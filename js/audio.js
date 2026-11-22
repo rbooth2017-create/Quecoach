@@ -4,13 +4,45 @@ import { barLen, beatLen } from './engine.js';
 import { analyseGrid } from './beatgrid.js';
 import { wrapInLoop, keyLockSemitones, heardPosition } from './deckmath.js';
 
-export const ctx = new (window.AudioContext || window.webkitAudioContext)();
+// Saved preferences (js/prefs.js writes them): the audio buffer has to be chosen before the context exists.
+const PREFS = (() => { try { return JSON.parse(globalThis.localStorage?.getItem('learn.prefs') || '{}') || {}; } catch { return {}; } })();
+const LATENCY = ['interactive', 'balanced', 'playback'].includes(PREFS.latency) ? PREFS.latency : 'interactive';
+export const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: LATENCY });
 // Stereo buses: a mono track is spread to both sides, so neither speaker nor headphone side goes quiet.
 const STEREO = { channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers' };
 const master = new GainNode(ctx, STEREO);
-master.connect(ctx.destination);
-/** The main mix, after the crossfader (the sampler plays in here too). */
+/** The main mix, after the crossfader (the sampler plays in here too). The Master knob is its gain. */
 export const masterBus = master;
+
+// ---------- master out: a safety limiter and the master meter ----------
+// master → limiter → mainOut → speakers, recordings, booth and the headphones' "room" side.
+// The limiter catches peaks above about −1 dBFS, so a hot mix can't clip the speakers or a recording.
+const limiter = new DynamicsCompressorNode(ctx, { threshold: -1, knee: 0, ratio: 20, attack: 0.001, release: 0.08 });
+/** What the room hears, after the limiter. Record and meter this. */
+export const mainOut = new GainNode(ctx, STEREO);
+const preMeter = new AnalyserNode(ctx, { fftSize: 512 });          // before the limiter: is the mix too hot?
+const outSplit = new ChannelSplitterNode(ctx, { numberOfOutputs: 2 });
+const outMeters = [new AnalyserNode(ctx, { fftSize: 512 }), new AnalyserNode(ctx, { fftSize: 512 })];
+master.connect(preMeter);
+mainOut.connect(outSplit); outSplit.connect(outMeters[0], 0); outSplit.connect(outMeters[1], 1);
+let limiterOn = PREFS.limiter !== false;
+function wireLimiter() {
+  try { master.disconnect(limiter); } catch { /* not connected */ }
+  try { master.disconnect(mainOut); } catch { /* not connected */ }
+  try { limiter.disconnect(); } catch { /* not connected */ }
+  if (limiterOn) { master.connect(limiter); limiter.connect(mainOut); } else master.connect(mainOut);
+}
+wireLimiter();
+/** Switch the safety limiter on or off. */
+export function setLimiter(on) { limiterOn = !!on; wireLimiter(); }
+export const limiterState = () => limiterOn;
+const meterBuf = new Float32Array(512);
+const peakOf = (an) => { an.getFloatTimeDomainData(meterBuf); let p = 0; for (let i = 0; i < meterBuf.length; i += 2) { const v = Math.abs(meterBuf[i]); if (v > p) p = v; } return p; };
+/** The master meter: { l, r } peak levels after the limiter (0..1), hot: the mix before the limiter, reduction in dB. */
+export function masterLevels() {
+  return { l: peakOf(outMeters[0]), r: peakOf(outMeters[1]), hot: peakOf(preMeter), reduction: limiterOn ? -limiter.reduction : 0 };
+}
+mainOut.connect(ctx.destination);
 
 // ---------- outputs: speakers and headphones ----------
 // Decks with Listen on feed cueBus. The headphone feed is a blend of the cue and the main mix
@@ -20,7 +52,7 @@ export const masterBus = master;
 //   speakers: no separate headphones: the cue plays quietly through the speakers (the old "Listen")
 export const cueBus = new GainNode(ctx, STEREO);
 const hpCue = new GainNode(ctx, STEREO), hpMaster = new GainNode(ctx, STEREO), hpOut = new GainNode(ctx, STEREO);
-cueBus.connect(hpCue); master.connect(hpMaster); hpCue.connect(hpOut); hpMaster.connect(hpOut);
+cueBus.connect(hpCue); mainOut.connect(hpMaster); hpCue.connect(hpOut); hpMaster.connect(hpOut);
 hpMaster.gain.value = 0;
 const SPEAKER_CUE = 0.5; // Listen through the speakers: quieter than the room
 const speakerCue = ctx.createGain(); speakerCue.gain.value = SPEAKER_CUE; cueBus.connect(speakerCue);
@@ -30,7 +62,7 @@ let hpKeep = null;    // muted <audio> that keeps the headphone stream flowing
 export const outputState = { mode: 'speakers', channels: 2, deviceId: null, error: null };
 
 function unwire() {
-  try { master.disconnect(ctx.destination); } catch { /* not connected */ }
+  try { mainOut.disconnect(ctx.destination); } catch { /* not connected */ }
   try { speakerCue.disconnect(); } catch { /* */ }
   try { hpOut.disconnect(); } catch { /* */ }
   for (const n of wiring) { try { n.disconnect(); } catch { /* */ } }
@@ -48,13 +80,13 @@ export async function routeOutputs(route) {
     dest.channelCount = route.channels; dest.channelCountMode = 'explicit'; dest.channelInterpretation = 'discrete';
     const merger = new ChannelMergerNode(ctx, { numberOfInputs: route.channels });
     const split = (node, [l, r]) => { const sp = new ChannelSplitterNode(ctx, { numberOfOutputs: 2 }); node.connect(sp); sp.connect(merger, 0, l); sp.connect(merger, 1, r); wiring.push(sp); };
-    split(master, route.master); split(hpOut, route.cue);
+    split(mainOut, route.master); split(hpOut, route.cue);
     merger.connect(dest); wiring.push(merger);
     Object.assign(outputState, { mode: 'channels', channels: route.channels, deviceId: null });
     return outputState;
   }
   dest.channelCount = 2; dest.channelCountMode = 'explicit'; dest.channelInterpretation = 'speakers';
-  master.connect(dest);
+  mainOut.connect(dest);
   if (route.mode === 'device' && route.deviceId) {
     const out = ctx.createMediaStreamDestination(); hpOut.connect(out); wiring.push(out);
     try {
@@ -75,7 +107,7 @@ export async function routeOutputs(route) {
       return outputState;
     } catch (err) {
       outputState.error = `Couldn't play to the headphone output: ${err.message}`;
-      unwire(); master.connect(dest);
+      unwire(); mainOut.connect(dest);
     }
   }
   speakerCue.connect(dest);
@@ -87,6 +119,30 @@ export async function routeOutputs(route) {
 export function setHeadphoneMix({ cue, master: m }) { hpCue.gain.value = cue; hpMaster.gain.value = m; }
 /** Headphone volume, 0..1 (the controller's own LEVEL knob also works on its socket). */
 export function setHeadphoneLevel(v) { hpOut.gain.value = Math.max(0, Math.min(1.5, v)); }
+
+// ---------- booth output: the main mix on a second sound output, with its own level ----------
+const boothGain = new GainNode(ctx, STEREO); mainOut.connect(boothGain);
+let booth = { ctx: null, keep: null, out: null, deviceId: null };
+/** Play the main mix on another output (a booth monitor), or stop with deviceId null. Resolves to an error text or null. */
+export async function routeBooth(deviceId, level = 1) {
+  boothGain.gain.value = Math.max(0, Math.min(1.5, level));
+  if (booth.deviceId === deviceId && (deviceId == null || booth.ctx)) return null;
+  if (booth.ctx) { booth.ctx.close().catch(() => {}); }
+  if (booth.keep) { booth.keep.pause(); booth.keep.srcObject = null; }
+  if (booth.out) { try { boothGain.disconnect(booth.out); } catch { /* */ } }
+  booth = { ctx: null, keep: null, out: null, deviceId: null };
+  if (!deviceId) return null;
+  try {
+    const out = ctx.createMediaStreamDestination(); boothGain.connect(out);
+    const bctx = new AudioContext({ sinkId: deviceId, latencyHint: 'interactive' });
+    bctx.createMediaStreamSource(out.stream).connect(bctx.destination);
+    await bctx.resume();
+    const keep = new Audio(); keep.srcObject = out.stream; keep.muted = true; keep.play().catch(() => {});
+    booth = { ctx: bctx, keep, out, deviceId };
+    return null;
+  } catch (err) { return `Couldn't play to the booth output: ${err.message}`; }
+}
+export function setBoothLevel(v) { boothGain.gain.value = Math.max(0, Math.min(1.5, v)); }
 
 /** A short test sound in the speakers or the headphones only, so you can check each is where it should be. */
 export function testTone(where = 'headphones') {
@@ -120,6 +176,9 @@ export class Deck {
     // Key lock: source → input → dry ─────────────→ EQ
     //                          ↘ stretch → wet ↗      (only one of dry/wet is open)
     this.keyLock = false; this.stretch = null; this.lag = 0; this.startedAt = 0; this.startOffset = 0;
+    this.keyShift = 0;                         // semitones up or down on top of key lock (Pro tools)
+    this.reversed = false; this.rbuffer = null; // playing backwards (reverse / censor)
+    this.slipOn = false; this.shadow = null;    // slip: the track carries on silently under a loop or reverse
     this.input = new GainNode(ctx, { channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers' });
     this.dry = ctx.createGain(); this.wet = ctx.createGain(); this.wet.gain.value = 0;
     this.low = ctx.createBiquadFilter(); this.low.type = 'lowshelf'; this.low.frequency.value = 200;
@@ -132,15 +191,20 @@ export class Deck {
   get rate() { return (1 + this.tempoPct / 100) * (1 + this.bend); }
   get bpm() { return this.track?.grid ? this.track.grid.bpm * (1 + this.tempoPct / 100) : null; }
   /** Where the deck is playing from (track seconds). */
-  playhead() { return this.playing ? wrapInLoop(this.offset + Math.max(0, ctx.currentTime - this.anchor) * this.rate, this.loop) : this.offset; }
+  playhead() {
+    if (!this.playing) return this.offset;
+    const run = Math.max(0, ctx.currentTime - this.anchor) * this.rate;
+    return this.reversed ? Math.max(0, this.offset - run) : wrapInLoop(this.offset + run, this.loop);
+  }
   /** Where the listener is: the playhead, minus the key lock's delay. Everything on screen follows this. */
   position() {
-    if (!this.playing || !this.lag) return this.playhead();
+    if (!this.playing || !this.lag || this.reversed) return this.playhead();
     const raw = this.offset + Math.max(0, ctx.currentTime - this.anchor) * this.rate;
     return wrapInLoop(heardPosition({ raw, lag: this.lag, rate: this.rate, since: ctx.currentTime - this.startedAt, startOffset: this.startOffset }), this.loop);
   }
   load(track, buffer, analysis) {
-    this.stop(); this.loop = null; this.track = track; this.buffer = buffer; this.analysis = analysis;
+    this.stop(); this.loop = null; this.reversed = false; this.rbuffer = null; this.shadow = null;
+    this.track = track; this.buffer = buffer; this.analysis = analysis;
     this.peaks = buffer ? computePeaks(buffer) : null;
     this.offset = track.grid?.firstDownbeat || 0;
   }
@@ -150,9 +214,9 @@ export class Deck {
     ctx.resume();
     const at = Math.max(ctx.currentTime, when || 0);
     const src = ctx.createBufferSource();
-    src.buffer = this.buffer; src.playbackRate.value = this.rate; src.connect(this.input);
-    if (this.loop) { src.loop = true; src.loopStart = this.loop.start; src.loopEnd = this.loop.end; }
-    src.start(at, Math.max(0, this.offset));
+    src.buffer = this.reversed ? this.reverseBuffer() : this.buffer; src.playbackRate.value = this.rate; src.connect(this.input);
+    if (this.loop && !this.reversed) { src.loop = true; src.loopStart = this.loop.start; src.loopEnd = this.loop.end; }
+    src.start(at, Math.max(0, this.reversed ? this.buffer.duration - this.offset : this.offset));
     src.onended = () => { if (this.source === src) { this.playing = false; this.source = null; } };
     this.source = src; this.anchor = this.startedAt = at; this.startOffset = this.offset; this.playing = true;
   }
@@ -177,6 +241,8 @@ export class Deck {
   }
   /** Loop between two points (track seconds). Playback carries on from where it is if that's inside. */
   setLoop(loop) {
+    if (this.reversed) this.setReverse(false);
+    this.slipStart();
     this.reanchor();
     this.loop = loop;
     const src = this.source;
@@ -189,27 +255,75 @@ export class Deck {
     this.offset = this.playhead(); this.anchor = ctx.currentTime;
     this.loop = null;
     if (this.source) this.source.loop = false;
+    this.slipEnd();
+  }
+  // ---------- reverse, slip and censor (Pro tools) ----------
+  /** The track backwards, made the first time it's needed. */
+  reverseBuffer() {
+    if (this.rbuffer) return this.rbuffer;
+    const b = this.buffer, r = ctx.createBuffer(b.numberOfChannels, b.length, b.sampleRate);
+    for (let c = 0; c < b.numberOfChannels; c++) { const src = b.getChannelData(c), dst = r.getChannelData(c); for (let i = 0, n = src.length; i < n; i++) dst[i] = src[n - 1 - i]; }
+    return (this.rbuffer = r);
+  }
+  /** Play backwards from where it is, or forwards again. With slip on, forwards picks up where the track would be. */
+  setReverse(on) {
+    on = !!on; if (!this.buffer || on === this.reversed) return;
+    if (on) { this.loop = null; this.slipStart(); }
+    const was = this.playing, p = this.playhead();
+    if (this.source) { const s = this.source; this.source = null; try { s.stop(); } catch { /* already stopped */ } }
+    this.playing = false; this.reversed = on; this.offset = p;
+    if (was) this.play();
+    if (!on) this.slipEnd();
+  }
+  /** Slip mode: loops, reverse and censor play over the track, which carries on silently underneath. */
+  setSlip(on) { this.slipOn = !!on; if (!this.slipOn) this.shadow = null; }
+  slipStart() { if (this.slipOn && this.playing && !this.shadow) this.shadow = { pos: this.playhead(), t: ctx.currentTime }; }
+  /** Back to where the track would have got to. */
+  slipEnd() {
+    const sh = this.shadow; if (!sh) return;
+    this.shadow = null;
+    if (!this.playing) return;
+    const to = sh.pos + (ctx.currentTime - sh.t) * (1 + this.tempoPct / 100);
+    this.seek(Math.min(this.buffer.duration - 0.05, to));
+  }
+  /** Where the track is underneath while slipping (null when not slipping). */
+  slipPosition() { const sh = this.shadow; return sh ? sh.pos + (ctx.currentTime - sh.t) * (1 + this.tempoPct / 100) : null; }
+  /** Censor: hold to play backwards; let go and the track is where it would have been. */
+  censor(down) {
+    if (down) { this.censorSlip = this.slipOn; this.slipOn = true; this.setReverse(true); }
+    else { this.setReverse(false); this.slipOn = !!this.censorSlip; }
   }
   reanchor() { this.offset = this.playhead(); this.anchor = ctx.currentTime; if (this.source) this.source.playbackRate.value = this.rate; }
-  setTempo(pct) { this.reanchor(); this.tempoPct = pct; this.reanchor(); if (this.keyLock && this.stretch) this.stretch.schedule({ semitones: keyLockSemitones(pct) }); }
+  setTempo(pct) { this.reanchor(); this.tempoPct = pct; this.reanchor(); if (this.needsStretch() && this.stretch) this.stretch.schedule({ semitones: this.semitones() }); }
+  /** The pitch change the stretcher adds: undo the tempo's pitch (key lock), plus any key shift. */
+  semitones() { return (this.keyLock ? keyLockSemitones(this.tempoPct) : 0) + this.keyShift; }
+  needsStretch() { return this.keyLock || this.keyShift !== 0; }
+  async ensureStretch() {
+    if (this.stretch) return;
+    const Stretch = await loadStretch();
+    if (this.stretch) return; // a second call got there first
+    const node = await Stretch(ctx);
+    await node.configure({ blockMs: KEYLOCK_BLOCK_MS });
+    this.stretchLatency = await node.latency();
+    if (this.stretch || this.disposed) { node.disconnect(); return; }
+    this.input.connect(node); node.connect(this.wet);
+    this.stretch = node;
+  }
   /** Key lock on: changing the tempo keeps the key. Off: the pitch follows the tempo, like a record. */
   async setKeyLock(on) {
     this.keyLock = !!on;
-    if (this.keyLock && !this.stretch) {
-      const Stretch = await loadStretch();
-      if (this.stretch) return this.applyKeyLock(); // a second call got there first
-      const node = await Stretch(ctx);
-      await node.configure({ blockMs: KEYLOCK_BLOCK_MS });
-      this.stretchLatency = await node.latency();
-      if (this.stretch || this.disposed) { node.disconnect(); return this.applyKeyLock(); }
-      this.input.connect(node); node.connect(this.wet);
-      this.stretch = node;
-    }
+    if (this.needsStretch()) await this.ensureStretch();
+    this.applyKeyLock();
+  }
+  /** Move the key up or down in semitones (−12..12), without changing the speed. */
+  async setKeyShift(n) {
+    this.keyShift = Math.max(-12, Math.min(12, Math.round(n) || 0));
+    if (this.needsStretch()) await this.ensureStretch();
     this.applyKeyLock();
   }
   applyKeyLock() {
-    const on = this.keyLock && !!this.stretch, t = ctx.currentTime;
-    if (on) this.stretch.schedule({ active: true, semitones: keyLockSemitones(this.tempoPct) });
+    const on = this.needsStretch() && !!this.stretch, t = ctx.currentTime;
+    if (on) this.stretch.schedule({ active: true, semitones: this.semitones() });
     // A 20 ms crossfade between the straight and the key-locked sound, so switching doesn't click.
     for (const [g, v] of [[this.dry, on ? 0 : 1], [this.wet, on ? 1 : 0]]) { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(v, t + 0.02); }
     if (!on && this.stretch) this.stretch.schedule({ active: false, output: t + 0.05 }); // stop processing once faded out

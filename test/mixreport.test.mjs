@@ -120,3 +120,15 @@ test('per-skill progress: weakest skill first, with a lesson to practise', async
   assert.equal(levelAdvice(low.slice(0, 4), 'pro'), null);
   assert.equal(levelAdvice(Array.from({ length: 5 }, () => ({ score: 70 })), 'pro'), null);
 });
+
+test('track choice scores the key and the energy step together', async () => {
+  const { energyFit } = await import('../js/mixreport.js');
+  assert.equal(energyFit(1), 100); assert.equal(energyFit(-1), 75); assert.equal(energyFit(5), 35); assert.equal(energyFit(null), null);
+  const base = { t: 30, bpm: 120, timed: 30, aligned: 30, wreck: 0, ones: 30, clash: 0, dip: 0, keyScore: 1, bassTool: true, startPhrase: 0, from: 'left', to: 'right' };
+  const good = scoreMix({ ...base, energyStep: 1 }), drop = scoreMix({ ...base, energyStep: -4 });
+  const part = (r) => r.parts.find((p) => p.id === 'key');
+  assert.equal(part(good).score, 100); assert.ok(part(drop).score < 70);
+  assert.equal(part(good).name, 'Track choice');
+  assert.ok(drop.tips.some((t) => /energy dropped/.test(t.text)));
+  assert.equal(part(scoreMix({ ...base })).score, 100, 'no energy data: the key alone');
+});

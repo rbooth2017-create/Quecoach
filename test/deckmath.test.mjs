@@ -218,3 +218,12 @@ test('a centred dial puts 0 dB at 12 o\'clock and maps back', () => {
   assert.equal(dialT(0.25, 0, 1), 0.25); // no centre: straight line
   assert.equal(dialFromT(0.5, 0, 1.25, 1), 1);
 });
+
+test('key shift moves round the Camelot wheel', async () => {
+  const { shiftCamelot } = await import('../js/deckmath.js');
+  assert.equal(shiftCamelot('8A', 1), '3A');
+  assert.equal(shiftCamelot('8A', -1), '1A');
+  assert.equal(shiftCamelot('12B', 12), '12B');
+  assert.equal(shiftCamelot('8A', 0), '8A');
+  assert.equal(shiftCamelot(null, 2), null);
+});

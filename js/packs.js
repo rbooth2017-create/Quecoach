@@ -11,7 +11,7 @@ let writeOn = () => {};
 export function setSwitchStore(read, write) { readOn = read; writeOn = write; }
 
 /**
- * pack: { id, name, blurb, on: { event: fn }, filters: { name: fn(value, ctx) }, start(ctx), stop(), reset() }
+ * pack: { id, name, blurb, on: { event: fn }, filters: { name: fn(value, ctx) }, start(ctx), stop(), reset(), resume() }
  * Registering twice with the same id replaces the old one.
  */
 export function registerPack(pack) {
@@ -23,6 +23,12 @@ export function registerPack(pack) {
 
 export const listPacks = () => packs.map((p) => ({ id: p.id, name: p.name, blurb: p.blurb || '', on: isOn(p.id) }));
 export const isOn = (id) => !!readOn()[id];
+
+/** A pack's "where you got to" for the start screen ({ title, line } or null), read whether it's on or off. */
+export function resumeInfo(id) {
+  const p = packs.find((x) => x.id === id); if (!p?.resume) return null;
+  try { return p.resume() || null; } catch (err) { console.error(`[pack ${id}] resume`, err); return null; }
+}
 const active = () => packs.filter((p) => isOn(p.id));
 
 /** Switch a pack on or off. Its own save is left alone either way. */

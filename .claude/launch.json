@@ -52,6 +52,19 @@
       ],
       "port": 8653,
       "autoPort": false
+    },
+    {
+      "name": "web-5",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8654",
+        "--bind",
+        "127.0.0.1"
+      ],
+      "port": 8654,
+      "autoPort": false
     }
   ]
 }

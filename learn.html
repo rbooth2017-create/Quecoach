@@ -451,6 +451,13 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .choice span { color: var(--ink-2); font-size: 12px; }
 .choice .tag { justify-self: start; font-size: 11px; padding: 1px 8px; border-radius: 99px; background: var(--ok-soft); color: var(--ok); font-weight: 650; }
 .choice[disabled] { opacity: .5; transform: none; }
+/* the start screen: carry on with DJ Life, or just the decks */
+.launch .choices { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.launch .choice { padding: 20px; }
+.launch .choice.last { border-color: var(--left); box-shadow: 0 0 0 1px var(--left); }
+.launch .choice .tag.last-tag { background: color-mix(in srgb, var(--left) 16%, transparent); color: var(--left); }
+.launch .choice .where { color: var(--ink); font-weight: 600; }
+.launch .note { color: var(--ink-3); font-size: 12px; margin: 18px 0 0; }
 
 /* lessons pane */
 .tutor { width: 330px; border-left: 1px solid var(--line); background: var(--card); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
@@ -823,7 +830,7 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
   --pv-shadow: #05030c;
   color-scheme: dark;
 }
-body.play-mode .workspace, body.play-mode #lessonsBtn, body.play-mode #viewBtn { display: none !important; }
+body.play-mode .workspace, body.play-mode #lessonsBtn, body.play-mode #viewBtn, body.play-mode #progress, body.play-mode #coach { display: none !important; }
 .playview { grid-row: 2 / 4; min-height: 0; overflow: hidden; background: radial-gradient(ellipse at 50% 120%, #2a1450 0%, var(--pv-bg) 62%); color: var(--pv-ink); }
 .pv { position: relative; height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); --bounce: 0; --vibe: .5; }
 .pv.has-next { grid-template-columns: minmax(0, 1fr) 280px; }
@@ -1035,6 +1042,12 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
 .pv-libslot { flex: 1; min-height: 0; display: flex; }
 .pv-libslot .library { flex: 1; min-height: 0; position: static; margin: 0; height: auto; order: 0 !important; color: var(--ink); color-scheme: normal; box-shadow: none; }
 .pv-picker-head b { font-size: 17px; }
+/* the game's picker: just songs. One click picks; no crates, deck letters or library tools */
+.pv-libslot :is(#crates, #openManager, #source, #libFold, .lib-size) { display: none; }
+.pv-libslot .library.with-crates .lib-body { grid-template-columns: minmax(0, 1fr); } /* crates hidden: the list takes the full width */
+.pv-libslot .trow[data-id] { cursor: pointer; }
+.pv-libslot .trow .acts { opacity: 1; }
+.pv-libslot .trow .acts .pick { padding: 3px 14px; font-size: 12px; border-radius: 999px; color: var(--card); background: var(--left); border-color: transparent; }
 .pv-x { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 50%; border: 1px solid var(--pv-line-2); background: transparent; color: var(--pv-ink) !important; }
 .pv-x:hover { background: var(--pv-card-2); }
 .pv-result { position: absolute; right: 20px; bottom: 20px; z-index: 4; width: 300px; display: grid; gap: 6px; padding: 16px; border-radius: 18px; background: var(--pv-card); border: 1px solid var(--pv-line-2); box-shadow: 0 20px 60px rgba(0,0,0,.5); animation: pv-pop .3s ease-out; }
@@ -1139,6 +1152,199 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
 .cl-quiet { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--pv-line); color: var(--pv-ink-2); font-size: 13px; }
 .cl-acts { display: flex; gap: 12px; flex-wrap: wrap; }
 @media (max-width: 900px) { .cl-road { grid-template-columns: 1fr; } .cl-road .cl-venue { margin-bottom: 0 !important; } .cl-booked { grid-template-columns: 1fr; } .cl-poster { max-width: 280px; } }
+
+/* ---------- Pro mode: just the decks ---------- */
+body.mode-pro #venueBtn, body.mode-pro #viewBtn, body.mode-pro #progress, body.mode-pro #coach { display: none !important; }
+#levelBtn .ic { display: inline-block; }
+/* the pro layout: no zoom, everything at full size, compact decks, the library a normal panel below them */
+body.pro-layout .stage > :not(.library) { zoom: 1 !important; }
+body.pro-layout .stage { gap: 8px; padding: 8px; }
+body.pro-layout .stage:not(.lib-collapsed) > .library { height: auto; margin-top: 0; flex: 1 1 260px; min-height: 230px; box-shadow: none; transition: none; }
+body.pro-layout .stage.fit-full > .decks-area:not(.folded) { flex: none; }
+body.pro-layout #lane { height: 150px; }
+body.pro-layout .decks-row { grid-template-columns: minmax(0, 1fr) 256px minmax(0, 1fr); gap: 8px; }
+body.pro-layout .deck { grid-template-rows: auto; gap: 8px; padding: 10px 12px; }
+body.pro-layout .deck-head .title { font-size: 15px; }
+body.pro-layout .deck-head .artist { font-size: 13px; }
+body.pro-layout .bpm b { font-size: 26px; }
+body.pro-layout .bpm span, body.pro-layout .counter, body.pro-layout .deckfoot, body.pro-layout .pitch .val { font-size: 12px; }
+body.pro-layout .wave { height: 46px; }
+body.pro-layout .deckbody { grid-template-columns: 64px minmax(0, 1fr) 64px; min-height: 0; }
+body.pro-layout .pitch .vfader { height: 104px; }
+body.pro-layout .pitch .keylock { font-size: 12px; padding: 3px 9px; }
+body.pro-layout .cue-btn { width: 52px; height: 30px; font-size: 12px; }
+body.pro-layout .tlabel { font-size: 11px; }
+body.pro-layout .pmodes button { font-size: 12px; padding: 5px 4px; }
+body.pro-layout .ppad { height: 36px; font-size: 12px; }
+body.pro-layout .dial-label, body.pro-layout .mixer .label, body.pro-layout .bfx-row, body.pro-layout .bfx-row b { font-size: 12px; }
+body.pro-layout .deckfoot .ghost.small { font-size: 12px; padding: 4px 9px; }
+.nudges { display: flex; justify-content: center; gap: 8px; align-self: center; }
+.nudges button { min-width: 84px; height: 40px; justify-content: center; font-weight: 650; border-radius: 10px; touch-action: none; }
+.nudges button.on { border-color: var(--c); color: var(--c); background: var(--soft); }
+.pitch input[type=range].vfader.up { direction: rtl; }
+/* Pro tools: tempo range, key shift, slip, reverse, censor */
+.protools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.protools > button, .protools .kshift button { height: 30px; padding: 0 10px; font-size: 12px; font-weight: 700; border-radius: 8px; justify-content: center; touch-action: none; }
+.protools > button.on { background: var(--c); border-color: var(--c); color: #fff; }
+.protools [data-a="range"] { font-variant-numeric: tabular-nums; min-width: 58px; }
+.protools .kshift { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px; border: 1px solid var(--line-2); border-radius: 9px; }
+.protools .kshift button { border: none; height: 28px; padding: 0 9px; font-size: 15px; }
+.protools .kshift b { min-width: 26px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+.keybadge.shifted { box-shadow: 0 0 0 2px var(--card), 0 0 0 3px var(--close); }
+.keybadge.dot { display: inline-block; width: 12px; height: 12px; padding: 0; vertical-align: middle; }
+/* master meter and limit light */
+.mmeter { display: grid; justify-items: center; gap: 4px; margin-top: 4px; }
+.mmeter canvas { width: 14px; height: 56px; display: block; }
+.mmeter .limit { font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 1px 5px; border-radius: 4px; color: var(--ink-3); border: 1px solid var(--line-2); transition: background .1s, color .1s; }
+.mmeter .limit.on { background: var(--warn); border-color: var(--warn); color: #fff; }
+/* the lane's zoom */
+.lane-zoom { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; }
+.lane-zoom .icon-btn { width: 26px; height: 26px; }
+.lane-zoom span { min-width: 30px; text-align: center; font-variant-numeric: tabular-nums; }
+.panel-head .hint { margin-left: auto; }
+/* levels you haven't earned yet */
+.level.locked { opacity: .6; }
+.level.locked small { color: var(--ink-3); }
+/* ---------- Settings ---------- */
+#settingsDlg { width: min(620px, 94vw); max-height: 88vh; }
+.settings-list { max-height: calc(88vh - 120px); overflow: auto; padding-right: 4px; gap: 18px; }
+.set-sec { display: grid; gap: 8px; }
+.set-sec h3 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.set-sec p { margin: 0; }
+.set-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 16px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.set-row:last-child { border-bottom: none; }
+.set-row span b { display: block; font-size: 13px; }
+.set-row span small { display: block; color: var(--ink-2); font-size: 12px; }
+.set-inline { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sel { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card-2); max-width: 260px; }
+.pin::placeholder { letter-spacing: normal; }
+.pin { width: 120px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card-2); letter-spacing: .3em; user-select: text; -webkit-user-select: text; }
+.switch { position: relative; display: inline-block; width: 40px; height: 24px; }
+.switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.switch i { position: absolute; inset: 0; border-radius: 99px; background: var(--line-2); transition: background .15s; pointer-events: none; }
+.switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .15s; }
+.switch input:checked + i { background: var(--ok); }
+.switch input:checked + i::after { transform: translateX(16px); }
+.switch input:focus-visible + i { box-shadow: var(--focus); }
+.mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mode-card { display: grid; justify-items: start; gap: 4px; padding: 14px; border-radius: 12px; text-align: left; }
+.mode-card .ic { color: var(--ink-3); }
+.mode-card small { color: var(--ink-2); font-size: 12px; }
+.mode-card.on { border-color: var(--left); box-shadow: inset 0 0 0 1px var(--left); }
+.mode-card.on .ic { color: var(--left); }
+.settings-more { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.settings-more button { justify-content: flex-start; gap: 12px; padding: 9px 12px; border-radius: 10px; text-align: left; }
+.settings-more small { display: block; color: var(--ink-2); font-size: 12px; }
+@media (max-width: 560px) { .mode-cards, .settings-more { grid-template-columns: 1fr; } .set-row { grid-template-columns: 1fr; } }
+/* ---------- keyboard shortcuts ---------- */
+.keys-dlg { width: min(640px, 94vw); max-height: 88vh; }
+.key-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 22px; max-height: calc(88vh - 170px); overflow: auto; margin-bottom: 14px; }
+.keys-group h3 { margin: 6px 0 2px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.key-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.key-row.wait { background: var(--close-soft); border-radius: 6px; padding: 4px 6px; }
+.key-row .key-cap { display: inline-flex; gap: 3px; }
+.key-row .ghost.small { padding: 2px 8px; font-size: 12px; }
+.keys-dlg .dlg-foot.two form { margin: 0; }
+@media (max-width: 600px) { .key-list { grid-template-columns: 1fr; } }
+/* ---------- History: tonight's tracklist ---------- */
+.hist-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.hist-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.hist-list li { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.hist-t { font-variant-numeric: tabular-nums; color: var(--ink-3); font-size: 12px; }
+.hist-n b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-n small { color: var(--ink-2); font-size: 12px; }
+.hist-acts { display: flex; gap: 4px; flex-wrap: wrap; }
+.hist-old { border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.hist-old summary { cursor: default; font-weight: 600; font-size: 12.5px; }
+.hist-old[open] summary { margin-bottom: 6px; }
+/* ---------- Young DJ mode: nothing that leaves the app or costs money ---------- */
+body.young [data-row="links"], body.young [data-buy], body.young [data-w-a="find"], body.young #aiBtn, body.young [data-a="ask-ai"], body.young [data-a="ai-notes"], body.young [data-a="ai-settings"], body.young .sp-ai, body.young #linkMenu { display: none !important; }
+/* ---------- Play view additions ---------- */
+.pv-daily.done { border-color: color-mix(in srgb, var(--pv-ok) 55%, transparent); color: var(--pv-ok); }
+.pv-daily .pv-star { width: 14px; height: 14px; }
+.pv-lock[data-state="ear"] .pv-ring { opacity: .55; }
+.pv-lock[data-state="ear"] b { font-size: 12px; color: var(--pv-ink-2); }
+.cl-brief { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 2px; font-size: 13px; color: var(--pv-gold); }
+.cl-brief.done { color: var(--pv-ok); }
+/* D3: the bedroom window sits behind the deck: keep it clear of the volume fader */
+.sc-window { left: 1.5%; width: 120px; height: 160px; top: 110px; opacity: .55; }
+/* D5: the vibe and gig text stay readable over the crowd */
+.pv-vibe, .pv-gig { position: relative; z-index: 2; }
+.pv-gig span, .pv-vibe span { text-shadow: 0 1px 8px rgba(8, 5, 18, .95), 0 0 2px rgba(8, 5, 18, .9); }
+/* D7: the toast sits above the library's header bar */
+body:not(.play-mode) #toast { bottom: 64px; }
+/* D8: the start screen scales up on big screens */
+.welcome-card { width: min(clamp(760px, 56vw, 980px), 92vw); }
+.welcome h1 { font-size: clamp(24px, 1.6vw, 30px); }
+.welcome p.lead { font-size: clamp(14px, .95vw, 16px); }
+.choice b { font-size: clamp(14px, .95vw, 16px); }
+.choice span { font-size: clamp(12px, .8vw, 14px); }
+.launch .choices { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+/* D9: one visual language: the full decks pick up the Play view's glow in the dark themes */
+:root[data-theme="neon"] .deck, :root[data-theme="night"] .deck, :root[data-theme="studio"] .deck { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--c) 18%, transparent); }
+:root[data-theme="neon"] .play, :root[data-theme="night"] .play, :root[data-theme="studio"] .play { box-shadow: 0 0 22px color-mix(in srgb, var(--c) 55%, transparent); }
+:root[data-theme="neon"] .deck-letter { box-shadow: 0 0 14px color-mix(in srgb, var(--c) 60%, transparent); }
+:root[data-theme="neon"] .ppad.on { box-shadow: 0 0 14px color-mix(in srgb, var(--pc) 55%, transparent); }
+:root[data-theme="neon"] .panel { border-color: color-mix(in srgb, var(--line) 70%, #6d5bd0 30%); }
+:root[data-theme="neon"] .bpm b, :root[data-theme="neon"] .deck-head .title { letter-spacing: -.01em; }
+:root[data-theme="neon"] .titlebar { background: linear-gradient(90deg, color-mix(in srgb, var(--card) 92%, var(--left)), var(--card) 40%, var(--card) 60%, color-mix(in srgb, var(--card) 92%, var(--right))); }
+
+/* the pro mixer: channel A | master, meter, quantise and Beat FX | channel B, so it's as short as the decks */
+body.pro-layout .mixer { grid-template-columns: minmax(0, 1fr) 104px minmax(0, 1fr); grid-template-rows: auto auto auto 1fr auto; grid-template-areas: "a c b" "a q b" "a fx b" "a fx b" "x x x"; gap: 6px 8px; padding: 8px; align-content: start; }
+body.pro-layout .mixer > .label, body.pro-layout .mixer > .pcount { display: none; }
+body.pro-layout .mixer .strips { display: contents; }
+body.pro-layout .mixer .strip[data-side="left"] { grid-area: a; }
+body.pro-layout .mixer .strip[data-side="right"] { grid-area: b; }
+body.pro-layout .mixer .strip { gap: 6px; padding: 6px 4px; }
+body.pro-layout .mixer .fader-row { flex: none; }
+body.pro-layout .mixer .fader-row .vfader, body.pro-layout .mixer .meter { height: 104px; }
+body.pro-layout .mixer .outs { grid-area: c; flex-direction: column; align-items: center; gap: 6px; }
+body.pro-layout .mixer .q-btn { grid-area: q; justify-self: stretch; }
+body.pro-layout .mixer .bfx { grid-area: fx; border-top: none; padding: 4px 0 0; gap: 4px; }
+body.pro-layout .mixer .bfx .label { font-size: 11px; }
+body.pro-layout .mixer .bfx-row button { padding: 1px 6px; }
+body.pro-layout .mixer .xf { grid-area: x; }
+body.pro-layout .deck { align-content: start; }
+body.pro-layout .decks-head { display: none; }
+body.pro-layout #lane { height: 128px; }
+body.pro-layout .stage:not(.lib-collapsed) > .library { min-height: 190px; }
+
+/* D2: the side panel never grows past its width: its column can shrink, tabs scroll, buttons and selects wrap */
+.tutor { grid-template-columns: minmax(0, 1fr); }
+.tutor-head { min-width: 0; }
+.tutor-head .pane-tabs { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tutor-head .pane-tabs::-webkit-scrollbar { display: none; }
+.tutor-head .pane-tabs button { white-space: nowrap; }
+.sp-form .sp-main { flex-wrap: wrap; }
+.sp-form select { width: 100%; min-width: 0; }
+.tutor-body { min-width: 0; }
+
+/* compact pro deck: the tempo fader with its buttons beside it, a slimmer transport */
+body.pro-layout .pitch { grid-template-columns: auto auto; grid-template-rows: auto auto auto auto; column-gap: 6px; row-gap: 4px; align-items: center; justify-items: center; }
+body.pro-layout .pitch .vfader { grid-column: 1; grid-row: 1 / 5; }
+body.pro-layout .pitch > :not(.vfader) { grid-column: 2; }
+body.pro-layout .deckbody { grid-template-columns: 64px minmax(0, 1fr) 96px; }
+body.pro-layout .transport { gap: 6px; }
+body.pro-layout .transport .play { width: 46px; height: 46px; }
+body.pro-layout .transport .tlabel { display: none; }
+body.pro-layout .deckfoot { gap: 4px 8px; }
+body.pro-layout .mixer .dial { width: 34px; height: 34px; }
+body.pro-layout .mixer .dial-wrap { gap: 0; }
+body.pro-layout .mixer .strip > .dial-label { display: none; }
+
+/* the pro library is part of the page, never a sheet over the decks: on a short screen the stage scrolls a little instead */
+body.pro-layout .stage > .library { position: relative; }
+@media (max-height: 940px) { body.pro-layout #lane { height: 104px; } body.pro-layout .stage:not(.lib-collapsed) > .library { min-height: 170px; } }
+
+body.pro-layout .mixer .cut { line-height: 22px; font-size: 11px; padding: 0 9px; }
+body.pro-layout .mixer .dial-label, body.pro-layout .mmeter .limit, body.pro-layout .q-btn { font-size: 11px; }
+body.pro-layout .q-btn { padding: 4px 10px; }
+
+/* four side panel tabs fit: tighter tabs, the count lives in the set list's own heading */
+.tutor-head { gap: 4px; padding-left: 10px; }
+.tutor-head .pane-tabs button { padding: 3px 8px; }
+.tutor-head .pane-tabs button .ic { display: none; }
+.tutor-head > .small.muted { display: none; }
 </style>
 </head>
 <body>
@@ -1169,7 +1375,8 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
 <div class="workspace">
 <main class="stage">
   <section class="panel lane-panel" id="lanePanel" data-panel="lane" data-group="stage">
-    <div class="panel-head fold-head"><button type="button" class="fold-btn" data-fold="lane"><span class="fold-ic"></span><span class="panel-title" id="laneTitle">Beat lane</span></button><span class="hint" id="hint">Play both decks to compare beats</span></div>
+    <div class="panel-head fold-head"><button type="button" class="fold-btn" data-fold="lane"><span class="fold-ic"></span><span class="panel-title" id="laneTitle">Beat lane</span></button><span class="hint" id="hint">Play both decks to compare beats</span>
+      <span class="lane-zoom" role="group" aria-label="Zoom the waveforms"><button type="button" class="icon-btn" data-zoom="-1" title="Zoom out: see more of the track" aria-label="Zoom out"></button><span id="laneZoomVal" class="small muted">1×</span><button type="button" class="icon-btn" data-zoom="1" title="Zoom in: see the beats closer" aria-label="Zoom in"></button></span></div>
     <div class="lane-wrap"><canvas id="lane"></canvas>
       <div class="lane-cover hidden" id="laneCover"><div><b>Beatmatch by ear</b><div class="muted small">Listen for the kick drums. When you think they're together, check.</div></div><button class="primary" id="checkBtn">Check my beats <kbd>C</kbd></button></div>
     </div>
@@ -1226,13 +1433,23 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
   </div>
 </div>
 
+<div class="welcome launch hidden" id="launchView" role="dialog" aria-modal="true" aria-labelledby="launchTitle">
+  <div class="welcome-card">
+    <div class="logo"></div>
+    <h1 id="launchTitle">Welcome back</h1>
+    <p class="lead" id="launchLead">What are you up to today?</p>
+    <div class="choices" id="launchChoices"></div>
+    <p class="note" id="launchNote"></p>
+  </div>
+</div>
+
 <div id="toast" role="status" aria-live="polite"></div>
 <section class="mix-report hidden" id="mixReport" role="status" aria-live="polite" aria-label="Mix report"></section>
 <input type="file" id="dirInput" webkitdirectory multiple class="hidden">
 
 <dialog id="levels">
   <h2>Your level</h2>
-  <p>Cue Coach grows with you. Higher levels take the help away and add more of the mixer. Switch back any time.</p>
+  <p id="levelsNote">Cue Coach grows with you. Higher levels take the help away and add more of the mixer.</p>
   <div class="levels" id="levelList"></div>
   <form method="dialog" class="dlg-foot"><button>Done</button></form>
 </dialog>
@@ -1318,21 +1535,11 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
   <div class="dlg-foot two"><button type="button" class="ghost" id="plCancel">Cancel</button><button type="button" class="primary" id="plCreate" disabled>Create crate</button></div>
 </dialog>
 
-<dialog id="help">
+<dialog id="help" class="keys-dlg">
   <h2>Keyboard shortcuts</h2>
-  <p>Everything also works with the mouse. A DJ controller is optional.</p>
-  <table>
-    <tr><td><kbd>Q</kbd></td><td>Play / pause deck A</td></tr>
-    <tr><td><kbd>P</kbd></td><td>Play / pause deck B</td></tr>
-    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Deck B speed (Shift for bigger steps)</td></tr>
-    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Nudge deck B, like spinning its wheel</td></tr>
-    <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Crossfader</td></tr>
-    <tr><td><kbd>C</kbd></td><td>Check your beats (Confident level)</td></tr>
-    <tr><td><kbd>/</kbd></td><td>Search your music</td></tr>
-    <tr><td><kbd>L</kbd></td><td>Show or hide lessons and your set</td></tr>
-    <tr><td><kbd>R</kbd></td><td>Start or stop recording</td></tr>
-  </table>
-  <form method="dialog" class="dlg-foot"><button class="primary">Got it</button></form>
+  <p>Both decks work from the keyboard, so a controller is optional. Press <b>Change</b> and then the key you want; <kbd>Backspace</kbd> clears it.</p>
+  <div class="key-list" id="keyList"></div>
+  <div class="dlg-foot two"><button type="button" class="ghost" id="keysReset">Reset to the defaults</button><form method="dialog"><button class="primary">Done</button></form></div>
 </dialog>
 
 <div id="linkMenu" class="menu link-menu hidden" role="menu"></div>

@@ -10,12 +10,13 @@ const MIN_SECONDS = 3;         // shorter overlaps are a flick of the crossfader
 /** The parts of the score, with the lesson that practises each one. */
 export const PARTS = {
   beats: { name: 'Beats in time', lesson: 'nudge', weight: 0.35 },
-  ones: { name: '"1"s lined up', lesson: 'phrase', weight: 0.15 },
-  phrase: { name: 'Started on a phrase', lesson: 'phrasing', weight: 0.15 },
+  ones: { name: '"1"s lined up', lesson: 'phrase', weight: 0.14 },
+  phrase: { name: 'Started on a phrase', lesson: 'phrasing', weight: 0.13 },
   bass: { name: 'One bass at a time', lesson: 'bass-swap', weight: 0.15 },
-  length: { name: 'Blend length', lesson: 'smooth', weight: 0.1 },
+  length: { name: 'Blend length', lesson: 'smooth', weight: 0.09 },
   smooth: { name: 'Steady volume', lesson: 'first-mix', weight: 0.05 },
-  key: { name: 'Keys fit', lesson: 'keys', weight: 0.05 },
+  // the id stays 'key' so older histories still line up; it now scores the whole choice of song: key and energy
+  key: { name: 'Track choice', lesson: 'keys', weight: 0.1 },
 };
 
 export const GRADES = [
@@ -30,7 +31,8 @@ export function newRecorder() { return { mix: null, solo: null, outFor: 0 }; }
 /**
  * Feed one frame. sample:
  * { left: { gain, playing, low (bass EQ dB), phrasePos (bars into the 16-bar phrase, 0..16) },
- *   right: {…}, offsetMs (beat offset when both play, or null), barOffset (beats between the "1"s), keyScore, bassTool, bpm }
+ *   right: {…}, offsetMs (beat offset when both play, or null), barOffset (beats between the "1"s), keyScore, bassTool, bpm,
+ *   energyStep (the new song's energy minus the old one's, 1–10 scale, or null when unknown) }
  * Returns a finished report when a transition completes, else null.
  */
 export function feed(rec, s, dt) {
@@ -40,7 +42,7 @@ export function feed(rec, s, dt) {
   if (!rec.mix) {
     if (!both) { if (on('left') && !on('right')) rec.solo = 'left'; else if (on('right') && !on('left')) rec.solo = 'right'; return null; }
     const from = rec.solo || 'left', to = from === 'left' ? 'right' : 'left';
-    rec.mix = { from, to, t: 0, startPhrase: s[from].phrasePos, aligned: 0, wreck: 0, timed: 0, ones: 0, offSum: 0, clash: 0, dip: 0, keyScore: s.keyScore ?? 0.5, bassTool: !!s.bassTool, bpm: s.bpm || 120, bassCutAtStart: s[to].low <= -12 };
+    rec.mix = { from, to, t: 0, startPhrase: s[from].phrasePos, aligned: 0, wreck: 0, timed: 0, ones: 0, offSum: 0, clash: 0, dip: 0, keyScore: s.keyScore ?? 0.5, energyStep: Number.isFinite(s.energyStep) ? s.energyStep : null, bassTool: !!s.bassTool, bpm: s.bpm || 120, bassCutAtStart: s[to].low <= -12 };
     rec.outFor = 0;
     return null;
   }
@@ -66,6 +68,12 @@ export function feed(rec, s, dt) {
 }
 
 const clamp = (x) => Math.max(0, Math.min(100, Math.round(x)));
+/** How well an energy step suits a mix (100: hold or lift by up to 2; drops and big jumps cost). null when unknown. */
+export function energyFit(step) {
+  if (step == null || !Number.isFinite(step)) return null;
+  const s = Math.round(step);
+  return s >= 0 && s <= 2 ? 100 : s === -1 || s === 3 ? 75 : s === -2 ? 55 : 35;
+}
 const secs = (x) => `${Math.round(x)} second${Math.round(x) === 1 ? '' : 's'}`;
 
 /** Turn what the recorder saw into a score, the parts and tips. Exported for tests. */
@@ -81,7 +89,9 @@ export function scoreMix(m) {
   parts.bass = m.bassTool ? { score: clamp(100 - (m.clash / Math.max(1, m.t)) * 160) } : null;
   parts.length = { score: bars >= 12 ? 100 : bars >= 6 ? 80 : bars >= 3 ? 55 : 30, bars };
   parts.smooth = { score: clamp(100 - m.dip * 20) };
-  parts.key = { score: m.keyScore >= 0.85 ? 100 : m.keyScore >= 0.55 ? 75 : m.keyScore >= 0.5 ? 60 : 35 };
+  const keyPart = m.keyScore >= 0.85 ? 100 : m.keyScore >= 0.55 ? 75 : m.keyScore >= 0.5 ? 60 : 35;
+  const energyPart = energyFit(m.energyStep);
+  parts.key = { score: energyPart == null ? keyPart : Math.round(keyPart * 0.5 + energyPart * 0.5), keyPart, energyPart, step: m.energyStep };
   let total = 0, weights = 0;
   for (const [id, p] of Object.entries(parts)) if (p) { total += p.score * PARTS[id].weight; weights += PARTS[id].weight; }
   const score = clamp(total / weights);
@@ -93,7 +103,9 @@ export function scoreMix(m) {
     bass: () => `Both basses were up together for ${secs(m.clash)}, which sounds muddy. Keep the new track's bass cut until the swap.`,
     length: () => `That blend was short (${Math.round(bars)} bars). Try 16: start at the outro and take your time.`,
     smooth: () => 'The volume dipped during the mix. Move the crossfader steadily and keep both channel faders up.',
-    key: () => 'The keys clash. Pick a "Great match" from Suggested for a sweeter blend.',
+    key: () => (parts.key.energyPart != null && parts.key.energyPart < parts.key.keyPart
+      ? (m.energyStep < 0 ? `The energy dropped ${-Math.round(m.energyStep)} steps, which can empty a floor. Hold or lift the energy, and save the big drops for a planned breather.` : `The energy jumped ${Math.round(m.energyStep)} steps at once. Build up a step or two at a time.`)
+      : 'The keys clash. Pick a "Great match" from Suggested for a sweeter blend.'),
   };
   const praiseFor = {
     beats: () => `Your beats were locked together ${Math.round(alignedPct * 100)}% of the time.`,
@@ -102,7 +114,7 @@ export function scoreMix(m) {
     bass: () => 'Only one bass at a time: clean low end.',
     length: () => `A nice long ${Math.round(bars)}-bar blend.`,
     smooth: () => 'Steady volume all the way through.',
-    key: () => 'The keys fit together.',
+    key: () => 'A great pick: the key and the energy fit.',
   };
   const list = Object.entries(parts).filter(([, p]) => p).map(([id, p]) => ({ id, name: PARTS[id].name, score: p.score, lost: (100 - p.score) * PARTS[id].weight, lesson: PARTS[id].lesson }));
   const tips = list.filter((p) => p.score < 80).sort((a, b) => b.lost - a.lost).slice(0, 2).map((p) => ({ id: p.id, lesson: p.lesson, text: tipFor[p.id]() }));

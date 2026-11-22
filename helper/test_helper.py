@@ -136,6 +136,11 @@ class WithFakeDatabase(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as e:
             self.get("/library", origin="https://evil.example")
         self.assertEqual(e.exception.code, 403)
+        # the development preview servers are allowed; any other local port is not
+        self.assertEqual(self.get("/status", origin="http://127.0.0.1:8650").headers["Access-Control-Allow-Origin"], "http://127.0.0.1:8650")
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.get("/library", origin="http://127.0.0.1:9999")
+        self.assertEqual(e.exception.code, 403)
         with self.assertRaises(urllib.error.HTTPError) as e:
             self.get("/audio/..%2F..%2Fetc%2Fpasswd")
         self.assertEqual(e.exception.code, 404)

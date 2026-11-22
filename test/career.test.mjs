@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VENUES, GIG, newCareer, loadCareer, recordMix, takeBooking, syncToLevel, gigProgress, venueForLevel, nextVenue } from '../js/career.js';
+import { VENUES, GIG, BRIEFS, CHALLENGES, CHALLENGE_BONUS, newCareer, loadCareer, recordMix, takeBooking, syncToLevel, gigProgress, venueForLevel, nextVenue, levelCap, dailyChallenge } from '../js/career.js';
+import { allowedLevel, levelLocked, featuresFor, FEATURES } from '../js/levels.js';
 import { LEVELS } from '../js/levels.js';
 
 test('five venues, bedroom to main room, every level has one and they never go back down', () => {
@@ -61,4 +62,50 @@ test('saved careers are checked', () => {
 test('gig progress for the bars', () => {
   const p = gigProgress(recordMix(newCareer(), 3));
   assert.deepEqual({ done: p.done, of: p.of, booked: p.booked, next: p.next.id }, { done: 1, of: 3, booked: false, next: 'party' });
+});
+
+test('after the bedroom, each venue has a brief: one skill that has to land before the next booking', () => {
+  for (const v of VENUES.slice(1, -1)) assert.ok(BRIEFS[v.id]?.text, v.id);
+  let c = { ...newCareer(), venue: 'basement' };
+  const muddy = { bass: 40, beats: 90 }, clean = { bass: 85, beats: 90 };
+  for (let i = 0; i < 4; i++) c = recordMix(c, 2, muddy);
+  assert.equal(c.good, GIG.mixes); assert.equal(c.offer, null, 'no booking without the brief');
+  assert.equal(gigProgress(c).briefDone, false);
+  c = recordMix(c, 1, clean);
+  assert.equal(c.offer, null, 'the brief has to land in a good mix');
+  c = recordMix(c, 2, clean);
+  assert.equal(c.offer, 'warehouse');
+  c = takeBooking(c);
+  assert.equal(c.brief, false, 'a new venue, a new brief');
+});
+
+test('a daily challenge: the same all day, a bonus once', () => {
+  assert.equal(dailyChallenge(20000), dailyChallenge(20000));
+  const seen = new Set(Array.from({ length: 60 }, (_, d) => dailyChallenge(20000 + d).id));
+  assert.ok(seen.size >= CHALLENGES.length - 1, 'the challenges rotate');
+  const day = Array.from({ length: 60 }, (_, d) => 20000 + d).find((d) => dailyChallenge(d).id === 'three');
+  let c = recordMix(newCareer(), 2, {}, day);
+  assert.equal(c.daily.done, false); assert.equal(c.stars, 2);
+  c = recordMix(c, 3, {}, day);
+  assert.equal(c.daily.done, true); assert.equal(c.stars, 5 + CHALLENGE_BONUS); assert.equal(c.challenge.id, 'three');
+  c = recordMix(c, 3, {}, day);
+  assert.equal(c.stars, 8 + CHALLENGE_BONUS, 'only once a day'); assert.equal(c.challenge, null);
+  c = recordMix(c, 0, {}, day + 1);
+  assert.equal(c.daily.done, false, 'a new day');
+});
+
+test('levels are earned in Learn mode: your venue caps your level', () => {
+  assert.equal(levelCap(newCareer()), 'starter');
+  assert.equal(levelCap({ ...newCareer(), venue: 'warehouse' }), 'confident');
+  assert.equal(allowedLevel('pro', 'improver'), 'improver');
+  assert.equal(allowedLevel('starter', 'confident'), 'starter', 'going down is always fine');
+  assert.equal(levelLocked('pro', 'confident'), true); assert.equal(levelLocked('improver', 'confident'), false);
+});
+
+test('Pro mode is the decks with none of the game', () => {
+  const pro = featuresFor('starter', 'pro');
+  assert.deepEqual(Object.keys(pro), FEATURES);
+  for (const f of ['playView', 'career', 'lesson', 'tour', 'mixReport', 'offsetHint', 'mixGuide']) assert.equal(pro[f], false, f);
+  for (const f of ['fullEQ', 'hotCues', 'perfPads', 'beatFx', 'proTools', 'proLayout', 'keyLock', 'beatLane']) assert.equal(pro[f], true, f);
+  assert.equal(featuresFor('pro').playView, true, 'Pro level in Learn mode still has the game');
 });

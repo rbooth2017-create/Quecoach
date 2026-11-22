@@ -1,7 +1,7 @@
 // DJ Life: the screens. The wallet and calendar chips in the Play view, the gig board, the shop, your home, the
 // diary, payday and the end of each week. All the sums are in economy.js and gigs.js; this file only draws them.
 import { icon } from '../../icons.js';
-import { venueById } from '../../career.js';
+import { venueById, gigProgress } from '../../career.js';
 import {
   VENUE_GIGS, GOALS, WANTS, HOSTED, DAY_NAMES, money, weekOf, weekday, effects, gearVibe, startGig, gigMix, gigVibe,
   gigDone, finishGig, leaveGig, advanceTo, buy, equip, moveHome, affordable, buyHome, buyCar, ownsHome, travelCost,
@@ -464,15 +464,23 @@ export function createDjLife(ctx, { key }) {
   }
 
   renderAll();
-  if (!life.intro) setTimeout(() => { if (layer.classList.contains('hidden')) drawIntro(); }, 600);
+  // first time: the intro, unless something (the start screen) already showed it or the player has moved on
+  if (!life.intro) setTimeout(() => { if (!life.intro && layer.classList.contains('hidden') && !world.isOpen()) drawIntro(); }, 600);
 
   return {
-    mixFinished, frame, openBoard,
+    mixFinished, frame, openBoard, openRoom,
     venue: () => (life.gig ? life.gig.offer.venue : 'bedroom'),
     venueName: () => (life.gig ? life.gig.offer.title : homeById(life.home).name),
     vibe: (next, c) => gearVibe(c.prev, next, effects(life, !life.gig || life.gig.offer.hosted ? 'home' : 'gig')),
     hud: () => {
-      if (!life.gig) return null;
+      if (!life.gig) {
+        // no gig tonight: one career, told DJ Life's way. Good mixes get bigger venues calling (js/career.js).
+        const gp = gigProgress(ctx.career());
+        const text = gp.last ? 'Every venue takes your calls now. Pick a gig from the board.'
+          : gp.booked ? `${gp.next.name} wants you. Their offers are on the gig board.`
+          : `${gp.of - gp.done} more good ${gp.of - gp.done === 1 ? 'mix' : 'mixes'}${gp.briefDone ? '' : ` and ${gp.brief.text.toLowerCase()}`}, and ${gp.next.name} starts calling.`;
+        return { label: 'No gig tonight', done: gp.done, of: gp.of, text };
+      }
       const g = life.gig, o = g.offer, left = o.mixes - g.scores.length;
       return { label: `Tonight · ${o.title}`, done: g.scores.length, of: o.mixes, text: `${left} more ${left === 1 ? 'mix' : 'mixes'} to go.${o.goal ? ` Bonus: ${GOALS[o.goal].text}.` : ''}` };
     },

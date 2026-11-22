@@ -1,7 +1,10 @@
 // Cue Coach "Learn": a beginner-first DJ app. Two decks, a mixer, a music library and a coach that fades
 // out as you level up. Works with mouse and keyboard; a controller is optional (later).
 import { Take, pickMime, fileName as recFileName, elapsed as recElapsed } from './recorder.js';
-import { ctx, Deck, beatmatch, synthDemoTrack, estimateGrid, setCrossfader, masterBus, cueBus, routeOutputs, outputState, setHeadphoneMix, setHeadphoneLevel, testTone } from './audio.js';
+import { ctx, Deck, beatmatch, synthDemoTrack, estimateGrid, setCrossfader, masterBus, mainOut, masterLevels, setLimiter, routeBooth, setBoothLevel, cueBus, routeOutputs, outputState, setHeadphoneMix, setHeadphoneLevel, testTone } from './audio.js';
+import { loadPrefs, LATENCIES, START_VIEWS, stepZoom, canLeaveYoung } from './prefs.js';
+import { ACTIONS, GROUPS as KEY_GROUPS, loadKeys, changedKeys, actionForEvent, comboOf, rebind, keyLabel } from './keymap.js';
+import { newSession, logPlay, saveSessions, toText as historyText, toCSV as historyCSV, fileBase as historyFile, since as historySince, MIN_SECONDS as HISTORY_SECONDS } from './history.js';
 import { cueRoute, headphoneMix, setupTip, MODES as HP_MODES } from './headphones.js';
 import { beatLen, barLen, fmtTime, timeOfBar, mixOutPoint } from './engine.js';
 import * as lib from './musiclib.js';
@@ -18,9 +21,9 @@ import { bandPeaks, barEnergies, phrasesFromEnergy, gridUnsure } from './beatgri
 const CUE_COLORS = ['#ef4f5c', '#22b573', '#f0a020', '#8b6cf6'];
 import { phraseColor, describeTrack, timelineSVG, sectionsFromBars, beatsSVG, phraseSVG, mixMapSVG, GUIDE, GUIDE_PARTS, CHEAT_SHEET, clock } from './songguide.js';
 const PHRASE_NAMES = { Up: 'Build', Down: 'Breakdown' };
-import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex, eqBands } from './levels.js';
+import { LEVELS, featuresFor, tempoRange, suggestLevelUp, levelIndex, eqBands, MODES, allowedLevel, levelLocked, nextTempoRange } from './levels.js';
 import { JogWheel, jogHTML, dialHTML, setDial, bindDials } from './controls.js';
-import { beatCount, phraseOffset, LOOP_SIZES, JUMP_SIZES, loopAt, jumpBy, scaleLoop } from './deckmath.js';
+import { beatCount, phraseOffset, LOOP_SIZES, JUMP_SIZES, loopAt, jumpBy, scaleLoop, shiftCamelot } from './deckmath.js';
 import { planMix, mixCue, partInfo, mixControls, mixSteps, prepSteps, PREP_STEPS, shiftPlan, stepState } from './mixplan.js';
 import { FxRack, FX, PAD_FX, padFxLabel } from './fx.js';
 import { SAMPLES, playSample, stopSample, samplePlaying } from './sampler.js';
@@ -42,7 +45,7 @@ import { newRecorder, feed as feedMix, addToHistory, progressStats, sparkSVG, CL
 import { createPlayView } from './playview.js';
 import * as packs from './packs.js';
 import { starsFor } from './playscore.js';
-import { loadCareer, recordMix as careerMix, takeBooking as careerTake, syncToLevel, venueById } from './career.js';
+import { loadCareer, recordMix as careerMix, takeBooking as careerTake, venueById, levelCap, dayNumber, dailyChallenge, CHALLENGE_BONUS } from './career.js';
 
 const THEMES = [
   { id: 'auto', name: 'Match my computer', bg: '#f6f5f1', bg2: '#14161b', left: '#2f7df6', right: '#ff6b4a' },
@@ -104,8 +107,17 @@ const state = {
   // the Play view (Starter) and your career from the bedroom to the main room
   view: store.get('view', store.get('level', 'starter') === 'starter' ? 'play' : 'decks'), guideNow: null, // the game skin is the Starter default; any level can switch to it
   career: loadCareer(store.get('career', null), store.get('level', 'starter')),
+  // settings (js/prefs.js), your keyboard map (js/keymap.js), each deck's tempo range (Pro tools)
+  prefs: loadPrefs(store.get('prefs', null)), keys: loadKeys(store.get('keys', null)),
+  range: { left: store.get('range.left', null), right: store.get('range.right', null) },
+  // tonight's tracklist (js/history.js): what the room heard
+  session: newSession(), heard: { left: 0, right: 0 },
 };
-state.f = featuresFor(state.level);
+for (const s of SIDES) if (![6, 8, 10, 16, 50].includes(state.range[s])) state.range[s] = state.prefs.tempoRange;
+/** Learn mode (the game) or Pro mode (just the decks). */
+const isPro = () => state.prefs.mode === 'pro';
+function savePrefs(patch) { state.prefs = loadPrefs({ ...state.prefs, ...patch }); store.set('prefs', state.prefs); }
+state.f = featuresFor(state.level, state.prefs.mode);
 /** Is the simple Play view on screen (instead of the full decks)? */
 const playOn = () => !!state.f?.playView && state.view === 'play';
 
@@ -143,6 +155,11 @@ const keyLockWanted = (side) => !!state.f.keyLock && store.get(`keyLock.${side}`
 function applyKeyLock(side) {
   decks[side].setKeyLock(keyLockWanted(side)).catch((err) => { console.warn('Key lock unavailable', err); if (state.f.keyLock) toast('Key lock isn\'t available on this computer.'); });
 }
+/** Key shift (Pro tools): move a deck's key a semitone at a time, without changing its speed. */
+function shiftKey(side, step) {
+  const d = decks[side]; if (!d.buffer) return;
+  d.setKeyShift((d.keyShift || 0) + step).then(() => renderDeck(side)).catch((err) => { console.warn('Key shift unavailable', err); toast('Key shift isn\'t available on this computer.'); });
+}
 function toggleKeyLock(side) {
   store.set(`keyLock.${side}`, !keyLockWanted(side)); applyKeyLock(side);
   const b = $(`#deck-${side} [data-a="keylock"]`); if (b) { b.classList.toggle('on', keyLockWanted(side)); b.setAttribute('aria-pressed', keyLockWanted(side)); }
@@ -158,9 +175,13 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3400);
 }
-function keyBadge(t) {
-  const h = lib.keyHue(t?.camelot);
-  return h == null ? '<span class="keybadge unknown">–</span>' : `<span class="keybadge" style="background:hsl(${h} 58% 48%)">${esc(t.camelot)}</span>`;
+function keyBadge(t, shift = 0) {
+  const key = shift ? shiftCamelot(t?.camelot, shift) : t?.camelot;
+  const h = lib.keyHue(key);
+  if (h == null) return '<span class="keybadge unknown">–</span>';
+  // Starter sees the colour only: neighbouring colours blend. The code ("8A") comes in at Improver.
+  if (!state.f.keyCodes) return `<span class="keybadge dot" style="background:hsl(${h} 58% 48%)" title="Key ${esc(key)}: songs with similar colours blend well" aria-label="Key ${esc(key)}"></span>`;
+  return `<span class="keybadge${shift ? ' shifted' : ''}" style="background:hsl(${h} 58% 48%)" ${shift ? `title="Shifted ${shift > 0 ? '+' : ''}${shift} from ${esc(t.camelot)}"` : ''}>${esc(key)}</span>`;
 }
 const fmtBpm = (b, dp = 1) => (b ? b.toFixed(dp) : '–');
 const kbd = (k) => (state.f.keyHints ? k.split(' ').map((x) => `<kbd>${esc(x)}</kbd>`).join(' ') : '');
@@ -168,23 +189,74 @@ const duration = (t) => (t.duration ? `${Math.floor(t.duration / 60)}:${String(M
 
 // ---------- levels ----------
 const LEVEL_ICON = ['sparkle', 'level', 'headphones', 'disc'];
+/** The highest level your career has earned (Learn mode). */
+const cap = () => levelCap(state.career);
+/** The first venue that unlocks a level. */
+const venueFor = (level) => ({ improver: 'The Basement', confident: 'the Warehouse', pro: 'the Main room' }[level] || 'the next venue');
+/**
+ * Switch level. In Learn mode a level is earned: you can go down for practice, but up only as far as your career
+ * has got (a booking at the next venue moves you up). Returns false when the level is locked.
+ */
 function setLevel(id, quiet = false) {
-  state.level = LEVELS[levelIndex(id)].id; state.f = featuresFor(state.level);
+  const want = LEVELS[levelIndex(id)].id;
+  if (!isPro() && levelLocked(want, cap()) && !quiet) { // asked for by hand: say why not (quietly, e.g. at start-up, it's capped)
+    toast(`${LEVELS[levelIndex(want)].name} unlocks when you get booked at ${venueFor(want)}. Play good gigs to get there.`);
+    return false;
+  }
+  state.level = isPro() ? want : allowedLevel(want, cap()); state.f = featuresFor(state.level, state.prefs.mode);
   store.set('level', state.level);
   for (const s of SIDES) { clampTempo(s); applyKeyLock(s); }
-  $('#levelBtn').innerHTML = `${esc(LEVELS[levelIndex(state.level)].name)} ${icon('chevron', 14)}`;
+  renderLevelBtn();
   if (!state.f.upNext && state.tab === 'suggested') state.tab = 'all';
   renderLevels(); renderDecks(); renderMixer(); renderLibrary(); state.coachKey = null;
-  saveCareer(syncToLevel(state.career, state.level)); // a level picked by hand moves you to its venue
   applyView();
   if (!quiet) toast(`${LEVELS[levelIndex(state.level)].name}: ${LEVELS[levelIndex(state.level)].blurb}`);
+  return true;
+}
+function renderLevelBtn() {
+  const b = $('#levelBtn');
+  b.innerHTML = isPro() ? `${icon('disc', 14)} Pro mode ${icon('chevron', 14)}` : `${esc(LEVELS[levelIndex(state.level)].name)} ${icon('chevron', 14)}`;
+  b.title = isPro() ? 'Pro mode: just the decks. Switch to Learn mode in Settings.' : 'Your level';
 }
 function renderLevels() {
-  $('#levelList').innerHTML = LEVELS.map((l, i) => `<button class="level ${l.id === state.level ? 'active' : ''}" data-level="${l.id}">${icon(LEVEL_ICON[i], 20)}<b>${esc(l.name)}</b><small>${esc(l.blurb)}</small></button>`).join('');
+  const c = cap();
+  $('#levelList').innerHTML = LEVELS.map((l, i) => {
+    const locked = !isPro() && levelLocked(l.id, c);
+    return `<button class="level ${l.id === state.level ? 'active' : ''} ${locked ? 'locked' : ''}" data-level="${l.id}" ${locked ? 'aria-disabled="true"' : ''}>${icon(locked ? 'lock' : LEVEL_ICON[i], 20)}<b>${esc(l.name)}</b><small>${locked ? `Get booked at ${esc(venueFor(l.id))} to unlock. ` : ''}${esc(l.blurb)}</small></button>`;
+  }).join('');
+  $('#levelsNote').textContent = isPro() ? 'You\'re in Pro mode: every tool is on. Levels are part of Learn mode.' : 'Cue Coach grows with you. Higher levels take the help away and add more of the mixer. You earn them by getting booked at bigger venues, and you can always go back down to practise.';
 }
+/** A deck's tempo range in ± %: its own (Pro tools), or the level's. */
+const rangeOf = (side) => (state.f.proTools ? state.range[side] : tempoRange(state.level, state.prefs.mode));
 function clampTempo(side) {
-  const d = decks[side], r = tempoRange(state.level);
+  const d = decks[side], r = rangeOf(side);
   if (Math.abs(d.tempoPct) > r) d.setTempo(Math.sign(d.tempoPct) * r);
+}
+/** Pro tools: step a deck's tempo range, like a CDJ's tempo range button. */
+function cycleRange(side) {
+  state.range[side] = nextTempoRange(state.range[side]); store.set(`range.${side}`, state.range[side]);
+  clampTempo(side); renderDeck(side);
+  toast(`Deck ${LETTER[side]} tempo range: ±${state.range[side]}%`);
+}
+
+// ---------- Learn mode and Pro mode ----------
+function setMode(m, quiet = false) {
+  if (m === state.prefs.mode) return;
+  savePrefs({ mode: m });
+  applyMode();
+  if (isPro()) {
+    packs.setOn('djlife', false);
+    if (tourOpen()) endTour();
+    if (playView.pickerOpen()) playView.closePicker();
+    playView.closeLayer();
+  }
+  setLevel(state.level, true);
+  if (!isPro()) { const v = store.get('decksView', state.view); if (v !== state.view) { state.view = v; store.set('view', v); applyView(); } }
+  if (!quiet) toast(isPro() ? 'Pro mode: just the decks, every tool on. No coaching, career or scores.' : 'Learn mode: the Play view, your career and the coach are back.');
+}
+function applyMode() {
+  document.body.classList.toggle('mode-pro', isPro());
+  if (isPro() && state.paneTab === 'lessons') state.paneTab = null;
 }
 
 // ---------- themes ----------
@@ -215,6 +287,8 @@ function deckRole(side) {
 }
 
 function renderDecks() { for (const s of SIDES) renderDeck(s); }
+/** Jog wheels on screen: your choice, or off in the pro layout (mouse users nudge with buttons, controller users have real ones). */
+const showJogs = () => state.prefs.jogs === 'show' || (state.prefs.jogs === 'auto' && !state.f.proLayout);
 
 function renderDeck(side) {
   const d = decks[side], el = $(`#deck-${side}`), f = state.f, t = d.track;
@@ -229,10 +303,10 @@ function renderDeck(side) {
       <button data-a="choose">${icon('search', 15)} Browse music</button></div>`;
     jogs[side] = null; return;
   }
-  const r = tempoRange(state.level);
+  const r = rangeOf(side);
   const keys = f.keyHints ? `<span>${side === 'left' ? `${kbd('Q')} play` : `${kbd('P')} play · ${kbd('↑ ↓')} speed · ${kbd('← →')} nudge`}</span>` : '';
   el.innerHTML = `
-    ${head(esc(t.title), `${keyBadge(t)}<span>${esc(t.artist || 'Unknown artist')}</span>`)}
+    ${head(esc(t.title), `${keyBadge(t, d.keyShift)}<span>${esc(t.artist || 'Unknown artist')}</span>`)}
       <div class="bpm"><b data-bpm>${fmtBpm(d.bpm, 2)}</b><span>BPM${t.grid?.estimated ? ' (est.)' : ''}</span></div></div>
     <canvas class="wave" data-wave title="Click to jump to a bar"></canvas>
     <div class="counter" data-counter>
@@ -247,15 +321,24 @@ function renderDeck(side) {
         <div class="tlabel">Start</div>
 
       </div>
-      ${jogHTML(side, f.keyHints && !state.jogUsed ? 'Spin me to nudge' : '')}
-      <div class="pitch" title="Speed: pull down to go faster, like the tempo slider on a controller">
-        <button class="round" data-a="slower" aria-label="Slower">${icon('minus', 15)}</button>
-        <input type="range" class="vfader" data-a="tempo" min="-${r}" max="${r}" step="0.05" value="${d.tempoPct}" aria-label="Speed (down is faster)">
-        <button class="round" data-a="faster" aria-label="Faster">${icon('plus', 15)}</button>
+      ${showJogs() ? jogHTML(side, f.keyHints && !state.jogUsed ? 'Spin me to nudge' : '') : `<div class="nudges" role="group" aria-label="Nudge deck ${LETTER[side]}">
+        <button data-nudge="-1" title="Hold to slow the beats down for a moment (like holding the jog wheel's side)">${icon('chevron', 15, 'style="transform:rotate(90deg)"')} Back</button>
+        <button data-nudge="1" title="Hold to push the beats ahead for a moment">Ahead ${icon('chevron', 15, 'style="transform:rotate(-90deg)"')}</button></div>`}
+      <div class="pitch" title="Speed: ${state.prefs.upIsFaster ? 'push up' : 'pull down'} to go faster">
+        <button class="round" data-a="${state.prefs.upIsFaster ? 'faster' : 'slower'}" aria-label="${state.prefs.upIsFaster ? 'Faster' : 'Slower'}">${icon(state.prefs.upIsFaster ? 'plus' : 'minus', 15)}</button>
+        <input type="range" class="vfader ${state.prefs.upIsFaster ? 'up' : ''}" data-a="tempo" min="-${r}" max="${r}" step="${r > 16 ? 0.1 : 0.05}" value="${d.tempoPct}" aria-label="Speed (${state.prefs.upIsFaster ? 'up' : 'down'} is faster)">
+        <button class="round" data-a="${state.prefs.upIsFaster ? 'slower' : 'faster'}" aria-label="${state.prefs.upIsFaster ? 'Slower' : 'Faster'}">${icon(state.prefs.upIsFaster ? 'minus' : 'plus', 15)}</button>
         <div class="val" data-pct></div>
         ${f.keyLock ? `<button class="keylock ${keyLockWanted(side) ? 'on' : ''}" data-a="keylock" aria-pressed="${keyLockWanted(side)}" title="Key lock: change the speed without changing the key">${icon('lock', 12)} Key</button>` : ''}
       </div>
     </div>
+    ${f.proTools ? `<div class="protools" role="group" aria-label="Deck ${LETTER[side]} tools">
+      <button data-a="range" title="Tempo range: press to change it (±6, 8, 10, 16 or 50%)">±${r}%</button>
+      <span class="kshift" title="Key shift: move the key up or down without changing the speed"><button data-a="key-down" aria-label="Key down a semitone">♭</button><b data-kshift>${d.keyShift > 0 ? '+' : ''}${d.keyShift || 0}</b><button data-a="key-up" aria-label="Key up a semitone">♯</button></span>
+      <button data-a="slip" class="${d.slipOn ? 'on' : ''}" aria-pressed="${d.slipOn}" title="Slip: loops and reverse play over the track, which carries on underneath. Let go and it's where it would have been.">Slip</button>
+      <button data-a="reverse" class="${d.reversed ? 'on' : ''}" aria-pressed="${d.reversed}" title="Reverse: play backwards">Rev</button>
+      <button data-censor title="Censor: hold to play backwards; let go and the track carries on where it would have been">Censor</button>
+    </div>` : ''}
     ${state.prep[side] ? '<div class="prep" data-prep-panel></div>' : f.perfPads ? `<div class="perf">
       <div class="pmodes" role="tablist">${PAD_MODE_LIST.map(([m, name]) => `<button data-pmode="${m}" class="${d.padMode === m ? 'on' : ''}" role="tab">${name}</button>`).join('')}</div>
       <div class="ppads" data-ppads>${[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `<button class="ppad" data-ppad="${i}"></button>`).join('')}</div>
@@ -267,7 +350,8 @@ function renderDeck(side) {
       ${f.barCounter ? '<span class="barcount" data-bar></span>' : ''}
       <button class="ghost small" data-a="breakdown" title="What's in this track and where to mix it">${icon('list', 14)} Breakdown</button>
       <button class="ghost small" data-a="eject" title="Take this track off the deck">${icon('eject', 14)} Eject</button></div>`;
-  jogs[side] = new JogWheel($('[data-jog]', el), () => decks[side], (kind) => {
+  const jogEl = $('[data-jog]', el);
+  jogs[side] = jogEl && new JogWheel(jogEl, () => decks[side], (kind) => {
     state.jogUsed = true; $('.jog', el)?.classList.add('used');
     if (kind === 'jog' || kind === 'scrub') state.did.add(kind);
   });
@@ -283,7 +367,7 @@ function renderMixer() {
     const d = decks[side];
     return `<div class="strip" data-side="${side}">
       <div class="strip-name">${LETTER[side]}</div>
-      ${eqBands(state.level).map((b) => dialHTML({ id: `${side}:${b}`, label: BAND[b], value: d.eq[b], min: -30, max: 6, def: 0, cut: true, centred: true })).join('')}
+      ${eqBands(state.level, state.prefs.mode).map((b) => dialHTML({ id: `${side}:${b}`, label: BAND[b], value: d.eq[b], min: -30, max: 6, def: 0, cut: true, centred: true })).join('')}
       <div class="fader-row">
         ${f.volume ? `<input type="range" class="vfader" data-vol="${side}" min="0" max="1" step="0.01" value="${d.vol.gain.value}" aria-label="Deck ${LETTER[side]} volume" title="Volume">` : ''}
         <canvas class="meter" data-meter="${side}"></canvas>
@@ -305,6 +389,7 @@ function renderMixer() {
     <div class="strips">${strip('left')}${strip('right')}</div>
     <div class="outs">
       <div class="phones" title="Master: how loud the whole mix is in the speakers (and in your recordings)">${dialHTML({ id: 'master', label: 'Master', value: masterBus.gain.value, min: 0, max: MASTER_MAX, def: 1, centred: true })}<span class="small muted">Speakers</span></div>
+      <div class="mmeter" title="Master level, left and right. LIMIT lights when the mix is too hot and the safety limiter is holding it down: turn the Master or the channels down a little."><canvas data-master-meter></canvas><span class="limit" data-limit>${state.prefs.limiter ? 'LIMIT' : 'CLIP'}</span></div>
       ${hasPhones() ? `<div class="phones" title="Headphones: left is only what you're cueing (Listen), right is what the room hears">${dialHTML({ id: 'hp:mix', label: 'Phones mix', value: hp.mix, min: 0, max: 1, def: 0 })}<span class="small muted">Cue ↔ Room</span></div>` : ''}
     </div>
     ${f.quantise ? `<button class="q-btn ${quantiseOn() ? 'on' : ''}" data-quant aria-pressed="${quantiseOn()}" title="Quantise: hot cues, beat jumps and play wait for the next beat, so they land in time">Quantise</button>` : ''}
@@ -319,7 +404,28 @@ function renderMixer() {
   $$('#mixer [data-dial]').forEach((x) => setDial(x, +x.dataset.value));
 }
 
+const mm = { l: 0, r: 0, hotUntil: 0 };
+function drawMaster() {
+  const cv = $('[data-master-meter]'); if (!cv || !cv.clientHeight) return;
+  const lv = masterLevels(), now = performance.now();
+  mm.l = Math.max(lv.l, mm.l * 0.9); mm.r = Math.max(lv.r, mm.r * 0.9);
+  // too hot: the limiter is pulling more than 2 dB, or (limiter off) the output is at full scale
+  if ((lv.reduction > 2 && lv.hot > 0.7) || (!state.prefs.limiter && Math.max(lv.l, lv.r) >= 0.99)) mm.hotUntil = now + 1200; // only with real signal (the limiter reads odd values while silent)
+  const { g, w, h } = fitCanvas(cv), n = 16, gap = 2, seg = (h - gap * (n - 1)) / n, bw = (w - 2) / 2;
+  g.clearRect(0, 0, w, h);
+  [mm.l, mm.r].forEach((v, c) => {
+    const lit = Math.round(Math.min(1, v) * n);
+    for (let i = 0; i < n; i++) {
+      g.fillStyle = i >= n - 2 ? colors.warn : i >= n - 5 ? colors.close : colors.ok;
+      g.globalAlpha = i < lit ? 1 : 0.16;
+      g.fillRect(c * (bw + 2), h - (i + 1) * seg - i * gap, bw, seg);
+    }
+  });
+  g.globalAlpha = 1;
+  $('[data-limit]')?.classList.toggle('on', now < mm.hotUntil);
+}
 function drawMeters() {
+  drawMaster();
   for (const side of SIDES) {
     const d = decks[side], cv = $(`[data-meter="${side}"]`);
     if (!cv || !cv.clientHeight) continue;
@@ -371,7 +477,7 @@ function isLive(side) { const d = decks[side]; return d.playing && d.xf.gain.val
 
 async function loadTo(side, track) {
   if (state.loading[side]) return;
-  if (isLive(side)) {
+  if (isLive(side) && state.prefs.loadLock) {
     const other = side === 'left' ? 'right' : 'left';
     toast(`Deck ${LETTER[side]} is playing to the room. Load onto deck ${LETTER[other]}${isLive(other) ? ' after pausing it' : ''}, or pause ${LETTER[side]} first.`);
     const el = $(`#deck-${side}`); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
@@ -393,6 +499,8 @@ async function loadTo(side, track) {
     const d = decks[side];
     d.stop();
     d.load(track, buffer, null);
+    if (d.keyShift) d.setKeyShift(0).catch(() => {}); // a new track starts in its own key
+    state.heard[side] = 0; // tonight's tracklist: this one counts once the room has heard it for a while
     if (cuePoints[track.id] != null) d.offset = cuePoints[track.id];
     d.bands = bandPeaks(buffer.getChannelData(0), buffer.sampleRate, WAVE_RATE);
     if (side === 'right') state.alignLocked = false;
@@ -548,7 +656,7 @@ function renderLibrary() {
   $$('#libTabs button').forEach((b) => { b.classList.toggle('active', b.dataset.tab === state.tab); b.classList.toggle('hidden', b.dataset.tab === 'suggested' && !state.f.upNext); });
   const banner = [];
   if (state.reconnect) banner.push(`Cue Coach needs your OK to read <b>${esc(state.reconnect.name)}</b> again. <button class="primary" data-a="reconnect">Reconnect</button>`);
-  if (state.target) banner.push(`Choosing a track for <b style="color:var(--${state.target})">deck ${LETTER[state.target]}</b>. Double-click a track, or use its ${LETTER[state.target]} button. <button class="ghost" data-a="untarget">Cancel</button>`);
+  if (state.target && !state.picking) banner.push(`Choosing a track for <b style="color:var(--${state.target})">deck ${LETTER[state.target]}</b>. Double-click a track, or use its ${LETTER[state.target]} button. <button class="ghost" data-a="untarget">Cancel</button>`);
   $('#libBanner').innerHTML = banner.join(' ');
   renderCrates();
   renderList();
@@ -579,7 +687,7 @@ function renderList() {
   const loaded = new Map(SIDES.map((s) => [decks[s].track?.id, s]));
   const canAdd = lib.hasManaged() && state.source !== 'managed';
   const setIds = new Set(state.set?.items.map((i) => i.id) || []);
-  const head = `<div class="trow head"><span>Key</span><span>Track</span><span class="wide">Artist</span><span>BPM</span><span class="wide">Time</span><span class="wide">${ref ? 'With deck A' : ''}</span><span></span></div>`;
+  const head = `<div class="trow head"><span>Key</span><span>Track</span><span class="wide">Artist</span><span>BPM</span><span class="wide">Time</span><span class="wide">${ref ? (state.picking ? 'Match' : 'With deck A') : ''}</span><span></span></div>`;
   let aiTop = '';
   if (state.tab === 'suggested') {
     const picks = state.aiPicks?.forId === ref.id ? state.aiPicks : null;
@@ -588,7 +696,7 @@ function renderList() {
       + (picks ? picks.picks.map((p) => `<div class="trow ai-row" data-id="${esc(p.track.id)}">${keyBadge(p.track)}<span class="t"><span class="ai-badge">AI</span> ${esc(p.track.title)}</span>
         <span class="a wide">${esc(p.track.artist)}</span><span class="n">${fmtBpm(p.track.bpm)}</span><span class="wide"></span>
         <span class="why wide" title="${esc(p.tip)}"><b>${esc(p.why)}</b> ${esc(p.tip)}</span>
-        <span class="acts" style="opacity:1"><button class="l" data-load="left">A</button><button class="r" data-load="right">B</button></span></div>`).join('') : '');
+        <span class="acts" style="opacity:1">${state.picking ? `<button class="pick" data-load="${state.target}">Choose</button>` : '<button class="l" data-load="left">A</button><button class="r" data-load="right">B</button>'}</span></div>`).join('') : '');
     rows = rows.filter((r) => !picks?.picks.some((p) => p.track.id === r.track.id));
   }
   el.innerHTML = aiTop + (rows.length ? head : '') + rows.slice(0, MAX_ROWS).map(({ track: t, match: m }) => {
@@ -601,10 +709,12 @@ function renderList() {
       : canAdd && lib.canImport(t) ? `<button data-row="import" title="Copy into My library" aria-label="Copy into My library">${icon('upload', 12)}</button>` : '';
     const linkBtn = `<button class="add" data-row="links" aria-haspopup="menu" title="Listen on Spotify or Apple Music, or buy it" aria-label="Listen or buy">${icon('external', 12)}</button>`;
     const setBtn = `<button class="add ${inS ? 'on' : ''}" data-row="set" aria-pressed="${inS}" title="${inS ? 'In your set. Press to take it out.' : 'Add to the end of your set'}" aria-label="${inS ? 'Take out of set' : 'Add to set'}">${icon(inS ? 'check' : 'plus', 12)}</button>`;
-    return `<div class="trow ${on ? 'loaded' : ''}" data-id="${esc(t.id)}" draggable="true" title="Double-click to load. Drag onto a deck or a crate.">${keyBadge(t)}
+    const acts = state.picking ? `<button class="pick" data-load="${state.target}">Choose</button>`
+      : `${extra}${linkBtn}${setBtn}<button class="l" data-load="left" title="Load on deck A">A</button><button class="r" data-load="right" title="Load on deck B">B</button>`;
+    return `<div class="trow ${on ? 'loaded' : ''}" data-id="${esc(t.id)}" draggable="${!state.picking}" title="${state.picking ? 'Click to choose this song' : 'Double-click to load. Drag onto a deck or a crate.'}">${keyBadge(t)}
       <span class="t">${on ? `<span style="color:var(--${on})">● </span>` : ''}${esc(t.title)}</span><span class="a wide">${esc(t.artist)}</span>
       <span class="n">${bpm}</span><span class="n wide muted">${duration(t)}</span><span class="wide mcell">${matchCell}</span>
-      <span class="acts">${extra}${linkBtn}${setBtn}<button class="l" data-load="left" title="Load on deck A">A</button><button class="r" data-load="right" title="Load on deck B">B</button></span></div>`;
+      <span class="acts">${acts}</span></div>`;
   }).join('') + (rows.length > MAX_ROWS ? `<div class="empty small">Showing ${MAX_ROWS} of ${rows.length}. Search to narrow it down.</div>` : '')
     + wantedHTML(crate, wanted) + buyBar();
   markLibSel();
@@ -752,6 +862,7 @@ async function resolveWanted(tracks) {
 
 /** Listen or buy: a small menu by the button. */
 function openLinkMenu(btn, t, buyFirst = false) {
+  if (youngBlocked()) return;
   const m = $('#linkMenu'), links = stream.trackLinks(t);
   const item = (l) => `<button data-url="${esc(l.url)}" role="menuitem">${icon('external', 14)}<span>${l.kind === 'listen' ? 'Listen on' : 'Buy on'} ${esc(l.label)}</span></button>`;
   const listen = links.filter((l) => l.kind === 'listen').map(item).join(''), buy = links.filter((l) => l.kind === 'buy').map(item).join('');
@@ -884,7 +995,7 @@ function applyLibView() {
 }
 
 // ---------- fit to the window: lane, plan and decks zoom down so they always fit above the library's header ----------
-const FIT_MIN = 0.5; // below this the stage scrolls instead: the controls would be too small to use
+const FIT_MIN = 0.72; // below this the stage scrolls instead: the controls would be too small to use
 let fitQueued = false;
 function scheduleFit() {
   if (fitQueued) return;
@@ -893,6 +1004,12 @@ function scheduleFit() {
 }
 function fitStage() {
   const st = $('.stage'), lib = $('#library'); if (!st || !lib) return;
+  if (document.body.classList.contains('pro-layout')) {
+    // the pro layout never zooms: everything at full size, the library takes the rest of the height below the decks
+    if (st.style.getPropertyValue('--fit') !== '1') { st.style.setProperty('--fit', '1'); for (const s of SIDES) if (decks[s]) decks[s]._wave = null; }
+    st.classList.add('fit-full');
+    return;
+  }
   const cs = getComputedStyle(st), gap = parseFloat(cs.rowGap) || 0;
   const inner = st.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
   const head = $('.lib-head', lib).offsetHeight;
@@ -1025,7 +1142,7 @@ function finishLesson() {
 
 function renderCoach(s) {
   const el = $('#coach'), f = state.f, L = lesson();
-  const show = f.lesson || state.paneOpen;
+  const show = !isPro() && (f.lesson || state.paneOpen); // Pro mode: no lesson card at all
   el.classList.toggle('hidden', !show);
   if (!show) { $('#progress').innerHTML = ''; state.coachKey = null; return; }
   if (!state.lessonDone) {
@@ -1040,7 +1157,8 @@ function renderCoach(s) {
   if (paneTab() === 'lessons') renderTutor();
   if (idx >= L.steps.length) {
     const next = nextLesson(L.id, state.completed);
-    const up = L.id === 'first-mix' ? suggestLevelUp(state.level, state.cleanMixes) : null;
+    const up0 = L.id === 'first-mix' ? suggestLevelUp(state.level, state.cleanMixes) : null;
+    const up = up0 && !levelLocked(up0.id, cap()) ? up0 : null; // a locked level is earned with a booking, not offered here
     el.classList.add('complete');
     el.innerHTML = `<div class="num">${icon('check', 16)}</div><div style="min-width:0"><h2>${esc(L.title)}: done!</h2><p>${up ? `That's ${state.cleanMixes} clean mixes: you're ready for ${esc(up.name)}.` : next ? `Up next: ${esc(next.title)}.` : 'You\'ve finished the course. Nice work.'}</p></div>
       <div class="side">${up ? `<button data-a="levelup" data-level="${up.id}">Try ${esc(up.name)}</button>` : ''}${L.id === 'first-mix' ? '<button data-a="again">Mix another track</button>' : `<button data-a="repeat">Do it again</button>`}${next ? `<button class="primary" data-a="next" data-lesson="${next.id}">Next lesson ${icon('chevron', 14, 'style="transform:rotate(-90deg)"')}</button>` : ''}</div>`;
@@ -1066,7 +1184,7 @@ function renderTutor() {
   const tab = paneTab();
   el.setAttribute('aria-label', tab === 'set' ? 'Set list' : 'Lessons');
   const tabBtn = (id, ic, name) => `<button data-ptab="${id}" role="tab" aria-selected="${tab === id}" class="${tab === id ? 'active' : ''}">${icon(ic, 14)} ${name}</button>`;
-  const head = (note) => `<div class="tutor-head"><div class="tabs pane-tabs" role="tablist" aria-label="Side panel">${tabBtn('lessons', 'book', 'Lessons')}${tabBtn('track', 'music', 'Track')}${tabBtn('set', 'list', 'Set')}</div>
+  const head = (note) => `<div class="tutor-head"><div class="tabs pane-tabs" role="tablist" aria-label="Side panel">${isPro() ? '' : tabBtn('lessons', 'book', 'Lessons')}${tabBtn('track', 'music', 'Track')}${tabBtn('set', 'list', 'Set')}${tabBtn('history', 'clock', 'History')}</div>
       <span class="grow"></span><span class="small muted">${note}</span>
       <button class="icon-btn" data-a="close" title="Hide the side panel (L)" aria-label="Hide the side panel">${icon('x', 16)}</button></div>`;
   if (state.guideOpen) {
@@ -1075,6 +1193,10 @@ function renderTutor() {
   }
   if (tab === 'track') {
     keepFocus(el, head('') + `<div class="tutor-body track-pane">${trackPaneHTML()}</div>`);
+    return;
+  }
+  if (tab === 'history') {
+    keepFocus(el, head('') + `<div class="tutor-body history-pane">${historyHTML()}</div>`);
     return;
   }
   if (tab === 'set') {
@@ -1132,15 +1254,22 @@ function phrasePos(d) {
   const b = (d.position() - g.firstDownbeat) / barLen(g);
   return ((b % 16) + 16) % 16;
 }
+/** The energy step of the next song against the one the room hears (null when either is unknown). */
+function energyStep() {
+  const from = state.mixRec.solo || (state.xfader <= 0.5 ? 'left' : 'right'), to = from === 'left' ? 'right' : 'left';
+  const a = energyOf(decks[from].track), b = energyOf(decks[to].track);
+  return Number.isFinite(a) && Number.isFinite(b) ? b - a : null;
+}
 function recordMix(s, dt) {
   const side = (k) => { const d = decks[k]; return { gain: d.buffer ? d.xf.gain.value * d.vol.gain.value : 0, playing: !!(d.buffer && d.playing), low: d.eq.low, phrasePos: phrasePos(d) }; };
   const sample = {
     left: side('left'), right: side('right'), offsetMs: s.offsetMs, barOffset: s.barOffset, keyScore: s.keyScore,
     bassTool: guideControls().low, bpm: decks.left.bpm || decks.right.bpm || 120,
+    energyStep: energyStep(),
   };
   const r = feedMix(state.mixRec, sample, dt);
   // a clip of every transition, for "Listen back" in the report
-  if (state.mixRec.mix && !rec.clip && rec.ok) rec.clip = new Take(recStream());
+  if (state.mixRec.mix && !rec.clip && rec.ok && state.prefs.mixClips) rec.clip = new Take(recStream());
   if (r) { const clip = rec.clip; rec.clip = null; onMixReport(r, clip); }
   else if (!state.mixRec.mix && rec.clip) { const c = rec.clip; rec.clip = null; c.stop(); } // backed out: no report
   if (rec.set) { const el = $('#recBtn [data-rectime]'); const t = recElapsed(rec.set.seconds); if (el && el.textContent !== t) el.textContent = t; }
@@ -1148,7 +1277,7 @@ function recordMix(s, dt) {
 
 // ---------- recording ----------
 const rec = { ok: typeof MediaRecorder !== 'undefined' && !!pickMime(), dest: null, set: null, clip: null };
-function recStream() { if (!rec.dest) { rec.dest = ctx.createMediaStreamDestination(); masterBus.connect(rec.dest); } return rec.dest.stream; }
+function recStream() { if (!rec.dest) { rec.dest = ctx.createMediaStreamDestination(); mainOut.connect(rec.dest); } return rec.dest.stream; } // after the limiter: what the room hears
 function saveBlob(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
@@ -1180,11 +1309,17 @@ function onMixReport(r, clip = null) {
   // clean mixes count towards the next level (the first-mix lesson counts its own)
   if (r.score >= CLEAN_SCORE && state.lessonId !== 'first-mix') { state.cleanMixes += 1; store.set('cleanMixes', state.cleanMixes); }
   if (state.report?.clip) URL.revokeObjectURL(state.report.clip);
-  // every mix counts towards your gig; a finished gig books you at the next venue (that's how you level up now)
-  const hadOffer = !!state.career.offer;
-  saveCareer(careerMix(state.career, starsFor(r.score)));
   state.report = { ...r, at, stars: starsFor(r.score), levelUp: null, fromTitle: decks[r.from].track?.title, toTitle: decks[r.to].track?.title };
   store.set('lastReport', { ...state.report, clip: null });
+  if (!state.f.career) { // Pro mode: the score is kept for your history, but nothing pops up
+    if (state.report.clip) URL.revokeObjectURL(state.report.clip);
+    state.report = null; return;
+  }
+  // every mix counts towards your gig; a finished gig (with the venue's brief) books you at the next venue
+  const hadOffer = !!state.career.offer;
+  const parts = Object.fromEntries(r.parts.map((p) => [p.id, p.score]));
+  saveCareer(careerMix(state.career, starsFor(r.score), parts, dayNumber()));
+  if (state.career.challenge) setTimeout(() => toast(`Daily challenge done: ${state.career.challenge.text}. +${CHALLENGE_BONUS} bonus stars.`), 1500);
   packs.emit('mixFinished', { report: r, stars: starsFor(r.score), track: decks[r.to].track, energy: energyOf(decks[r.to].track) });
   if (playOn()) playView.showResult(r, state.career); else renderReport();
   if (!hadOffer && state.career.offer) setTimeout(() => playView.openBooked(), playOn() ? 2500 : 1200);
@@ -1246,7 +1381,8 @@ const visibleEl = (sel) => $$(sel).find((x) => x.offsetParent !== null && x.getC
 const tourOpen = () => !$('#tour').classList.contains('hidden');
 function startTour() {
   closeHelpMenu();
-  if (!$('#welcomeView').classList.contains('hidden')) return;
+  if (playOn()) return; // the tour is about the full decks
+  if (!$('#welcomeView').classList.contains('hidden') || launchOpen()) return;
   for (const d of $$('dialog[open]')) d.close();
   tour.stops = stopsFor(state.level, (st) => !!visibleEl(st.target));
   if (!tour.stops.length) return;
@@ -1284,9 +1420,11 @@ function placeTour(el = tour.stops[tour.i] && visibleEl(tour.stops[tour.i].targe
   card.style.left = `${Math.max(16, Math.min(vw - cw - 16, left))}px`;
   card.style.top = `${Math.max(16, Math.min(vh - ch - 16, top))}px`;
 }
+/** Asked for from Help: the tour is about the full decks, so go there first. */
+function tourFromHelp() { if (playOn()) setView('decks', true); startTour(); }
 function maybeStartTour() {
-  if (playOn()) return; // the tour shows the full decks
-  if (shouldAutoStart({ done: store.get('tourDone', false), hasSource: !!state.source, welcomeOpen: !$('#welcomeView').classList.contains('hidden') })) setTimeout(startTour, 600);
+  if (playOn() || !state.f.tour) return; // the tour shows the full decks, and Pro mode has none
+  if (shouldAutoStart({ done: store.get('tourDone', false), hasSource: !!state.source, welcomeOpen: !$('#welcomeView').classList.contains('hidden') || launchOpen() })) setTimeout(startTour, 600);
 }
 function bindTour() {
   $('#tour').addEventListener('click', (e) => {
@@ -1323,7 +1461,7 @@ function bindHelpMenu() {
   $('#helpMenu').addEventListener('click', (e) => {
     const b = e.target.closest('[data-help]'); if (!b) return;
     closeHelpMenu();
-    ({ tour: startTour, guide: openGuide, keys: () => $('#help').showModal() })[b.dataset.help]();
+    ({ tour: tourFromHelp, guide: openGuide, keys: openKeys })[b.dataset.help]();
   });
   $('#helpMenu').addEventListener('keydown', (e) => {
     const items = $$('#helpMenu button'), i = items.indexOf(document.activeElement);
@@ -1381,7 +1519,7 @@ function aiNotesHTML(t) {
 }
 async function fetchAiNotes() {
   const side = trackSide(), t = decks[side].track, b = t && describeTrack(t);
-  if (!b || state.aiNotesBusy) return;
+  if (!b || state.aiNotesBusy || youngBlocked()) return;
   state.aiNotesBusy = t.id; aiNotes.delete(t.id); renderTutor();
   try {
     const candidates = lib.rankNext(t, state.tracks, { exclude: [t.id], limit: 8 }).map((r) => r.track || r);
@@ -1536,7 +1674,8 @@ function drawLane(hint) {
   if (!visible || lane.clientWidth === 0) return;
   const { g, w, h, dpr } = fitCanvas(lane);
   g.clearRect(0, 0, w, h);
-  const cx = w / 2, pps = w / 4, rowH = h / 2, left = 30;
+  const cx = w / 2, pps = (w / 4) * state.prefs.laneZoom, rowH = h / 2, left = 30; // about 4 seconds across at zoom 1
+  const labels = []; // phrase labels, drawn last so the beat dots never cover them
   if (hint?.tone === 'ok' && f.beatDots) { g.fillStyle = colors.ok; g.globalAlpha = 0.16; g.fillRect(cx - 12, 0, 24, h); g.globalAlpha = 1; }
   g.font = '650 10px system-ui, -apple-system, "Segoe UI", sans-serif'; g.textBaseline = 'middle';
   const dots = { left: [], right: [] }; // beat dots, drawn last so they sit on top
@@ -1593,11 +1732,8 @@ function drawLane(hint) {
           // mark each phrase: "Phrase 3 · Chorus"
           const t = grid.firstDownbeat + k * bl, ph = d.track.phrases?.find((p) => t >= p.start - 0.05 && t < p.end - 0.05);
           const label = `Phrase ${Math.floor((bar - 1) / 16) + 1}${ph ? ` · ${PHRASE_NAMES[ph.label] || ph.label}` : ''}`;
-          g.globalAlpha = 1; g.font = '750 10px system-ui, -apple-system, "Segoe UI", sans-serif';
-          const tw = g.measureText(label).width;
-          g.fillStyle = colors.warn; g.fillRect(x, top + 2, tw + 10, 14);
-          g.fillStyle = '#fff'; g.textAlign = 'left'; g.fillText(label, x + 5, top + 9.5);
-          g.font = '650 10px system-ui, -apple-system, "Segoe UI", sans-serif';
+          // deck A's label on the top edge of its row, deck B's on the bottom edge of its row: away from the dots in the middle
+          labels.push({ label, x, y: r === 0 ? top + 2 : top + rowH - 16 });
         } else if (down && f.barCounter && bar >= 1) { g.globalAlpha = 0.75; g.fillStyle = colors.ink; g.textAlign = 'left'; g.fillText(String(bar), x + 4, top + 9); }
       }
       g.globalAlpha = 1;
@@ -1616,6 +1752,17 @@ function drawLane(hint) {
   // now line
   g.fillStyle = colors.ink; g.globalAlpha = 0.9; g.fillRect(Math.round(cx) - 1, 0, 2, h); g.globalAlpha = 1;
   if (f.beatDots) drawBeatDots(g, dots, { w, cx, pps, rowH, left });
+  // phrase labels on top of everything; kept inside the lane so they're never cut off
+  g.font = '750 10px system-ui, -apple-system, "Segoe UI", sans-serif'; g.textAlign = 'left';
+  for (const { label, x, y } of labels) {
+    const tw = g.measureText(label).width, bx = Math.max(left, Math.min(w - tw - 12, x));
+    g.globalAlpha = 1; g.fillStyle = colors.warn; g.fillRect(bx, y, tw + 10, 14);
+    g.fillStyle = '#fff'; g.fillText(label, bx + 5, y + 7.5);
+  }
+}
+function zoomLane(dir) {
+  savePrefs({ laneZoom: stepZoom(state.prefs.laneZoom, dir) });
+  $('#laneZoomVal').textContent = `${state.prefs.laneZoom}×`;
 }
 
 /**
@@ -1809,6 +1956,17 @@ const playView = createPlayView({
     play: (side) => togglePlay(side),
     tempo: (side, pct) => stepTempo(side, pct),
     tempoStep: FINE, // a tap stays inside the "matched" window; holding speeds up
+    /** One tap towards the match halves the gap (so it never takes ten taps), and never jumps past it. */
+    tapStep: (side, dir) => {
+      const d = decks[side], o = decks[side === 'left' ? 'right' : 'left'];
+      if (!d.track?.grid || !o.bpm) return FINE;
+      const need = (o.bpm / d.track.grid.bpm - 1) * 100 - d.tempoPct; // % still to go
+      if (Math.sign(need) !== Math.sign(dir) || Math.abs(need) <= FINE * 1.5) return FINE;
+      return Math.max(FINE, Math.floor((Math.abs(need) / 2) / FINE) * FINE);
+    },
+    hints: () => ({ speed: !!state.f.offsetHint }),
+    checking: () => performance.now() < state.checkUntil,
+    daily: () => { const c = dailyChallenge(dayNumber()); return { text: c.text, done: state.career.daily?.day === dayNumber() && !!state.career.daily.done }; },
     bend: (side, dir) => nudge(side, dir),
     ready: readyDeck,
     load: (side, track) => loadTo(side, track),
@@ -1829,14 +1987,14 @@ const playView = createPlayView({
     },
     mixZone,
     openLibrary: (side, slot) => {
-      state.target = side;
+      state.target = side; state.picking = true;
       if (state.f.upNext && decks[side === 'left' ? 'right' : 'left'].buffer) state.tab = 'suggested';
       slot.append($('#library'));
       renderLibrary();
       requestAnimationFrame(() => $('#search').focus());
     },
     closeLibrary: () => {
-      state.target = null;
+      state.target = null; state.picking = false;
       home.library.parent.insertBefore($('#library'), home.library.next);
       renderLibrary(); scheduleFit();
     },
@@ -1880,21 +2038,22 @@ function mixZone(side) {
 const home = {};
 for (const [k, sel] of Object.entries({ coach: '#coach', lane: '#lanePanel', library: '#library' })) { const n = $(sel); home[k] = { parent: n.parentNode, next: n.nextSibling }; }
 /** Play view (the game skin, any level) or full decks. */
-function setView(v) {
+function setView(v, quiet = false) {
   state.view = v === 'decks' ? 'decks' : 'play'; store.set('view', state.view);
+  if (!packs.isOn('djlife') && !isPro()) store.set('decksView', state.view); // what "Learn to DJ" brings back next time
   applyView();
-  if (!playOn() && v === 'decks') toast('The full decks: every control, the library and the lessons. The Play view is back up top whenever you want it.');
+  if (!quiet && !isPro() && !playOn() && v === 'decks') toast('The full decks: every control, the library and the lessons. The Play view is back up top whenever you want it.');
 }
 function applyView() {
   const on = playOn();
   if (!on && playView.pickerOpen()) playView.closePicker();
-  // the beat lane and lesson card come along into the game skin, and go back after
-  for (const k of ['coach', 'lane']) {
-    const n = k === 'coach' ? $('#coach') : $('#lanePanel');
-    if (on) playView.slots[k].append(n); else home[k].parent.insertBefore(n, home[k].next);
-  }
+  // the beat lane comes along into the game skin, and goes back after. The lesson card stays on the full decks:
+  // its steps talk about deck A and B, and the game coaches with its own steps.
+  const lane = $('#lanePanel');
+  if (on) playView.slots.lane.append(lane); else home.lane.parent.insertBefore(lane, home.lane.next);
   state.coachKey = null;
   document.body.classList.toggle('play-mode', on);
+  document.body.classList.toggle('pro-layout', !on && !!state.f.proLayout);
   $('#playView').classList.toggle('hidden', !on);
   const vb = $('#viewBtn');
   vb.classList.toggle('hidden', !state.f.playView);
@@ -1917,7 +2076,36 @@ function renderVenueBtn() {
   const b = $('#venueBtn'); if (!b) return;
   const v = venueById(state.career.venue);
   b.innerHTML = `${icon('level', 15)} ${esc(v.name)}${state.career.offer ? ' <span class="vb-dot" aria-label="You\'ve been booked"></span>' : ''}`;
-  b.classList.toggle('hidden', playOn()); // the Play view has its own
+  b.classList.toggle('hidden', playOn() || !state.f.career); // the Play view has its own; Pro mode has no career
+}
+
+// ---------- tonight's tracklist (js/history.js) ----------
+/** A track joins the tracklist once the room has heard it for HISTORY_SECONDS. */
+function trackHistory(dt) {
+  for (const side of SIDES) {
+    const d = decks[side]; if (!d.buffer || !isLive(side)) continue;
+    const before = state.heard[side]; state.heard[side] += dt;
+    if (before < HISTORY_SECONDS && state.heard[side] >= HISTORY_SECONDS) {
+      state.session = logPlay(state.session, { ...d.track, bpm: d.bpm }, Date.now() - HISTORY_SECONDS * 1000);
+      store.set('history', saveSessions(store.get('history', []), state.session));
+      if (state.paneOpen && paneTab() === 'history') renderTutor();
+    }
+  }
+}
+function historyHTML() {
+  const old = store.get('history', []).filter((x) => x.id !== state.session.id);
+  const list = (ses) => (ses.tracks.length ? `<ol class="hist-list">${ses.tracks.map((t) => `<li><span class="hist-t">${esc(historySince(ses.start, t.at))}</span><span class="hist-n"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.bpm ? ` · ${t.bpm} BPM` : ''}${t.key ? ` · ${esc(t.key)}` : ''}</small></span></li>`).join('')}</ol>` : '<p class="small muted">Nothing yet. A track joins the list once the room has heard it for 30 seconds.</p>');
+  const acts = (id) => `<div class="hist-acts"><button class="ghost small" data-hist="copy" data-sid="${esc(id)}">${icon('copy', 14)} Copy</button><button class="ghost small" data-hist="txt" data-sid="${esc(id)}">${icon('download', 14)} Text</button><button class="ghost small" data-hist="csv" data-sid="${esc(id)}">${icon('download', 14)} CSV</button></div>`;
+  const when = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return `<section class="tutor-sec"><div class="hist-head"><b>Tonight</b><small class="muted">since ${esc(when(state.session.start))}</small></div>
+      ${list(state.session)}${state.session.tracks.length ? acts(state.session.id) : ''}</section>
+    ${old.length ? `<section class="tutor-sec"><div class="hist-head"><b>Earlier sets</b></div>${old.map((x) => `<details class="hist-old"><summary>${esc(when(x.start))} · ${x.tracks.length} track${x.tracks.length === 1 ? '' : 's'}</summary>${list(x)}${acts(x.id)}</details>`).join('')}</section>` : ''}`;
+}
+function historyAction(what, id) {
+  const ses = id === state.session.id ? state.session : store.get('history', []).find((x) => x.id === id); if (!ses) return;
+  if (what === 'copy') { navigator.clipboard?.writeText(historyText(ses)).then(() => toast('Tracklist copied.'), () => toast('Couldn\'t copy. Use Text to save it as a file.')); return; }
+  const csv = what === 'csv';
+  saveBlob(new Blob([csv ? historyCSV(ses) : historyText(ses)], { type: csv ? 'text/csv' : 'text/plain' }), `${historyFile(ses)}.${csv ? 'csv' : 'txt'}`);
 }
 
 // ---------- every frame ----------
@@ -1925,6 +2113,7 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.2, (now - last) / 1000); last = now;
   const s = mixState(dt);
+  trackHistory(dt);
   recordMix(s, dt);
   const hint = beatHint(s);
   const hel = $('#hint');
@@ -1972,7 +2161,7 @@ function frame(now) {
 
 // ---------- actions ----------
 function stepTempo(side, delta) {
-  const d = decks[side], r = tempoRange(state.level);
+  const d = decks[side], r = rangeOf(side);
   if (!d.buffer) return;
   d.setTempo(Math.max(-r, Math.min(r, Math.round((d.tempoPct + delta) * 100) / 100)));
 }
@@ -2460,7 +2649,7 @@ function eject(side) {
 }
 
 function check() {
-  const byEar = state.f.beatLaneCheck || lesson().hidesLane;
+  const byEar = state.f.beatLaneCheck || lesson().hidesLane || (playOn() && !state.f.offsetHint);
   if (!byEar) return;
   state.checkUntil = performance.now() + 3000;
   const L = decks.left, R = decks.right;
@@ -2479,6 +2668,10 @@ function deckEvents(side) {
     const b = e.target.closest('[data-a]'); if (!b) return;
     const a = b.dataset.a;
     if (a === 'keylock') return toggleKeyLock(side);
+    if (a === 'range') return cycleRange(side);
+    if (a === 'key-up' || a === 'key-down') return shiftKey(side, a === 'key-up' ? 1 : -1);
+    if (a === 'slip') { d().setSlip(!d().slipOn); renderDeck(side); return toast(d().slipOn ? `Slip on for deck ${LETTER[side]}: loops and reverse play over the track, which carries on underneath.` : `Slip off for deck ${LETTER[side]}.`); }
+    if (a === 'reverse') { if (!d().buffer) return; d().setReverse(!d().reversed); return renderDeck(side); }
     if (a === 'breakdown') return openTrackTab(side);
     if (a === 'choose') return focusLibrary(side, side === 'right' && state.f.upNext && decks.left.buffer ? 'suggested' : 'all');
     if (a === 'eject') return eject(side);
@@ -2493,6 +2686,18 @@ function deckEvents(side) {
   el.addEventListener('click', (e) => {
     const pad = e.target.closest('[data-cue]'); if (pad && d().buffer) return hotCue(side, +pad.dataset.cue, e.altKey);
     const pb = e.target.closest('[data-prep]'); if (pb && d().buffer) return prepAction(side, pb.dataset.prep, e);
+  });
+  // hold buttons: Censor plays backwards while held; the nudge buttons bend the speed while held
+  el.addEventListener('pointerdown', (e) => {
+    const c = e.target.closest('[data-censor]'), n = e.target.closest('[data-nudge]');
+    if ((!c && !n) || e.button !== 0 || !d().buffer) return;
+    e.preventDefault();
+    if (c) { d().censor(true); c.classList.add('on'); } else { nudge(side, +n.dataset.nudge); state.did.add('jog'); n.classList.add('on'); }
+    const up = () => {
+      if (c) { d().censor(false); c.classList.remove('on'); } else { nudge(side, 0); n.classList.remove('on'); }
+      window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+    };
+    window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
   });
   el.addEventListener('pointerdown', (e) => {
     if (!e.target.closest('[data-cuebtn]') || e.button !== 0) return;
@@ -2573,7 +2778,10 @@ function bind() {
   });
   $('#settingsBtn').innerHTML = icon('gear', 18); $('#menuBtn').innerHTML = icon('menu', 18);
   $('#settingsBtn').addEventListener('click', openSettings);
-  $('#settingsList').addEventListener('click', (e) => { const b = e.target.closest('[data-set]'); if (b) runSetting(b.dataset.set); });
+  bindSettings();
+  $('#lanePanel').addEventListener('click', (e) => { const z = e.target.closest('[data-zoom]'); if (z) zoomLane(+z.dataset.zoom); });
+  $('#laneZoomVal').textContent = `${state.prefs.laneZoom}×`;
+  $('[data-zoom="-1"]').innerHTML = icon('zoomout', 15); $('[data-zoom="1"]').innerHTML = icon('zoomin', 15);
   $('#packsList').addEventListener('click', (e) => {
     const on = e.target.closest('[data-pack-on]'), rs = e.target.closest('[data-pack-reset]');
     if (on) { const id = on.dataset.packOn; packs.setOn(id, !packs.isOn(id)); openPacks(); }
@@ -2582,10 +2790,10 @@ function bind() {
   $('#menuBtn').addEventListener('click', (e) => { const r = e.currentTarget.getBoundingClientRect(); desktop?.showMenu?.(r.left, r.bottom); });
   $('#themeBtn').addEventListener('click', () => { renderThemes(); $('#themes').showModal(); });
   $('#themeList').addEventListener('click', (e) => { const b = e.target.closest('[data-theme-id]'); if (b) applyTheme(b.dataset.themeId); });
-  $('#levelBtn').addEventListener('click', () => { renderLevels(); $('#levels').showModal(); });
+  $('#levelBtn').addEventListener('click', () => { if (isPro()) return openSettings(); renderLevels(); $('#levels').showModal(); });
   $('#viewBtn').addEventListener('click', () => setView(playOn() ? 'decks' : 'play'));
   $('#venueBtn').addEventListener('click', () => packs.filter('openMap', false) || (state.career.offer ? playView.openBooked() : playView.openMap()));
-  $('#levelList').addEventListener('click', (e) => { const b = e.target.closest('[data-level]'); if (b) { setLevel(b.dataset.level); $('#levels').close(); } });
+  $('#levelList').addEventListener('click', (e) => { const b = e.target.closest('[data-level]'); if (b && setLevel(b.dataset.level)) $('#levels').close(); });
   $('#checkBtn').addEventListener('click', check);
   $('#mixPlan').addEventListener('click', (e) => {
     if (!e.target.closest('[data-a="cue-b"]')) return;
@@ -2612,6 +2820,7 @@ function bind() {
   $('#tutor').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.ptab) return setPaneTab(b.dataset.ptab);
+    if (b.dataset.hist) return historyAction(b.dataset.hist, b.dataset.sid);
     if (b.dataset.a === 'close') return setPane(false);
     if (b.dataset.a === 'guide') return openGuide();
     if (b.dataset.a === 'guide-back') return closeGuide();
@@ -2646,9 +2855,10 @@ function bind() {
     else if (b.dataset.a === 'next') startLesson(b.dataset.lesson);
     else if (b.dataset.a === 'levelup') { state.cleanMixes = 0; store.set('cleanMixes', 0); setLevel(b.dataset.level); mixAgain(); }
   });
+  $('#launchView').addEventListener('click', (e) => { const b = e.target.closest('[data-launch]'); if (b) chooseLaunch(b.dataset.launch); });
   $('#welcomeView').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-source]'); if (!b || b.disabled) return;
-    if (await useSource(b.dataset.source)) { $('#welcomeView').classList.add('hidden'); focusLibrary('left', 'all'); maybeStartTour(); }
+    if (await useSource(b.dataset.source)) { $('#welcomeView').classList.add('hidden'); openLaunch(true); }
   });
   $('#libTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { state.tab = b.dataset.tab; renderLibrary(); } });
   $('#source').addEventListener('click', async (e) => {
@@ -2756,6 +2966,7 @@ function bind() {
     }
     const b = e.target.closest('[data-load]');
     if (b) { const t = rowTrack(e); if (t) loadTo(b.dataset.load, t); return; }
+    if (state.picking && state.target) { const t = rowTrack(e); if (t) return loadTo(state.target, t); } // the game: one click picks
     selectRow(e);
   });
   $('#list').addEventListener('dblclick', (e) => {
@@ -2767,7 +2978,8 @@ function bind() {
   });
   window.addEventListener('resize', () => { for (const s of SIDES) decks[s]._wave = null; });
   window.addEventListener('keydown', onKey);
-  window.addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') nudge(keySide(), 0); });
+  window.addEventListener('keyup', onKeyUp);
+  bindKeys();
   desktop?.onCommand?.(runCommand);
 }
 
@@ -2815,10 +3027,10 @@ function runCommand(cmd) {
     'play-left': () => togglePlay('left'),
     'play-right': () => togglePlay('right'),
     search: () => focusLibrary(null),
-    level: () => { renderLevels(); $('#levels').showModal(); },
+    level: () => { if (isPro()) return openSettings(); renderLevels(); $('#levels').showModal(); },
     theme: () => { renderThemes(); $('#themes').showModal(); },
-    help: () => $('#help').showModal(),
-    tour: startTour,
+    help: openKeys,
+    tour: tourFromHelp,
     guide: openGuide,
     'restart-lesson': () => startLesson(state.lessonId),
     'toggle-lessons': () => setPane(!state.paneOpen),
@@ -2835,7 +3047,7 @@ function onKey(e) {
   if (playView.layerOpen() || (playOn() && e.target?.closest?.('.pv-picker'))) return;
   const typing = !!e.target?.matches?.('input[type=search], input[type=text], textarea');
   if (e.key === 'Escape') { if (typing) e.target.blur(); if (state.target) { state.target = null; renderLibrary(); } return; }
-  if (typing || e.metaKey || e.ctrlKey || e.altKey || !$('#welcomeView').classList.contains('hidden')) return;
+  if (typing || e.metaKey || e.ctrlKey || e.altKey || !$('#welcomeView').classList.contains('hidden') || launchOpen() || $('dialog[open]')) return;
   if ((e.key === 'Delete' || e.key === 'Backspace') && state.source === 'managed' && !e.target?.closest?.('#tutor') && !e.target?.matches?.('input, textarea, select')) {
     const ids = state.libSel.size ? [...state.libSel] : state.libSelId ? [state.libSelId] : [];
     if (!ids.length) return;
@@ -2845,25 +3057,73 @@ function onKey(e) {
     else deleteFromLibrary(ids);
     return;
   }
-  const k = e.key.toLowerCase();
+  const hit = actionForEvent(state.keys, e); if (!hit) return;
+  const [grp, what] = hit.id.split('.');
+  // the deck a key works on: its own, except in the Play view, where speed and nudge keys move the song coming in
+  const deckKey = grp === 'a' || grp === 'b';
+  const side = !deckKey ? null : playOn() && ['slower', 'faster', 'back', 'ahead'].includes(what) ? keySide() : grp === 'a' ? 'left' : 'right';
+  const big = hit.shift;
   const act = {
-    q: () => togglePlay('left'),
-    p: () => togglePlay('right'),
-    arrowup: () => stepTempo(keySide(), e.shiftKey ? 1 : FINE),
-    arrowdown: () => stepTempo(keySide(), e.shiftKey ? -1 : -FINE),
-    arrowleft: () => { if (!e.repeat) { nudge(keySide(), -1); state.did.add('jog'); } },
-    arrowright: () => { if (!e.repeat) { nudge(keySide(), 1); state.did.add('jog'); } },
-    l: () => { if (!playOn()) setPane(!state.paneOpen); },
-    '[': () => moveXfader(state.xfader - 0.05),
-    ']': () => moveXfader(state.xfader + 0.05),
-    '/': () => focusLibrary(null),
-    c: check,
-    '?': () => $('#help').showModal(),
-    r: () => { if (!e.repeat) toggleRecording(); },
-  }[k];
+    play: () => togglePlay(side),
+    cue: () => { if (!e.repeat) { if (playOn()) togglePlay(side); else cueDown(side); } },
+    slower: () => stepTempo(side, big ? -1 : -FINE),
+    faster: () => stepTempo(side, big ? 1 : FINE),
+    back: () => { if (!e.repeat) { nudge(side, -1); state.did.add('jog'); } },
+    ahead: () => { if (!e.repeat) { nudge(side, 1); state.did.add('jog'); } },
+    loop: () => { if (!e.repeat) toggleLoop(side, 4); },
+    cue1: () => keyHotCue(side, 0), cue2: () => keyHotCue(side, 1), cue3: () => keyHotCue(side, 2), cue4: () => keyHotCue(side, 3),
+    load: () => loadSelected(side),
+    xleft: () => moveXfader(state.xfader - 0.05),
+    xright: () => moveXfader(state.xfader + 0.05),
+    search: () => focusLibrary(null),
+    pane: () => { if (!playOn()) setPane(!state.paneOpen); },
+    record: () => { if (!e.repeat) toggleRecording(); },
+    check,
+    help: () => openKeys(),
+  }[what];
   if (!act) return;
-  if (e.target?.matches?.('input[type=range]') && k.startsWith('arrow')) e.target.blur();
+  if (e.target?.matches?.('input[type=range]') && e.key.startsWith('Arrow')) e.target.blur();
   e.preventDefault(); act();
+}
+/** Key up: let go of CUE and the nudges. */
+function onKeyUp(e) {
+  const hit = actionForEvent(state.keys, e); if (!hit) return;
+  const [grp, what] = hit.id.split('.'); if (grp !== 'a' && grp !== 'b') return;
+  const side = playOn() && (what === 'back' || what === 'ahead') ? keySide() : grp === 'a' ? 'left' : 'right';
+  if (what === 'back' || what === 'ahead') nudge(side, 0);
+  if (what === 'cue' && !playOn()) cueUp(side);
+}
+function keyHotCue(side, i) {
+  if (!decks[side].buffer) return;
+  if (!state.f.hotCues) return toast('Hot cues come in at the Improver level.');
+  hotCue(side, i, false);
+}
+
+// ---------- keyboard shortcuts: see and change every key (js/keymap.js) ----------
+let keyWait = null; // the action waiting for its new key
+function openKeys() { keyWait = null; renderKeys(); if (!$('#help').open) $('#help').showModal(); }
+function renderKeys() {
+  const cap = (combo) => (combo ? keyLabel(combo).map((k) => `<kbd>${esc(k)}</kbd>`).join(' ') : '<span class="muted small">No key</span>');
+  $('#keyList').innerHTML = KEY_GROUPS.map(([g, name]) => `<div class="keys-group"><h3>${esc(name)}</h3>${Object.entries(ACTIONS).filter(([, a]) => a.group === g).map(([id, a]) => `
+    <div class="key-row ${keyWait === id ? 'wait' : ''}"><span>${esc(a.name)}</span><span class="key-cap">${keyWait === id ? '<span class="small">Press a key… <kbd>Esc</kbd> to cancel</span>' : cap(state.keys[id])}</span>
+      <button type="button" class="ghost small" data-key-set="${id}" aria-label="Change the key for ${esc(name)}: ${esc(a.name)}">${keyWait === id ? 'Waiting' : 'Change'}</button></div>`).join('')}</div>`).join('');
+}
+function bindKeys() {
+  $('#keyList').addEventListener('click', (e) => { const b = e.target.closest('[data-key-set]'); if (b) { keyWait = keyWait === b.dataset.keySet ? null : b.dataset.keySet; renderKeys(); } });
+  $('#keysReset').addEventListener('click', () => { state.keys = loadKeys(null); store.set('keys', {}); keyWait = null; renderKeys(); toast('Keys back to the defaults.'); });
+  $('#help').addEventListener('keydown', (e) => {
+    if (!keyWait) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.key === 'Escape') { keyWait = null; return renderKeys(); }
+    if (e.key === 'Backspace' || e.key === 'Delete') { state.keys = rebind(state.keys, keyWait, '').keys; }
+    else {
+      const combo = comboOf(e); if (!combo) return; // a modifier on its own: keep waiting
+      const r = rebind(state.keys, keyWait, combo); state.keys = r.keys;
+      if (r.freed.length) toast(`${keyLabel(combo).join('+')} was on "${ACTIONS[r.freed[0]].name}" (${KEY_GROUPS.find(([g]) => g === ACTIONS[r.freed[0]].group)[1]}). That now has no key.`);
+    }
+    store.set('keys', changedKeys(state.keys)); keyWait = null; renderKeys();
+  }, true);
+  $('#help').addEventListener('close', () => { keyWait = null; });
 }
 
 // ---------- set list (side panel) ----------
@@ -2896,12 +3156,12 @@ async function generateSet() {
   if (!pool.length) return toast(`${from.name} has no tracks yet.`);
   const first = decks.left.track && pool.some((t) => t.id === decks.left.track.id) ? decks.left.track : null;
   const where = from.kind === 'all' ? 'your library' : from.name;
-  if (!state.ai.hasKey) {
+  if (!state.ai.hasKey || state.prefs.young) {
     const items = quickSet(pool, { minutes: state.setMinutes, vibe: state.setVibe, first, ...crowd() });
     if (!items.length) return toast('None of these tracks have a known speed yet. Try again in a moment.');
     const ev = setEvent(), name = ev.usesVibe ? `${vibeName()} set` : `${ev.name} set`;
     commitSet(makeSet({ title: `${name}${from.kind === 'all' ? '' : ` from ${from.name}`}`, story: `Built from ${where}. ${ev.story}`, items }));
-    return toast('Quick build done. Connect the AI coach for sets that follow your description.');
+    return toast(state.prefs.young ? 'Set built from your library.' : 'Quick build done. Connect the AI coach for sets that follow your description.');
   }
   state.setBusy = 'generate'; renderSetPanel();
   try {
@@ -2914,7 +3174,7 @@ async function generateSet() {
 async function refineCurrentSet() {
   const s = state.set; if (!s?.items.length) return toast('Make a set first: press Generate, or add tracks with + in the library.');
   const downs = s.items.filter((i) => i.vote < 0).length;
-  if (!state.ai.hasKey) {
+  if (!state.ai.hasKey || state.prefs.young) {
     if (!downs) return toast(state.refineText ? 'Following an instruction needs the AI coach. Without it, Refine swaps the tracks you gave a thumbs down.' : 'Give a thumbs down to the tracks you want swapped, then press Refine.');
     const r = refineSet(state.tracks, s, { vibe: state.setVibe, minutes: state.setMinutes, from: setPool(), ...crowd() });
     commitSet(r.set);
@@ -2946,7 +3206,7 @@ function loadNextFromSet() {
   loadTo(side, n.track);
 }
 
-const paneTab = () => state.paneTab || (state.f.setFirst ? 'set' : 'lessons');
+const paneTab = () => { const t = state.paneTab || (state.f.setFirst || isPro() ? 'set' : 'lessons'); return isPro() && t === 'lessons' ? 'set' : t; };
 function setPaneTab(tab) { state.paneTab = tab; state.guideOpen = false; store.set('paneTab', tab); renderTutor(); }
 function renderSetPanel() { if (state.paneOpen && paneTab() === 'set') renderTutor(); }
 
@@ -3133,7 +3393,7 @@ function setPanelClick(e) {
 }
 
 // ---------- AI coach ----------
-function openAI() { renderAI(); $('#aiDlg').showModal(); }
+function openAI() { if (youngBlocked()) return; renderAI(); $('#aiDlg').showModal(); }
 function renderAI() {
   const a = state.ai;
   $('#aiState').innerHTML = a.hasKey ? `<span class="ok-pill">${icon('check', 14)} Connected · ${esc(a.model || 'Claude')}</span>` : `<span class="off-pill">${icon('key', 14)} Not connected</span>`;
@@ -3148,6 +3408,7 @@ function renderAI() {
 }
 
 async function askAICoach() {
+  if (youngBlocked()) return;
   const ref = decks.left.track; if (!ref) return toast('Load a track on deck A first.');
   if (!state.ai.hasKey) { toast('Connect the AI coach first.'); return openAI(); }
   state.aiBusy = true; renderList();
@@ -3199,7 +3460,8 @@ let syncTold = -Infinity; // when we last explained there's no sync (shown at mo
 function onControllerMessage(profile, ctl, data) {
   if (data[0] === 0xF0) return; // SysEx replies to our keep-alive
   if (state.learn && state.learn.device === profile.name) return onLearnMessage(profile.name, data);
-  const a = midiToAction(profile, ctl, data, { tempoRange: tempoRange(state.level) });
+  const a = midiToAction(profile, ctl, data, { tempoRange: rangeOf('left') });
+  if (a?.type === 'tempo' && a.side === 'right' && Number.isFinite(a.pct)) a.pct = (a.pct / rangeOf('left')) * rangeOf('right'); // each deck has its own range
   logMidi(data, a);
   if (!a) return;
   const d = a.side ? decks[a.side] : null;
@@ -3492,30 +3754,102 @@ async function watchRekordbox() {
   return false;
 }
 
-// ---------- settings ----------
-const SETTINGS = [
+// ---------- settings (js/prefs.js) ----------
+const MORE = [
   ['music', 'folder', 'Music library', 'Practice tracks, a music folder or your rekordbox library'],
-  ['controller', 'keyboard', 'Controller and sound', 'Your DJ controller, and where the sound comes out'],
-  ['ai', 'wand', 'AI coach', 'Connect Claude for set building and track picks'],
+  ['controller', 'keyboard', 'Controller and sound', 'Your DJ controller, headphones and where the sound comes out'],
+  ['keys', 'keyboard', 'Keyboard shortcuts', 'See and change every key'],
+  ['ai', 'wand', 'AI coach', 'Connect Claude for set building and track picks', 'adult'],
   ['theme', 'palette', 'Appearance', 'Light, dark and colour themes'],
-  ['level', 'level', 'Your level', 'How much help and how many controls you see'],
-  ['packs', 'sparkle', 'Expansion packs', 'Add-ons that change the game, like DJ Life'],
-  ['lessons', 'book', 'Lessons', 'Show or hide the lessons pane'],
   ['layout', 'layout', 'Layout', 'Collapse, move or hide sections to suit you'],
-  ['help', 'help', 'Keyboard shortcuts', 'Every key Cue Coach listens to'],
+  ['level', 'level', 'Your level', 'How much help and how many controls you see', 'learn'],
+  ['packs', 'sparkle', 'Expansion packs', 'Add-ons that change the game, like DJ Life', 'learn'],
 ];
-function openSettings() {
-  $('#settingsList').innerHTML = SETTINGS.map(([id, ic, name, note]) => `<button data-set="${id}">${icon(ic, 18)}<span><b>${name}</b><small>${note}</small></span></button>`).join('');
-  $('#settingsDlg').showModal();
+function openSettings() { renderSettings(); if (!$('#settingsDlg').open) $('#settingsDlg').showModal(); }
+function renderSettings() {
+  const p = state.prefs, pro = isPro();
+  const opt = (v, cur, label) => `<option value="${esc(String(v))}" ${String(v) === String(cur) ? 'selected' : ''}>${esc(label)}</option>`;
+  const row = (label, note, control) => `<div class="set-row"><span><b>${label}</b>${note ? `<small>${note}</small>` : ''}</span>${control}</div>`;
+  const check = (key, on) => `<label class="switch"><input type="checkbox" data-pref="${key}" ${on ? 'checked' : ''}><i></i></label>`;
+  const more = MORE.filter(([, , , , only]) => !(only === 'learn' && pro) && !(only === 'adult' && p.young));
+  $('#settingsList').innerHTML = `
+    <section class="set-sec"><h3>Mode</h3>
+      <div class="mode-cards" role="radiogroup" aria-label="Mode">${MODES.map((m) => `<button type="button" role="radio" aria-checked="${p.mode === m.id}" class="mode-card ${p.mode === m.id ? 'on' : ''}" data-mode="${m.id}">${icon(m.id === 'pro' ? 'disc' : 'level', 20)}<b>${esc(m.name)}</b><small>${esc(m.blurb)}</small></button>`).join('')}</div>
+    </section>
+    ${pro ? '' : `<section class="set-sec"><h3>Start-up</h3>${row('When Cue Coach opens', 'The start screen lets you pick DJ Life, Learn or Pro each time.', `<select class="sel" data-pref="start">${START_VIEWS.map(([v, l]) => opt(v, p.start, l)).join('')}</select>`)}</section>`}
+    <section class="set-sec"><h3>Decks</h3>
+      ${row('Jog wheels', 'Automatic hides them in the pro layout: nudge with the buttons, the keys or a controller.', `<select class="sel" data-pref="jogs">${opt('auto', p.jogs, 'Automatic')}${opt('show', p.jogs, 'Always show')}${opt('hide', p.jogs, 'Hide')}</select>`)}
+      ${row('Speed fader', 'Which way is faster.', `<select class="sel" data-pref="upIsFaster">${opt('false', p.upIsFaster, 'Pull down to go faster (CDJ)')}${opt('true', p.upIsFaster, 'Push up to go faster')}</select>`)}
+      ${pro || state.f.proTools ? row('Tempo range for new decks', 'Each deck\'s ±% button changes it on the fly.', `<select class="sel" data-pref="tempoRange">${[6, 8, 10, 16, 50].map((r) => opt(r, p.tempoRange, `±${r}%`)).join('')}</select>`) : ''}
+      ${row('Protect the live deck', 'Never load a track onto the deck the room is hearing.', check('loadLock', p.loadLock))}
+    </section>
+    <section class="set-sec"><h3>Sound</h3>
+      ${row('Audio buffer', `${esc(LATENCIES.find(([v]) => v === p.latency)[2])} Takes effect when Cue Coach restarts.`, `<span class="set-inline"><select class="sel" data-pref="latency">${LATENCIES.map(([v, l]) => opt(v, p.latency, l)).join('')}</select><button type="button" class="ghost small" data-set="restart">Restart now</button></span>`)}
+      ${row('Safety limiter', 'Stops a hot mix clipping the speakers and your recordings. The LIMIT light on the master meter shows when it\'s working.', check('limiter', p.limiter))}
+      ${row('Booth output', 'Send the main mix to a second sound output too, for a booth monitor.', `<select class="sel" data-pref="booth" id="boothSel">${opt('', p.booth, 'Off')}</select>`)}
+      ${p.booth ? row('Booth level', '', `<input type="range" min="0" max="1.5" step="0.05" value="${p.boothLevel}" data-pref="boothLevel" aria-label="Booth level">`) : ''}
+    </section>
+    <section class="set-sec"><h3>Recording</h3>
+      ${row('Keep a clip of every mix', 'For "Listen back" in the mix report. Turn off to save memory on long sets.', check('mixClips', p.mixClips))}
+    </section>
+    <section class="set-sec"><h3>${icon('shield', 16)} Young DJ mode</h3>
+      ${p.young
+        ? `<p class="small">On: no links to shops or streaming services, no AI coach and no API keys.${p.youngPin ? ' A grown-up\'s PIN is needed to switch it off.' : ''}</p>
+          <div class="set-inline">${p.youngPin ? '<input type="password" inputmode="numeric" maxlength="4" class="pin" id="youngPin" placeholder="PIN" aria-label="PIN" autocomplete="off">' : ''}<button type="button" data-set="young-off">Switch off</button></div>`
+        : `<p class="small">For younger DJs: hides links to shops and streaming services, the AI coach and API keys. Add a 4-digit PIN so only a grown-up can switch it off.</p>
+          <div class="set-inline"><input type="password" inputmode="numeric" maxlength="4" class="pin" id="youngPin" placeholder="PIN (optional)" aria-label="PIN, optional" autocomplete="off"><button type="button" class="primary" data-set="young-on">Switch on</button></div>`}
+    </section>
+    <section class="set-sec"><h3>More</h3><div class="settings-more">${more.map(([id, ic, name, note]) => `<button type="button" data-set="${id}">${icon(ic, 18)}<span><b>${name}</b><small>${note}</small></span></button>`).join('')}</div></section>`;
+  soundOutputs().then((outs) => {
+    const sel = $('#boothSel'); if (!sel) return;
+    sel.innerHTML = opt('', p.booth, 'Off') + outs.filter((o) => o.id !== store.get('sink', '')).map((o) => opt(o.id, p.booth, o.label)).join('');
+    sel.disabled = !outs.length;
+  });
 }
-function runSetting(id) {
-  $('#settingsDlg').close();
-  if (id === 'music') { state.menuOpen = true; renderSource(); $('#library').scrollIntoView({ block: 'nearest' }); return; }
-  if (id === 'lessons') return setPane(!state.paneOpen);
-  if (id === 'layout') return openLayout();
-  if (id === 'packs') return openPacks();
-  runCommand({ controller: 'controller', ai: 'ai', theme: 'theme', level: 'level', help: 'help' }[id]);
+function bindSettings() {
+  const dlg = $('#settingsDlg');
+  dlg.addEventListener('change', (e) => {
+    const k = e.target.dataset.pref; if (!k) return;
+    const raw = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    const v = k === 'upIsFaster' ? raw === 'true' : k === 'tempoRange' || k === 'boothLevel' ? +raw : raw;
+    savePrefs({ [k]: v });
+    if (k === 'limiter') setLimiter(v);
+    if (k === 'booth' || k === 'boothLevel') routeBooth(state.prefs.booth, state.prefs.boothLevel).then((err) => err && toast(err));
+    if (k === 'jogs' || k === 'upIsFaster' || k === 'tempoRange') { if (k === 'tempoRange') for (const s of SIDES) { state.range[s] = v; store.set(`range.${s}`, v); clampTempo(s); } renderDecks(); applyView(); }
+    if (k === 'limiter' || k === 'mixClips') renderMixer();
+    if (k !== 'boothLevel') renderSettings();
+  });
+  dlg.addEventListener('input', (e) => { if (e.target.dataset.pref === 'boothLevel') { savePrefs({ boothLevel: +e.target.value }); setBoothLevel(+e.target.value); } });
+  dlg.addEventListener('click', (e) => {
+    const m = e.target.closest('[data-mode]'); if (m) { setMode(m.dataset.mode); return renderSettings(); }
+    const b = e.target.closest('[data-set]'); if (!b) return;
+    const id = b.dataset.set;
+    if (id === 'restart') return location.reload();
+    if (id === 'young-on') {
+      const pin = $('#youngPin')?.value.trim() || '';
+      if (pin && !/^\d{4}$/.test(pin)) return toast('A PIN is 4 numbers.');
+      savePrefs({ young: true, youngPin: pin }); applyYoung(); renderSettings();
+      return toast(`Young DJ mode on${pin ? '. Keep the PIN somewhere safe' : ''}.`);
+    }
+    if (id === 'young-off') {
+      if (!canLeaveYoung(state.prefs, $('#youngPin')?.value.trim())) return toast('That PIN isn\'t right.');
+      savePrefs({ young: false, youngPin: '' }); applyYoung(); renderSettings();
+      return toast('Young DJ mode off.');
+    }
+    dlg.close();
+    if (id === 'music') { state.menuOpen = true; renderSource(); $('#library').scrollIntoView({ block: 'nearest' }); return; }
+    if (id === 'layout') return openLayout();
+    if (id === 'packs') return openPacks();
+    if (id === 'keys') return openKeys();
+    runCommand({ controller: 'controller', ai: 'ai', theme: 'theme', level: 'level' }[id]);
+  });
 }
+/** Young DJ mode: no links out, no shop, no AI key (the CSS hides them; the functions check too). */
+function applyYoung() {
+  document.body.classList.toggle('young', state.prefs.young);
+  if (state.prefs.young) { closeLinkMenu?.(); if ($('#aiDlg').open) $('#aiDlg').close(); }
+}
+const youngBlocked = () => { if (!state.prefs.young) return false; toast('That\'s switched off in Young DJ mode.'); return true; };
 
 // ---------- expansion packs ----------
 function openPacks() {
@@ -3540,13 +3874,67 @@ const packCtx = {
   resetVibe: () => playView.resetVibe(),
 };
 
+// ---------- the start screen: DJ Life, Learn or Pro ----------
+// Learn mode shows it each time you open the app (unless Settings says where to start). Pro mode never does:
+// a working DJ opens straight onto the decks. Your last pick is ringed and focused.
+const launchOpen = () => !$('#launchView').classList.contains('hidden');
+function openLaunch(first = false) {
+  if (isPro() && !first) return false;
+  const hasLife = packs.listPacks().some((p) => p.id === 'djlife');
+  const life = hasLife ? packs.resumeInfo('djlife') : null;
+  const saved = store.get('launch', packs.isOn('djlife') ? 'life' : 'learn');
+  const last = first ? 'learn' : saved === 'decks' ? 'learn' : saved; // 'decks' was "Just the decks" before Pro mode
+  const lvl = LEVELS.find((l) => l.id === state.level)?.name || state.level;
+  const card = (id, ic, title, body) => `<button class="choice ${last === id ? 'last' : ''}" data-launch="${id}">
+    ${icon(ic, 22)}<b>${title}</b>${body}${last === id && !first ? '<span class="tag last-tag">Last time</span>' : ''}</button>`;
+  $('#launchTitle').textContent = first ? 'How do you want to start?' : 'Welcome back';
+  $('#launchLead').textContent = first ? 'You can change this any time in Settings.' : 'What are you up to today?';
+  $('#launchChoices').innerHTML = (hasLife ? card('life', 'sparkle', life ? 'Carry on with DJ Life' : 'DJ Life',
+    life ? `<span class="where">${esc(life.title)} · ${esc(life.line)}</span><span>Walk round town, take gigs, pay the rent.</span>`
+      : '<span>The full game: start in your parents\' spare room, play gigs for money, buy gear, move out.</span>') : '')
+    + card('learn', 'level', 'Learn to DJ',
+      `<span class="where">${first ? 'Start at Starter' : `${esc(lvl)} · ${esc(venueById(state.career.venue).name)}`}</span><span>The Play view, lessons and a coach. Work your way from the bedroom to the main room.</span>`)
+    + card('pro', 'disc', 'Pro decks',
+      '<span class="where">No game</span><span>Just the decks: every tool, no coaching, career or scores.</span>');
+  $('#launchNote').textContent = life ? 'Your DJ Life save is kept whichever you pick.' : 'Your level, look and music are just as you left them.';
+  $('#launchView').classList.remove('hidden');
+  requestAnimationFrame(() => $(`[data-launch="${last}"]`)?.focus());
+  return true;
+}
+function chooseLaunch(which, view = null) {
+  store.set('launch', which);
+  $('#launchView').classList.add('hidden');
+  if (which === 'pro') { setMode('pro', true); setView('decks', true); toast('Pro decks: every tool on, nothing in your way. Switch to Learn mode in Settings any time.'); return; }
+  setMode('learn', true);
+  if (which === 'life') {
+    packs.setOn('djlife', true);
+    if (!playOn()) setView('play');
+    packs.filter('openRoom', false);
+  } else {
+    packs.setOn('djlife', false);
+    const v = view || store.get('decksView', state.view);
+    if (v !== state.view) { state.view = v; store.set('view', v); applyView(); } // quietly: no 'full decks' toast
+    maybeStartTour();
+  }
+}
+/** Start-up in Learn mode: the start screen, or straight to where Settings says. */
+function startUp() {
+  if (isPro()) return;
+  const where = state.prefs.start;
+  if (where === 'ask' || (where === 'life' && !packs.listPacks().some((p) => p.id === 'djlife'))) return openLaunch();
+  chooseLaunch(where === 'life' ? 'life' : 'learn', where === 'play' || where === 'decks' ? where : null);
+}
+
 // ---------- start ----------
 async function boot() {
   if (desktop?.platform) document.documentElement.classList.add(desktop.platform);
-  applyTheme(store.get('theme', 'auto'));
+  applyTheme(store.get('theme', store.get('source', null) ? 'auto' : 'neon')); // new installs start on the Play view's own colours
   bind();
+  applyMode(); applyYoung();
+  if (isPro()) packs.setOn('djlife', false);
   setLevel(state.level, true);
   packs.startPacks(packCtx);
+  if (state.prefs.booth) routeBooth(state.prefs.booth, state.prefs.boothLevel).then((err) => err && toast(err));
   renderSource();
   startLesson(state.lessonId);
   aiStatus().then((st) => { state.ai = st; renderAI(); });
@@ -3555,6 +3943,7 @@ async function boot() {
   (sink && ctx.setSinkId ? ctx.setSinkId(sink).catch(() => store.set('sink', '')) : Promise.resolve()).then(() => applyRoute());
   const rb = watchRekordbox();
   if (!state.source) { $('#welcomeView').classList.remove('hidden'); return; }
+  startUp(); // the music keeps loading behind the start screen
   if (state.source === 'rekordbox') {
     // the helper may still be starting: wait for it rather than switching your library to practice tracks
     state.analysing = { text: 'Connecting to rekordbox…', spin: true }; renderSource();

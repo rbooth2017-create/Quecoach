@@ -33,7 +33,8 @@ const BASS_CUT = -30;
  *   bend(side, dir), ready(side), load(side, track), suggest(ref, { exclude, limit }), career(),
  *   takeBooking(), djName(), setDjName(name), fullDecks(), tempoStep, seek(side, t), mixZone(side),
  *   openLibrary(side, slot), closeLibrary(), vol(side), setVol(side, v), bass(side), setBass(side, db), controls(),
- *   count(side), phraseGap(), align(side) }
+ *   count(side), phraseGap(), align(side), hints() → { speed } (false: match by ear), tapStep(side, dir) (one tap's size),
+ *   daily() → { text, done } | null }
  * The beat lane, the lesson card and the library are the full decks' own elements, lent to this view
  * (see slots in the returned object).
  */
@@ -59,6 +60,7 @@ export function createPlayView({ root, layer, api }) {
         <div class="pv-coach" data-pv-coachslot></div>
         <div class="pv-top-r">
           <span class="pv-packchips" data-pv-packchips></span>
+          <span class="pv-chip pv-daily" data-pv-daily></span>
           <span class="pv-chip" data-pv-streak title="Mixes in a row with 2 stars or more"></span>
           <span class="pv-chip" data-pv-starcount title="Stars from all your mixes"></span>
           <button class="pv-chip" data-pv="decks" title="Show the full decks, mixer, library and lessons">${icon('sliders', 15)}Full decks</button>
@@ -112,7 +114,7 @@ export function createPlayView({ root, layer, api }) {
     </aside>
     <div class="pv-picker hidden" data-pv-picker role="dialog" aria-modal="true" aria-label="Choose a song">
       <div class="pv-picker-card">
-        <div class="pv-picker-head"><b data-pv-ptitle>Choose a song</b><span class="pv-picker-tip">Double-click a song to put it on</span><button class="pv-x" data-pv="close-picker" aria-label="Close">${icon('x', 16)}</button></div>
+        <div class="pv-picker-head"><b data-pv-ptitle>Choose a song</b><span class="pv-picker-tip" data-pv-ptip></span><button class="pv-x" data-pv="close-picker" aria-label="Close">${icon('x', 16)}</button></div>
         <div class="pv-libslot" data-pv-libslot></div>
       </div>
     </div>
@@ -177,10 +179,12 @@ export function createPlayView({ root, layer, api }) {
     if (a === 'close-result') return hideResult();
   });
   // keyboard (Enter / Space): one step, or a short push
+  /** One tap: a step sized to the gap (so a few taps get you there), never past the match. */
+  const tap = (side, dir) => (api.tapStep ? api.tapStep(side, dir) : api.tempoStep);
   root.addEventListener('click', (e) => {
     const b = e.target.closest('[data-hold]'); if (!b || e.detail !== 0) return;
     const side = st.roles.inc, what = b.dataset.hold;
-    if (what === 'faster' || what === 'slower') return api.tempo(side, (what === 'faster' ? 1 : -1) * api.tempoStep);
+    if (what === 'faster' || what === 'slower') { const dir = what === 'faster' ? 1 : -1; return api.tempo(side, dir * tap(side, dir)); }
     api.bend(side, what === 'back' ? -1 : 1); setTimeout(() => api.bend(side, 0), 250);
   });
   root.addEventListener('input', (e) => {
@@ -225,7 +229,7 @@ export function createPlayView({ root, layer, api }) {
     if (what === 'back' || what === 'ahead') { api.bend(side, what === 'back' ? -1 : 1); st.hold = { end }; }
     else {
       const dir = what === 'faster' ? 1 : -1; let n = 0;
-      const tick = () => { api.tempo(side, dir * (n > 12 ? api.tempoStep * 6 : n > 4 ? api.tempoStep * 2 : api.tempoStep)); n++; st.hold.t = setTimeout(tick, n === 1 ? 350 : 90); };
+      const tick = () => { api.tempo(side, dir * (n === 0 ? tap(side, dir) : n > 12 ? api.tempoStep * 6 : n > 4 ? api.tempoStep * 2 : api.tempoStep)); n++; st.hold.t = setTimeout(tick, n === 1 ? 350 : 90); };
       st.hold = { end }; tick();
     }
     const up = () => { end(); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); };
@@ -283,8 +287,11 @@ export function createPlayView({ root, layer, api }) {
       case 'pick': case 'load':
         return { kicker, title: 'Pick what\'s next', detail: 'Choose a song from Play next. The green ones blend best with this one.', step: 'pick' };
       case 'match': {
-        const adv = speedAdvice(bm?.bpmDiff);
-        return { kicker, title: 'Lock the pulse', detail: `${adv.text} When the two circles sit on top of each other, the speeds match.`, step: 'match' };
+        if (!byEar()) {
+          const adv = speedAdvice(bm?.bpmDiff);
+          return { kicker, title: 'Lock the pulse', detail: `${adv.text} When the two circles sit on top of each other, the speeds match.`, step: 'match' };
+        }
+        return { kicker, title: 'Match it by ear', detail: `Listen to the two kick drums. If they gallop, tap Faster or Slower until ${inc} sits on the beat. Press C to check.`, step: 'match' };
       }
       case 'cue':
         return { kicker, title: 'Get it ready', detail: `Press "Get it ready" so ${inc} waits on its very first beat.`, cta: 'ready', step: 'cue' };
@@ -323,6 +330,9 @@ export function createPlayView({ root, layer, api }) {
     if (F.playing && !T.buffer) return { kicker: '', title: 'Pick what\'s next', detail: 'Choose a song from Play next.', cta: 'pick' };
     return { kicker: '', title: 'Keep it moving', detail: 'Match the speed, then start the next song on the 1.' };
   }
+
+  /** Confident and Pro: no speed tips or match %, the ears do it (the C key still checks). */
+  const byEar = () => api.hints && !api.hints().speed && !(api.checking?.());
 
   // ---------- per frame ----------
   function update(dt) {
@@ -376,10 +386,11 @@ export function createPlayView({ root, layer, api }) {
 
     // the lock
     const lk = el('lock');
-    lk.style.setProperty('--sep', String(1 - lock));
-    lk.dataset.state = !bm ? 'off' : lock >= 0.99 ? 'locked' : lock >= 0.8 ? 'close' : 'apart';
+    const ear = byEar();
+    lk.style.setProperty('--sep', String(ear && bm ? 0.45 : 1 - lock));
+    lk.dataset.state = !bm ? 'off' : ear ? 'ear' : lock >= 0.99 ? 'locked' : lock >= 0.8 ? 'close' : 'apart';
     lk.classList.toggle('flip', r.floor === 'right');
-    setText(el('locktext'), !bm ? '' : lock >= 0.99 ? (bm.both ? 'LOCKED' : '100%') : `${Math.round(lock * 100)}%`);
+    setText(el('locktext'), !bm ? '' : ear ? 'BY EAR' : lock >= 0.99 ? (bm.both ? 'LOCKED' : '100%') : `${Math.round(lock * 100)}%`);
 
     // what to say, and which controls matter now
     const s = say(n, r, bm);
@@ -391,14 +402,14 @@ export function createPlayView({ root, layer, api }) {
     $('[data-pv="pick"]', root).hidden = s.cta !== 'pick';
     const sp = el('speed'); sp.hidden = !T.buffer || !F.buffer;
     if (!sp.hidden) {
-      const adv = bm && Math.abs(bm.bpmDiff) > 0.1 ? speedAdvice(bm.bpmDiff) : null;
-      const nud = !adv && bm?.both ? nudgeAdvice(offsetMs) : null;
+      const adv = !ear && bm && Math.abs(bm.bpmDiff) > 0.1 ? speedAdvice(bm.bpmDiff) : null;
+      const nud = !ear && !adv && bm?.both ? nudgeAdvice(offsetMs) : null;
       $('[data-hold="faster"]', sp).classList.toggle('hint', adv?.dir === 'faster');
       $('[data-hold="slower"]', sp).classList.toggle('hint', adv?.dir === 'slower');
       $('[data-hold="back"]', sp).classList.toggle('hint', nud?.dir === 'back');
       $('[data-hold="ahead"]', sp).classList.toggle('hint', nud?.dir === 'ahead');
       $('.pv-seg.small', sp).hidden = !T.playing; // pushing the beats only matters once both play
-      setText(el('advice'), adv ? adv.text : nud?.text || (bm ? 'Same speed.' : ''));
+      setText(el('advice'), ear ? 'Trust your ears.' : adv ? adv.text : nud?.text || (bm ? 'Same speed.' : ''));
       sp.classList.toggle('focus', s.step === 'match');
     }
 
@@ -427,8 +438,8 @@ export function createPlayView({ root, layer, api }) {
     el('bassrow').classList.toggle('hint', hl.has('bass'));
     const bl = bassOn('left'), br = bassOn('right');
     const bothBass = bl && br && D.left.buffer && D.right.buffer;
-    setText(el('bl'), D.left.buffer ? (bl ? 'Bass on' : 'Bass off') : 'Left');
-    setText(el('br'), D.right.buffer ? (br ? 'Bass on' : 'Bass off') : 'Right');
+    setText(el('bl'), D.left.buffer ? (bl ? 'Bass on' : 'Bass off') : 'No song');
+    setText(el('br'), D.right.buffer ? (br ? 'Bass on' : 'Bass off') : 'No song');
     el('bl').classList.toggle('on', !!(D.left.buffer && bl)); el('br').classList.toggle('on', !!(D.right.buffer && br));
     el('bassrow').classList.toggle('muddy', !!(bothBass && D.left.playing && D.right.playing && api.gain('left') > 0.12 && api.gain('right') > 0.12));
     el('hand').classList.toggle('hint', hl.has('hand'));
@@ -466,8 +477,8 @@ export function createPlayView({ root, layer, api }) {
     // handover slider
     const xf = el('xf');
     if (document.activeElement !== xf) xf.value = api.xfader();
-    setText(el('hl'), D.left.buffer ? D.left.track.title : 'Left');
-    setText(el('hr'), D.right.buffer ? D.right.track.title : 'Right');
+    setText(el('hl'), D.left.buffer ? D.left.track.title : 'No song');
+    setText(el('hr'), D.right.buffer ? D.right.track.title : 'No song');
     el('hand').classList.toggle('go', !!s.slide && (!s.hl || s.hl.includes('hand')));
     el('hand').classList.toggle('flip', r.floor === 'right');
     const bars = el('bars');
@@ -514,7 +525,13 @@ export function createPlayView({ root, layer, api }) {
       el('gigbars').innerHTML = Array.from({ length: gb.of }, (_, i) => `<i class="${i < gb.done ? 'on' : ''}"></i>`).join('');
     }
     setText(el('giglabel'), hud ? hud.label : 'Gig progress');
-    setText(el('gigtext'), hud ? hud.text : gp.last ? 'Headline set. Keep that floor full.' : gp.booked ? `You're booked at ${gp.next.name}. Open the map.` : `${plural(gp.of - gp.done, 'more mix')} with ${GIG.stars} stars or more and you're booked at ${gp.next.name}.`);
+    setText(el('gigtext'), hud ? hud.text : gigText(gp));
+    const daily = api.daily?.();
+    const dk = daily ? `${daily.text}|${daily.done}` : '';
+    if (el('daily').dataset.key !== dk) {
+      el('daily').dataset.key = dk; el('daily').hidden = !daily;
+      if (daily) { el('daily').innerHTML = `${daily.done ? icon('check', 14) : STAR(false)}Today`; el('daily').title = `Today's challenge${daily.done ? ' (done)' : ''}: ${daily.text}. Bonus stars once a day.`; el('daily').classList.toggle('done', daily.done); }
+    }
 
     // Play next: when there's room for another song
     // Play next: always there once a song is on. Mid-mix it already lists what goes after the new song.
@@ -529,6 +546,14 @@ export function createPlayView({ root, layer, api }) {
   }
 
   function setText(node, t) { if (node && node.textContent !== t) node.textContent = t; }
+  /** The gig line under the crowd: how many good mixes to go, and the venue's brief if it's still to do. */
+  function gigText(gp) {
+    if (gp.last) return 'Headline set. Keep that floor full.';
+    if (gp.booked) return `You're booked at ${gp.next.name}. Open the map.`;
+    const left = gp.of - gp.done;
+    if (!left && !gp.briefDone) return `Last thing before ${gp.next.name} books you: ${gp.brief.text.toLowerCase()}.`;
+    return `${plural(left, 'more mix')} with ${GIG.stars} stars or more${gp.briefDone ? '' : `, and ${gp.brief.text.toLowerCase()},`} and you're booked at ${gp.next.name}.`;
+  }
 
   /**
    * mode: 'pick' (the other deck is empty), 'swap' (it has a song you could change your mind about), 'wait'
@@ -540,7 +565,7 @@ export function createPlayView({ root, layer, api }) {
     st.nextKey = key;
     setText(el('nexttitle'), mode === 'wait' ? 'Up after this mix' : 'Play next');
     setText(el('nextsub'), mode === 'wait' ? `These blend with ${ref.title}. Pick one once the handover is done.`
-      : mode === 'swap' ? `Changed your mind? These blend with ${ref.title} too.` : `These blend with ${ref.title}.`);
+      : mode === 'swap' ? `Changed your mind? Click one to swap it in on the ${side}.` : `These blend with ${ref.title}. Click one to put it on the ${side}.`);
     const rows = api.suggest(ref, { exclude: SIDES.map((x) => D[x].track?.id).filter(Boolean), limit: 5 });
     const box = el('cards');
     box.innerHTML = rows.length ? '' : '<p class="pv-empty">No other songs yet. Add some music in Full decks.</p>';
@@ -560,6 +585,7 @@ export function createPlayView({ root, layer, api }) {
     st.picker = { side };
     const other = D[OTHER[side]];
     setText(el('ptitle'), other.buffer ? `What goes after ${other.track.title}?` : 'Choose a song to start with');
+    setText(el('ptip'), `Click a song to put it on the ${side}.`);
     el('picker').classList.remove('hidden');
     api.openLibrary(side, el('libslot'));
   }
@@ -626,6 +652,7 @@ export function createPlayView({ root, layer, api }) {
       <div class="cl-gig">
         <div><span class="cl-kick">${gp.last ? 'Headline slot' : `Tonight's gig · ${esc(venueById(career.venue).name)}`}</span>
           <b>${gp.last ? 'You made it. Keep the main room dancing.' : gp.booked ? `You're booked at ${esc(gp.next.name)}` : `Play ${GIG.mixes} mixes with ${GIG.stars} stars or more`}</b>
+          ${!gp.last && !gp.booked && gp.brief ? `<span class="cl-brief ${gp.briefDone ? 'done' : ''}">${icon(gp.briefDone ? 'check' : 'sparkle', 14)} The booker's brief: ${esc(gp.brief.text)}</span>` : ''}
           <div class="pv-gigbars">${Array.from({ length: gp.of }, (_, i) => `<i class="${i < gp.done ? 'on' : ''}"></i>`).join('')}</div></div>
         ${gp.booked ? '<button class="cl-go" data-cl="booked">See the booking</button>' : '<button class="cl-go" data-cl="close">Start the gig</button>'}
       </div>
