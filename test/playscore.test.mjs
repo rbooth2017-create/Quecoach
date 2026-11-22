@@ -13,7 +13,7 @@ test('stars: a clean mix is two, butter is three', () => {
 test('lock: speed first, then the beats', () => {
   assert.equal(lockAmount(null), 0);
   assert.equal(lockAmount(5), 0);
-  assert.equal(lockAmount(0.05), 0.85, 'speed matched, not playing together yet');
+  assert.equal(lockAmount(0.05), 1, 'speed matched, not playing together yet: a full match');
   assert.equal(lockAmount(0.05, 10), 1);
   assert.ok(lockAmount(0.05, 60) < lockAmount(0.05, 30));
   assert.ok(lockAmount(0.05, 500) >= 0.35, 'speed matched always counts for something');

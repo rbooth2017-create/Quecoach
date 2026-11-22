@@ -379,7 +379,7 @@ export function createPlayView({ root, layer, api }) {
     lk.style.setProperty('--sep', String(1 - lock));
     lk.dataset.state = !bm ? 'off' : lock >= 0.99 ? 'locked' : lock >= 0.8 ? 'close' : 'apart';
     lk.classList.toggle('flip', r.floor === 'right');
-    setText(el('locktext'), !bm ? '' : lock >= 0.99 ? 'LOCKED' : `${Math.round(lock * 100)}%`);
+    setText(el('locktext'), !bm ? '' : lock >= 0.99 ? (bm.both ? 'LOCKED' : '100%') : `${Math.round(lock * 100)}%`);
 
     // what to say, and which controls matter now
     const s = say(n, r, bm);

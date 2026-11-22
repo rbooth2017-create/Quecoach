@@ -15,7 +15,7 @@ export const LOCK = { bpm: 0.1, ms: 25, farBpm: 3, farMs: 120 };
 export function lockAmount(bpmDiff, offsetMs = null) {
   if (bpmDiff == null || !Number.isFinite(bpmDiff)) return 0;
   const sp = Math.abs(bpmDiff) <= LOCK.bpm ? 1 : Math.max(0, 1 - (Math.abs(bpmDiff) - LOCK.bpm) / (LOCK.farBpm - LOCK.bpm));
-  if (offsetMs == null || !Number.isFinite(offsetMs)) return sp * 0.85; // speed matched, but not heard together yet
+  if (offsetMs == null || !Number.isFinite(offsetMs)) return sp; // not heard together yet: the speed is all there is to match
   const ph = Math.abs(offsetMs) <= LOCK.ms ? 1 : Math.max(0, 1 - (Math.abs(offsetMs) - LOCK.ms) / (LOCK.farMs - LOCK.ms));
   return Math.min(sp, 0.35 + 0.65 * ph) * (sp >= 1 ? 1 : 0.9);
 }

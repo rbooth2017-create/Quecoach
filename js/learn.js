@@ -1983,8 +1983,14 @@ const quantiseOn = () => !!state.f.quantise && store.get('quantise', true);
 function quantWhen(side) {
   if (!quantiseOn()) return 0;
   const other = decks[side === 'left' ? 'right' : 'left'], own = decks[side];
-  const wait = (other.playing && other.toNextBeat()) ?? (own.playing ? own.toNextBeat() : null);
-  return wait == null || wait < 0.004 ? 0 : ctx.currentTime + wait;
+  const ref = other.playing ? other : own.playing ? own : null;
+  let wait = ref?.toNextBeat() ?? null;
+  if (wait == null) return 0;
+  // toNextBeat is when the beat is heard. Key lock delays this deck's sound by own.lag, so start its audio that
+  // much earlier; otherwise the new track lands a key-lock block (60 ms) behind the beat.
+  wait -= own.lag || 0;
+  if (wait < 0) wait += (60 / ref.bpm) / (1 + ref.bend);
+  return wait < 0.004 ? 0 : ctx.currentTime + wait;
 }
 function toggleQuantise() {
   store.set('quantise', !quantiseOn()); renderMixer();
