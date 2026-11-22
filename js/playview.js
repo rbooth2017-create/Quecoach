@@ -5,6 +5,7 @@
 import { icon } from './icons.js';
 import { lockAmount, speedAdvice, nudgeAdvice, vibeStep, vibeWords, starsFor } from './playscore.js';
 import { VENUES, venueById, venueIndex, gigProgress, GIG } from './career.js';
+import { emit, filter } from './packs.js';
 
 const SIDES = ['left', 'right'];
 const OTHER = { left: 'right', right: 'left' };
@@ -47,6 +48,7 @@ export function createPlayView({ root, layer, api }) {
       <div class="sc sc-beams"><i></i><i></i><i></i><i></i></div>
       <div class="sc sc-lasers"><i></i><i></i><i></i></div>
       <div class="sc sc-glow"></div>
+      <div class="sc sc-pack" data-pv-packscene></div>
     </div>
     <div class="pv-main">
       <header class="pv-top">
@@ -56,6 +58,7 @@ export function createPlayView({ root, layer, api }) {
         </div>
         <div class="pv-coach" data-pv-coachslot></div>
         <div class="pv-top-r">
+          <span class="pv-packchips" data-pv-packchips></span>
           <span class="pv-chip" data-pv-streak title="Mixes in a row with 2 stars or more"></span>
           <span class="pv-chip" data-pv-starcount title="Stars from all your mixes"></span>
           <button class="pv-chip" data-pv="decks" title="Show the full decks, mixer, library and lessons">${icon('sliders', 15)}Full decks</button>
@@ -164,7 +167,7 @@ export function createPlayView({ root, layer, api }) {
       return;
     }
     const a = b.dataset.pv;
-    if (a === 'map') return openMap();
+    if (a === 'map') return filter('openMap', false) || openMap(); // an expansion pack can show its own screen here
     if (a === 'music') return openPicker(pickSide());
     if (a === 'align') { const gap = api.phraseGap(); if (gap?.canAlign) api.align(gap.mover); return; }
     if (a === 'decks') return api.fullDecks();
@@ -327,8 +330,9 @@ export function createPlayView({ root, layer, api }) {
     const r = roles(n); st.roles = r;
     const F = D[r.floor], T = D[r.inc];
     const career = api.career();
-    if (st.venue !== career.venue) setVenue(career.venue);
-    const venue = venueById(career.venue);
+    const venueId = filter('venue', career.venue); // a pack may put you somewhere else tonight
+    if (st.venue !== venueId) setVenue(venueId);
+    const venue = venueById(venueId);
 
     // beats: the incoming deck measured against the floor
     const bm = F.buffer && T.buffer ? api.beatmatch(F, T) : null;
@@ -480,7 +484,11 @@ export function createPlayView({ root, layer, api }) {
     const muddy = both && bassOn(r.floor) && bassOn(r.inc); // two basslines at once: the floor notices
     const clash = both && ((bm && (Math.abs(bm.bpmDiff) > 0.3 || (offsetMs != null && Math.abs(offsetMs) > 45))) || muddy);
     const locked = both && lock >= 0.99;
-    if (st.heard || audibleA || audibleB) st.vibe = vibeStep(st.vibe, { audible: audibleA || audibleB, clash, locked }, dt, venue.picky); // the room waits for the first song
+    if (st.heard || audibleA || audibleB) { // the room waits for the first song
+      const prev = st.vibe;
+      st.vibe = filter('vibe', vibeStep(prev, { audible: audibleA || audibleB, clash, locked }, dt, venue.picky), { prev, venue: venueId });
+    }
+    emit('frame', { vibe: st.vibe, dt, live: !!(audibleA || audibleB) });
     el('vibe').style.width = `${Math.round(st.vibe * 100)}%`;
     el('vibe').dataset.tone = st.vibe >= 0.6 ? 'ok' : st.vibe >= 0.35 ? 'close' : 'warn';
     setText(el('vibetext'), audibleA || audibleB || st.heard ? vibeWords(st.vibe, venue.crowd) : 'Waiting for the music.');
@@ -495,15 +503,18 @@ export function createPlayView({ root, layer, api }) {
 
     // career
     const gp = gigProgress(career);
-    setText(el('venue'), venue.name);
+    const hud = filter('gigHud', null); // a pack's own gig: { label, done, of, text }
+    setText(el('venue'), filter('venueName', venue.name));
     setText(el('streak'), `×${career.streak} streak`);
     el('starcount').innerHTML = `${STAR(true)}${career.stars}`;
-    const gk = `${gp.done}|${gp.of}|${gp.booked}`;
+    const gb = hud || gp;
+    const gk = `${gb.done}|${gb.of}|${gp.booked}|${!!hud}`;
     if (el('gigbars').dataset.key !== gk) {
       el('gigbars').dataset.key = gk;
-      el('gigbars').innerHTML = Array.from({ length: gp.of }, (_, i) => `<i class="${i < gp.done ? 'on' : ''}"></i>`).join('');
+      el('gigbars').innerHTML = Array.from({ length: gb.of }, (_, i) => `<i class="${i < gb.done ? 'on' : ''}"></i>`).join('');
     }
-    setText(el('gigtext'), gp.last ? 'Headline set. Keep that floor full.' : gp.booked ? `You're booked at ${gp.next.name}. Open the map.` : `${plural(gp.of - gp.done, 'more mix')} with ${GIG.stars} stars or more and you're booked at ${gp.next.name}.`);
+    setText(el('giglabel'), hud ? hud.label : 'Gig progress');
+    setText(el('gigtext'), hud ? hud.text : gp.last ? 'Headline set. Keep that floor full.' : gp.booked ? `You're booked at ${gp.next.name}. Open the map.` : `${plural(gp.of - gp.done, 'more mix')} with ${GIG.stars} stars or more and you're booked at ${gp.next.name}.`);
 
     // Play next: when there's room for another song
     // Play next: always there once a song is on. Mid-mix it already lists what goes after the new song.
@@ -573,7 +584,7 @@ export function createPlayView({ root, layer, api }) {
     box.innerHTML = `<div class="pv-res-head">${stars(n)}<button class="pv-x" data-pv="close-result" aria-label="Close">${icon('x', 15)}</button></div>
       <b class="pv-res-grade">${esc(report.grade)}</b>
       ${line ? `<p>${esc(line)}</p>` : ''}${tip ? `<p class="pv-res-tip">Next time: ${esc(tip)}</p>` : ''}
-      <p class="pv-res-gig">${n >= GIG.stars ? 'That one counts for your gig.' : `${GIG.stars} stars or more counts for your gig.`} ${gp.last ? '' : `${gp.done} of ${gp.of} done.`}</p>`;
+      <p class="pv-res-gig">${esc(filter('resultGigLine', `${n >= GIG.stars ? 'That one counts for your gig.' : `${GIG.stars} stars or more counts for your gig.`} ${gp.last ? '' : `${gp.done} of ${gp.of} done.`}`))}</p>`;
     box.classList.remove('hidden');
     clearTimeout(st.resultTimer);
     st.resultTimer = setTimeout(hideResult, 12000);
@@ -666,7 +677,7 @@ export function createPlayView({ root, layer, api }) {
 
   return {
     update, showResult, openMap, openBooked, closeLayer, setVenue, openPicker, closePicker,
-    slots: { coach: el('coachslot'), lane: el('laneslot') },
+    slots: { coach: el('coachslot'), lane: el('laneslot'), packChips: el('packchips'), packScene: el('packscene') },
     pickerOpen: () => !!st.picker,
     incoming: () => st.roles.inc,
     resetVibe: () => { st.vibe = 0.55; },

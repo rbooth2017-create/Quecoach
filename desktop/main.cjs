@@ -15,9 +15,10 @@ const PORT = 8642;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const HELPER = 'http://127.0.0.1:8765';
 const PANEL_W = 420;
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8' };
-// Files the page may load: the app, the audio spike, and the time-stretch library it uses.
-const SERVED = /^\/(index\.html|spike\.html|learn\.html|library\.html|js\/[\w.-]+\.js|node_modules\/signalsmith-stretch\/SignalsmithStretch\.mjs)$/;
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+// Files the page may load: the app, the audio spike, expansion packs (js/packs/<name>/, scripts and styles), and the
+// time-stretch library. Folder names are letters, digits, - and _ only, so a path can't climb out with "..".
+const SERVED = /^\/(index\.html|spike\.html|learn\.html|library\.html|js\/[\w.-]+\.js|js\/packs\/(?:[\w-]+\/)?[\w-]+\.(?:js|css)|node_modules\/signalsmith-stretch\/SignalsmithStretch\.mjs)$/;
 
 let win = null;
 let server = null;

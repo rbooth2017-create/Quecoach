@@ -37,9 +37,10 @@ import * as stream from './streaming.js';
 import * as lay from './layout.js';
 import { stopsFor, step as tourStep, shouldAutoStart, progressLabel } from './tour.js';
 import { setArc, energyChartSVG } from './setchart.js';
-import { energyFeatures, estimateEnergy } from './energy.js';
+import { energyFeatures, estimateEnergy, energyOf } from './energy.js';
 import { newRecorder, feed as feedMix, addToHistory, progressStats, sparkSVG, CLEAN_SCORE, skillStats, levelAdvice } from './mixreport.js';
 import { createPlayView } from './playview.js';
+import * as packs from './packs.js';
 import { starsFor } from './playscore.js';
 import { loadCareer, recordMix as careerMix, takeBooking as careerTake, syncToLevel, venueById } from './career.js';
 
@@ -60,6 +61,8 @@ const store = {
   get: (k, d) => { try { const v = localStorage.getItem(`learn.${k}`); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem(`learn.${k}`, JSON.stringify(v)); } catch { /* private mode */ } },
 };
+// expansion packs (js/packs.js): which are switched on
+packs.setSwitchStore(() => store.get('packs', {}), (v) => store.set('packs', v));
 
 // ---------- state ----------
 /** The saved set, with a vote on every item (sets saved before votes existed have none). */
@@ -1182,6 +1185,7 @@ function onMixReport(r, clip = null) {
   saveCareer(careerMix(state.career, starsFor(r.score)));
   state.report = { ...r, at, stars: starsFor(r.score), levelUp: null, fromTitle: decks[r.from].track?.title, toTitle: decks[r.to].track?.title };
   store.set('lastReport', { ...state.report, clip: null });
+  packs.emit('mixFinished', { report: r, stars: starsFor(r.score), track: decks[r.to].track, energy: energyOf(decks[r.to].track) });
   if (playOn()) playView.showResult(r, state.career); else renderReport();
   if (!hadOffer && state.career.offer) setTimeout(() => playView.openBooked(), playOn() ? 2500 : 1200);
   if (state.paneOpen && paneTab() === 'lessons' && !state.guideOpen) renderTutor();
@@ -2564,12 +2568,17 @@ function bind() {
   $('#settingsBtn').innerHTML = icon('gear', 18); $('#menuBtn').innerHTML = icon('menu', 18);
   $('#settingsBtn').addEventListener('click', openSettings);
   $('#settingsList').addEventListener('click', (e) => { const b = e.target.closest('[data-set]'); if (b) runSetting(b.dataset.set); });
+  $('#packsList').addEventListener('click', (e) => {
+    const on = e.target.closest('[data-pack-on]'), rs = e.target.closest('[data-pack-reset]');
+    if (on) { const id = on.dataset.packOn; packs.setOn(id, !packs.isOn(id)); openPacks(); }
+    if (rs && confirm('Start this pack again from scratch? Its progress (money, gear, home) is wiped. Your lessons and mixes are kept.')) { packs.resetPack(rs.dataset.packReset); openPacks(); }
+  });
   $('#menuBtn').addEventListener('click', (e) => { const r = e.currentTarget.getBoundingClientRect(); desktop?.showMenu?.(r.left, r.bottom); });
   $('#themeBtn').addEventListener('click', () => { renderThemes(); $('#themes').showModal(); });
   $('#themeList').addEventListener('click', (e) => { const b = e.target.closest('[data-theme-id]'); if (b) applyTheme(b.dataset.themeId); });
   $('#levelBtn').addEventListener('click', () => { renderLevels(); $('#levels').showModal(); });
   $('#viewBtn').addEventListener('click', () => setView(playOn() ? 'decks' : 'play'));
-  $('#venueBtn').addEventListener('click', () => (state.career.offer ? playView.openBooked() : playView.openMap()));
+  $('#venueBtn').addEventListener('click', () => packs.filter('openMap', false) || (state.career.offer ? playView.openBooked() : playView.openMap()));
   $('#levelList').addEventListener('click', (e) => { const b = e.target.closest('[data-level]'); if (b) { setLevel(b.dataset.level); $('#levels').close(); } });
   $('#checkBtn').addEventListener('click', check);
   $('#mixPlan').addEventListener('click', (e) => {
@@ -3484,6 +3493,7 @@ const SETTINGS = [
   ['ai', 'wand', 'AI coach', 'Connect Claude for set building and track picks'],
   ['theme', 'palette', 'Appearance', 'Light, dark and colour themes'],
   ['level', 'level', 'Your level', 'How much help and how many controls you see'],
+  ['packs', 'sparkle', 'Expansion packs', 'Add-ons that change the game, like DJ Life'],
   ['lessons', 'book', 'Lessons', 'Show or hide the lessons pane'],
   ['layout', 'layout', 'Layout', 'Collapse, move or hide sections to suit you'],
   ['help', 'help', 'Keyboard shortcuts', 'Every key Cue Coach listens to'],
@@ -3497,8 +3507,32 @@ function runSetting(id) {
   if (id === 'music') { state.menuOpen = true; renderSource(); $('#library').scrollIntoView({ block: 'nearest' }); return; }
   if (id === 'lessons') return setPane(!state.paneOpen);
   if (id === 'layout') return openLayout();
+  if (id === 'packs') return openPacks();
   runCommand({ controller: 'controller', ai: 'ai', theme: 'theme', level: 'level', help: 'help' }[id]);
 }
+
+// ---------- expansion packs ----------
+function openPacks() {
+  const list = packs.listPacks();
+  $('#packsList').innerHTML = list.length ? list.map((p) => `<div class="pack-row">
+      <span><b>${esc(p.name)}</b><small>${esc(p.blurb)}</small></span>
+      <button class="${p.on ? 'primary' : ''}" data-pack-on="${esc(p.id)}" aria-pressed="${p.on}">${p.on ? 'On' : 'Off'}</button>
+      ${p.on ? `<button class="ghost" data-pack-reset="${esc(p.id)}" title="Start this pack again from scratch">Start over</button>` : ''}
+    </div>`).join('') : '<p>No expansion packs installed.</p>';
+  if (!$('#packsDlg').open) $('#packsDlg').showModal();
+}
+/** What the core lends a pack: where to draw, what it may read, and a few things it may do. */
+const packCtx = {
+  slots: { chips: playView.slots.packChips, scene: playView.slots.packScene },
+  career: () => state.career,
+  level: () => state.level,
+  djName: () => store.get('djName', ''),
+  toast: (m) => toast(m),
+  openBooked: () => playView.openBooked(),
+  playOn: () => playOn(),
+  showPlay: () => { if (!playOn()) setView('play'); },
+  resetVibe: () => playView.resetVibe(),
+};
 
 // ---------- start ----------
 async function boot() {
@@ -3506,6 +3540,7 @@ async function boot() {
   applyTheme(store.get('theme', 'auto'));
   bind();
   setLevel(state.level, true);
+  packs.startPacks(packCtx);
   renderSource();
   startLesson(state.lessonId);
   aiStatus().then((st) => { state.ai = st; renderAI(); });

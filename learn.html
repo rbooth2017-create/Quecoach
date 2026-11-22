@@ -106,6 +106,10 @@ html.darwin .desktop-only, html.win32 .desktop-only, html.linux .desktop-only { 
 .settings-list button { justify-content: flex-start; gap: 12px; padding: 9px 12px; border-radius: 10px; text-align: left; }
 .settings-list button .ic { color: var(--ink-2); }
 .settings-list small { display: block; color: var(--ink-2); font-size: 12px; }
+.packs-list { display: grid; gap: 8px; margin-bottom: 4px; }
+.pack-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.pack-row > span { flex: 1; min-width: 0; }
+.pack-row small { display: block; color: var(--ink-2); font-size: 12px; }
 .pill-btn { border-color: transparent; background: var(--card-2); font-weight: 600; font-size: 12px; padding: 4px 10px; }
 
 /* ---------- your layout: collapse, move and hide sections ---------- */
@@ -1287,6 +1291,13 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
   <div class="dlg-foot two"><button type="button" class="ghost" id="layoutReset">Reset layout</button><button type="button" class="primary" id="layoutDone">Done</button></div>
 </dialog>
 
+<dialog id="packsDlg">
+  <h2>Expansion packs</h2>
+  <p>Add-ons that change how the game plays. Switching one off keeps its progress for later; your lessons, level and mixes are never touched.</p>
+  <div class="packs-list" id="packsList"></div>
+  <form method="dialog" class="dlg-foot"><button>Done</button></form>
+</dialog>
+
 <dialog id="settingsDlg">
   <h2>Settings</h2>
   <div class="settings-list" id="settingsList"></div>
@@ -1336,6 +1347,7 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
     <div class="tour-foot"><button class="ghost" data-tour="skip">Skip tour</button><span class="grow"></span><button data-tour="back">Back</button><button class="primary" data-tour="next">Next</button></div>
   </div>
 </div>
+<script type="module" src="js/packs/installed.js"></script>
 <script type="module" src="js/learn.js"></script>
 </body>
 </html>
