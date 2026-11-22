@@ -1,5 +1,5 @@
 // Cue Coach desktop: an always-on-top side panel next to rekordbox.
-// - serves the web app on 127.0.0.1:8642 (only index.html and js/)
+// - serves the web app on 127.0.0.1:8642 (only its pages and js/)
 // - starts the rekordbox helper (helper/rekordbox_helper.py) and stops it on quit
 // - docks a 420 px window to the right edge of the screen, floating over rekordbox
 const { app, BrowserWindow, Menu, ipcMain, screen, session, shell, desktopCapturer, systemPreferences, nativeImage, dialog } = require('electron');
@@ -17,7 +17,7 @@ const HELPER = 'http://127.0.0.1:8765';
 const PANEL_W = 420;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8' };
 // Files the page may load: the app, the audio spike, and the time-stretch library it uses.
-const SERVED = /^\/(index\.html|spike\.html|learn\.html|js\/[\w.-]+\.js|node_modules\/signalsmith-stretch\/SignalsmithStretch\.mjs)$/;
+const SERVED = /^\/(index\.html|spike\.html|learn\.html|library\.html|js\/[\w.-]+\.js|node_modules\/signalsmith-stretch\/SignalsmithStretch\.mjs)$/;
 
 let win = null;
 let server = null;
@@ -229,6 +229,10 @@ function createManagerWindow() {
   let t; for (const ev of ['resize', 'move']) managerWin.on(ev, () => { clearTimeout(t); t = setTimeout(save, 400); });
   managerWin.on('close', save);
   managerWin.on('closed', () => { managerWin = null; });
+  // Never leave a silent blank window: if the page can't load, say what happened.
+  const showLoadError = (why) => managerWin?.loadURL(errorPage('The library couldn\'t open', why));
+  managerWin.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => { if (isMainFrame && code !== -3) showLoadError(`The library page didn't load (${desc}). Quit Cue Coach and open it again.`); });
+  managerWin.webContents.on('did-navigate', (_e, url, status) => { if (url.startsWith(ORIGIN) && status >= 400) showLoadError(`The library page wasn't found (error ${status}). If another copy of Cue Coach is open, quit every copy and open it again.`); });
   managerWin.loadURL(`${ORIGIN}/library.html`);
 }
 
