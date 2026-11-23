@@ -857,6 +857,10 @@ dialog td { padding: 5px 0; border-bottom: 1px solid var(--line); } dialog td:fi
 /* Quantise */
 .q-btn { justify-self: center; font-size: 11px; font-weight: 650; padding: 2px 10px; border-radius: 99px; color: var(--ink-3); }
 .q-btn.on { color: var(--left); border-color: var(--left); background: var(--left-soft); }
+.cue-mode { display: inline-flex; border: 1px solid var(--line); border-radius: 99px; overflow: hidden; }
+.cue-mode button { font-size: 10.5px; font-weight: 650; padding: 2px 8px; border: 0; border-radius: 0; background: none; color: var(--ink-3); display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.cue-mode button + button { border-left: 1px solid var(--line); }
+.cue-mode button.on { color: var(--left); background: var(--left-soft); }
 /* Prepare a track */
 .deckfoot button.on { color: var(--c); border-color: var(--c); }
 .prep { display: grid; gap: 8px; padding: 10px; border-radius: 10px; background: var(--card-2); font-size: 12px; }
@@ -913,7 +917,7 @@ button.pv-music:hover { background: color-mix(in srgb, var(--pv-a) 30%, transpar
 .pv-say p { margin: 0 auto; max-width: 720px; color: var(--pv-ink-2); font-size: 14.5px; }
 
 .pv-stage { --disc: clamp(104px, 15vh, 230px); display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 280px) minmax(0, 1fr); align-items: center; gap: 16px; }
-.pv-deck { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; text-align: center; --c: var(--pv-a); --c2: var(--pv-a-2); --pulse: .25; }
+.pv-deck { align-self: start; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; text-align: center; --c: var(--pv-a); --c2: var(--pv-a-2); --pulse: .25; }
 .pv-deck[data-side="right"] { --c: var(--pv-b); --c2: var(--pv-b-2); }
 .pv-disc { position: relative; width: var(--disc); height: var(--disc); margin-bottom: 8px; }
 .pv-glow { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 calc(18px + 40px * var(--pulse)) calc(2px + 6px * var(--pulse)) color-mix(in srgb, var(--c) calc(var(--pulse) * 70%), transparent), inset 0 0 26px color-mix(in srgb, var(--c) calc(var(--pulse) * 50%), transparent); }
@@ -1407,6 +1411,9 @@ body:not(.play-mode) #toast { bottom: 64px; }
 :root:is([data-theme="graphite"], [data-theme="concrete"]) .cl-card { background: radial-gradient(ellipse at 85% 0%, #2a2a2a 0%, var(--pv-bg) 60%); }
 :root:is([data-theme="graphite"], [data-theme="concrete"]) :is(.pv-picker, .career-layer) { background: rgba(0,0,0,.6); }
 :root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-cue.on { box-shadow: none; }
+/* deck B is near-white here, so a deck-coloured outline looked lit when it wasn't: off is a quiet hairline on both decks, on is a solid fill */
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-cue:not(.on):not(.hint) { border-color: var(--pv-line-2); color: var(--pv-ink-2) !important; }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-cue:not(.on):hover { border-color: var(--c); color: var(--pv-ink) !important; }
 :root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-steps li.current { box-shadow: none; }
 :root:is([data-theme="graphite"], [data-theme="concrete"]) .titlebar { border-bottom: 1px solid var(--line); }
 

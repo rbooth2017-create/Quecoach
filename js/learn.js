@@ -133,6 +133,8 @@ function makeDeck(side) {
   d.pre = ctx.createGain(); d.pre.connect(d.vol);
   d.listenGain = ctx.createGain(); d.listenGain.gain.value = 0;
   d.pre.connect(d.listenGain); d.listenGain.connect(cueBus);
+  // The room gate, after the crossfader: closed while the deck is cued "Phones only" (see setListen).
+  d.gate = ctx.createGain(); d.xf.disconnect(); d.xf.connect(d.gate); d.gate.connect(masterBus); d.held = false;
   // Level meter, after the channel volume and EQ (before the crossfader), like a real mixer.
   d.meter = ctx.createAnalyser(); d.meter.fftSize = 512; d.vol.connect(d.meter);
   d.meterBuf = new Float32Array(d.meter.fftSize); d.peak = 0;
@@ -282,10 +284,11 @@ function renderThemes() {
 function deckRole(side) {
   const d = decks[side];
   if (!d.buffer) return '';
-  const inRoom = d.playing && d.xf.gain.value > 0.3;
+  const inRoom = d.playing && roomGain(d) > 0.3;
   if (!state.f.friendlyRoles) return inRoom ? 'On air' : d.playing ? 'Playing' : 'Paused';
   if (inRoom) return 'In the room';
   if (d.playing && d.listening) return 'Only you can hear this';
+  if (d.held) return 'Only in your headphones';
   if (d.playing) return 'Playing quietly';
   return 'Ready';
 }
@@ -308,7 +311,10 @@ function renderDeck(side) {
     jogs[side] = null; return;
   }
   const r = rangeOf(side);
-  const keys = f.keyHints ? `<span>${side === 'left' ? `${kbd('Q')} play` : `${kbd('P')} play · ${kbd('↑ ↓')} speed · ${kbd('← →')} nudge`}</span>` : '';
+  // the same hint on both decks, from your own keys; the rest of them are in the tooltip
+  const g = side === 'left' ? 'a' : 'b', cap = (id) => keyLabel(state.keys[`${g}.${id}`]).join('+');
+  const keyTip = `Keys for deck ${LETTER[side]}: ${cap('play') || 'no key'} play · ${[cap('slower'), cap('faster')].filter(Boolean).join(' / ') || 'no keys'} speed · ${[cap('back'), cap('ahead')].filter(Boolean).join(' / ') || 'no keys'} nudge`;
+  const keys = f.keyHints && cap('play') ? `<span title="${esc(keyTip)}">${kbd(cap('play'))} play</span>` : '';
   el.innerHTML = `
     ${head(esc(t.title), `${keyBadge(t, d.keyShift)}<span>${esc(t.artist || 'Unknown artist')}</span>`)}
       <div class="bpm"><b data-bpm>${fmtBpm(d.bpm, 2)}</b><span>BPM${t.grid?.estimated ? ' (est.)' : ''}</span></div></div>
@@ -319,7 +325,7 @@ function renderDeck(side) {
     </div>
     <div class="deckbody">
       <div class="transport">
-        <button class="play" data-a="play" aria-label="Play or pause (${side === 'left' ? 'Q' : 'P'})" title="Play / pause">${icon(d.playing ? 'pause' : 'play', 22)}</button>
+        <button class="play" data-a="play" aria-label="Play or pause${cap('play') ? ` (${esc(cap('play'))})` : ''}" title="Play / pause">${icon(d.playing ? 'pause' : 'play', 22)}</button>
         <button class="cue-btn" data-cuebtn aria-label="Cue" title="CUE: paused, it sets the cue point here (and plays while you hold it). Playing, it jumps back to the cue point and stops.">CUE</button>
         <button class="round" data-a="restart" aria-label="Back to the first beat" title="Back to the first beat">${icon('restart', 15)}</button>
         <div class="tlabel">Start</div>
@@ -377,7 +383,7 @@ function renderMixer() {
         <canvas class="meter" data-meter="${side}"></canvas>
       </div>
       <button class="cue ${d.listening ? 'on' : ''}" data-listen="${side}" aria-pressed="${d.listening}" title="Listen: hear deck ${LETTER[side]} yourself, even when the crossfader is away from it">${icon('headphones', 17)}</button>
-      <div class="dial-label">Listen</div>
+      <div class="dial-label">${d.held ? 'Phones only' : 'Listen'}</div>
     </div>`;
   };
   const pcol = (side) => `<div class="pc-col" data-pc="${side}">
@@ -394,6 +400,10 @@ function renderMixer() {
     <div class="outs">
       <div class="phones" title="Master: how loud the whole mix is in the speakers (and in your recordings)">${dialHTML({ id: 'master', label: 'Master', value: masterBus.gain.value, min: 0, max: MASTER_MAX, def: 1, centred: true })}<span class="small muted">Speakers</span></div>
       <div class="mmeter" title="Master level, left and right. LIMIT lights when the mix is too hot and the safety limiter is holding it down: turn the Master or the channels down a little."><canvas data-master-meter></canvas><span class="limit" data-limit>${state.prefs.limiter ? 'LIMIT' : 'CLIP'}</span></div>
+      <div class="cue-mode" role="group" aria-label="What the cue (Listen) button does"${hasPhones() ? '' : ' title="No separate headphones set up yet: a cued deck plays quietly through the speakers. Set headphones up under Controller."'}>
+        <button class="${cueMode() === 'phones' ? 'on' : ''}" data-cuemode="phones" aria-pressed="${cueMode() === 'phones'}" title="Phones only: a deck you cue is kept out of the speakers until you press its cue again, so the crowd never hears you getting it ready">${icon('headphones', 13)} Only</button>
+        <button class="${cueMode() === 'room' ? 'on' : ''}" data-cuemode="room" aria-pressed="${cueMode() === 'room'}" title="Phones + room: your headphones hear the cued deck and the track that's playing; the faders decide what the room hears, like a club mixer">${icon('headphones', 13)} + Room</button>
+      </div>
       ${hasPhones() ? `<div class="phones" title="Headphones: left is only what you're cueing (Listen), right is what the room hears">${dialHTML({ id: 'hp:mix', label: 'Phones mix', value: hp.mix, min: 0, max: 1, def: 0 })}<span class="small muted">Cue ↔ Room</span></div>` : ''}
     </div>
     ${f.quantise ? `<button class="q-btn ${quantiseOn() ? 'on' : ''}" data-quant aria-pressed="${quantiseOn()}" title="Quantise: hot cues, beat jumps and play wait for the next beat, so they land in time">Quantise</button>` : ''}
@@ -485,7 +495,7 @@ function mixState(dt) {
 
 // ---------- loading tracks ----------
 /** Is this deck playing to the room (playing, channel fader up, crossfader on its side)? */
-function isLive(side) { const d = decks[side]; return d.playing && d.xf.gain.value > 0.3 && d.vol.gain.value > 0.05; }
+function isLive(side) { const d = decks[side]; return d.playing && roomGain(d) > 0.3 && d.vol.gain.value > 0.05; }
 
 async function loadTo(side, track) {
   if (state.loading[side]) return;
@@ -517,7 +527,7 @@ async function loadTo(side, track) {
     d.bands = bandPeaks(buffer.getChannelData(0), buffer.sampleRate, WAVE_RATE);
     if (side === 'right') state.alignLocked = false;
     state.target = null;
-    if (side === 'left' && !decks.right.buffer && state.f.upNext) state.tab = 'suggested'; // what's next?
+    if (!decks[side === 'left' ? 'right' : 'left'].buffer && state.f.upNext) state.tab = 'suggested'; // what's next?
     if (playView.pickerOpen()) playView.closePicker(); // the Play view's song picker has done its job
   } catch (err) {
     console.error(err); toast(`Couldn't load "${track.title}": ${err.message}`);
@@ -1312,7 +1322,7 @@ function energyStep() {
   return Number.isFinite(a) && Number.isFinite(b) ? b - a : null;
 }
 function recordMix(s, dt) {
-  const side = (k) => { const d = decks[k]; return { gain: d.buffer ? d.xf.gain.value * d.vol.gain.value : 0, playing: !!(d.buffer && d.playing), low: d.eq.low, phrasePos: phrasePos(d) }; };
+  const side = (k) => { const d = decks[k]; return { gain: d.buffer ? roomGain(d) * d.vol.gain.value : 0, playing: !!(d.buffer && d.playing), low: d.eq.low, phrasePos: phrasePos(d) }; };
   const sample = {
     left: side('left'), right: side('right'), offsetMs: s.offsetMs, barOffset: s.barOffset, keyScore: s.keyScore,
     bassTool: guideControls().low, bpm: decks.left.bpm || decks.right.bpm || 120,
@@ -1923,7 +1933,7 @@ const ALIGN_MAX_BEATS = 8; // Align offers to fix up to 2 bars
 
 /** The deck Align moves: the one that isn't playing to the room (else the planned incoming deck, else B). */
 function alignSide() {
-  const live = SIDES.filter((s) => decks[s].buffer && decks[s].playing && decks[s].xf.gain.value > 0.3);
+  const live = SIDES.filter((s) => decks[s].buffer && decks[s].playing && roomGain(decks[s]) > 0.3);
   if (live.length === 1) return live[0] === 'left' ? 'right' : 'left';
   return currentPlan()?.to || 'right';
 }
@@ -2002,7 +2012,7 @@ const playView = createPlayView({
     decks,
     now: () => state.guideNow,
     beatmatch: (ref, other) => beatmatch(ref, other),
-    gain: (side) => { const d = decks[side]; return d.buffer ? d.xf.gain.value * d.vol.gain.value : 0; },
+    gain: (side) => { const d = decks[side]; return d.buffer ? roomGain(d) * d.vol.gain.value : 0; },
     xfader: () => state.xfader,
     setXfader: (x) => moveXfader(x),
     play: (side) => togglePlay(side),
@@ -2187,6 +2197,7 @@ function frame(now) {
   else { hel.className = 'hint'; hel.textContent = 'Play both decks to compare beats'; }
   drawLane(hint);
   scheduleClicks();
+  heldNudge();
   renderCoach(s);
   if (playOn()) { // the full decks are hidden: skip drawing them (the beat lane and lesson card are in the Play view)
     syncLights(); updateMixPlan(); playView.update(dt);
@@ -2202,7 +2213,7 @@ function frame(now) {
     const q = (k) => $(`[data-${k}]`, el);
     if (q('bpm')) q('bpm').textContent = fmtBpm(d.bpm, 2);
     if (q('pct')) q('pct').textContent = state.f.pitchPercent ? `${d.tempoPct >= 0 ? '+' : ''}${d.tempoPct.toFixed(2)}%` : (d.tempoPct ? (d.tempoPct > 0 ? 'faster' : 'slower') : 'normal');
-    const role = q('live'); if (role) { role.textContent = deckRole(side); role.classList.toggle('on', d.playing && d.xf.gain.value > 0.3); }
+    const role = q('live'); if (role) { role.textContent = deckRole(side); role.classList.toggle('on', d.playing && roomGain(d) > 0.3); }
     const play = $('[data-a="play"]', el);
     if (play && play.dataset.state !== String(d.playing)) { play.dataset.state = String(d.playing); play.innerHTML = icon(d.playing ? 'pause' : 'play', 22); }
     const slider = $('input[data-a="tempo"]', el); if (slider && document.activeElement !== slider) slider.value = d.tempoPct;
@@ -2276,9 +2287,49 @@ function setEQ(side, band, db, rerender = true) {
   if (rerender) { const dial = $(`[data-dial="${side}:${band}"]`); if (dial) setDial(dial, db); }
   $(`[data-cut="${side}:${band}"]`)?.classList.toggle('on', db <= -25);
 }
+/**
+ * Headphone cue ("Listen"). How it treats the room depends on the cue mode:
+ *   phones: Phones only. A deck you cue that the room isn't already hearing is kept out of the room
+ *           (whatever its fader and the crossfader say) until you un-cue it: that's when it drops in.
+ *   room:   Phones + room, like a club mixer. Cue doesn't touch the room; the faders decide, and the
+ *           headphones blend in what the room hears so you can mix against the playing track.
+ * A deck the room is already hearing is never cut off by cueing it.
+ */
 function setListen(side, on) {
-  const d = decks[side]; d.listening = on; d.listenGain.gain.value = on ? 1 : 0;
+  const d = decks[side], wasLive = isLive(side);
+  d.listening = on; d.listenGain.gain.value = on ? 1 : 0;
+  setHeld(side, on && cueMode() === 'phones' && !wasLive);
   const b = $(`[data-listen="${side}"]`); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
+}
+/** Keep a deck out of the room (or let it in), with a short fade so it doesn't click. */
+function setHeld(side, held) {
+  const d = decks[side]; if (d.held === held) return;
+  d.held = held; d.heldTold = false;
+  d.gate.gain.setTargetAtTime(held ? 0 : 1, ctx.currentTime, held ? 0.01 : 0.04);
+  const lab = $(`[data-listen="${side}"] + .dial-label`); if (lab) lab.textContent = held ? 'Phones only' : 'Listen';
+}
+/** How much of a deck the room gets from the crossfader and the cue gate (0..1), before its channel fader. */
+const roomGain = (d) => (d.held ? 0 : d.xf.gain.value);
+const cueMode = () => (store.get('cueMode', 'phones') === 'room' ? 'room' : 'phones');
+function setCueMode(mode) {
+  store.set('cueMode', mode);
+  // Phones + room: hear the room too (half and half, unless you've set the blend yourself); Phones only: just the cue
+  if (mode === 'room' && hp.mix < 0.05) setHpMix(0.5, true);
+  if (mode === 'phones') setHpMix(0, true);
+  for (const s of SIDES) setHeld(s, mode === 'phones' && decks[s].listening && !isLive(s));
+  for (const b of $$('[data-cuemode]')) { const on = b.dataset.cuemode === mode; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
+  toast(mode === 'phones'
+    ? 'Cue: phones only. A deck you cue stays out of the speakers until you press its cue again.'
+    : 'Cue: phones + room. Your headphones hear the cued deck and the room; the faders decide what the room hears.');
+}
+/** A held deck with its fader and crossfader up: say once why the room can't hear it. */
+function heldNudge() {
+  for (const s of SIDES) {
+    const d = decks[s];
+    if (!d.held || d.heldTold || !d.playing || d.xf.gain.value * d.vol.gain.value < 0.3) continue;
+    d.heldTold = true;
+    toast(`Deck ${LETTER[s]} is only in your headphones. Press its cue again to bring it into the room.`);
+  }
 }
 function moveXfader(x) {
   state.xfader = Math.max(0, Math.min(1, x)); applyXfader();
@@ -2719,6 +2770,7 @@ function scheduleClicks() {
 function eject(side, { force = false, settle = false } = {}) {
   const d = decks[side]; if (!d.buffer) return false;
   if (isLive(side) && !force) { toast(`Deck ${LETTER[side]} is playing to the room. Pause it or move the crossfader away first.`); return false; }
+  setListen(side, false); // the next song never arrives already in your headphones
   d.stop(); d.loop = null; d.track = null; d.buffer = null; d.peaks = null; d.bands = null; d._wave = null;
   state.prep[side] = false; prepClick[side] = false; state.target = null;
   state.planKey = null; state.plan = null; state.mixDir = null; state.mixStartBar = null; state.mixDone = new Set();
@@ -2726,7 +2778,7 @@ function eject(side, { force = false, settle = false } = {}) {
     const other = side === 'left' ? 'right' : 'left', o = decks[other];
     // the bass stays with the song that's left (the Bass slider sits all the way on its side, not in the middle),
     // and the next song loads with its bass already out, as the guide wants
-    d.setVolume(1); setEQ(side, 'low', o.buffer ? -30 : 0); setListen(side, false);
+    d.setVolume(1); setEQ(side, 'low', o.buffer ? -30 : 0);
     if (o.buffer) setEQ(other, 'low', 0);
     if (o.playing) { o.setVolume(1); moveXfader(other === 'left' ? 0 : 1); }
     if (o.buffer) renderDeck(other);
@@ -2774,7 +2826,7 @@ function deckEvents(side) {
     if (a === 'slip') { d().setSlip(!d().slipOn); renderDeck(side); return toast(d().slipOn ? `Slip on for deck ${LETTER[side]}: loops and reverse play over the track, which carries on underneath.` : `Slip off for deck ${LETTER[side]}.`); }
     if (a === 'reverse') { if (!d().buffer) return; d().setReverse(!d().reversed); return renderDeck(side); }
     if (a === 'breakdown') return openTrackTab(side);
-    if (a === 'choose') return focusLibrary(side, side === 'right' && state.f.upNext && decks.left.buffer ? 'suggested' : 'all');
+    if (a === 'choose') return focusLibrary(side, state.f.upNext && decks[side === 'left' ? 'right' : 'left'].buffer ? 'suggested' : 'all');
     if (a === 'eject') return eject(side);
     if (a === 'prep') { state.prep[side] = !state.prep[side]; if (!state.prep[side]) prepClick[side] = false; return renderDeck(side); }
     if (!d().buffer) return;
@@ -2841,6 +2893,7 @@ function mixerEvents() {
   });
   m.addEventListener('click', (e) => {
     if (e.target.closest('[data-quant]')) return toggleQuantise();
+    const cm = e.target.closest('[data-cuemode]'); if (cm) return setCueMode(cm.dataset.cuemode);
     const b = e.target.closest('[data-bfx]'); const c = e.target.closest('[data-bfxch]');
     if (c) { state.bfx.ch = c.dataset.bfxch; applyBfx(); }
     if (!b) return;

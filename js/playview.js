@@ -389,7 +389,7 @@ export function createPlayView({ root, layer, api }) {
       de.classList.toggle('empty', !loaded); de.classList.toggle('playing', loaded && d.playing);
       de.classList.toggle('floor', side === r.floor);
       const audible = loaded && d.playing && api.gain(side) > 0.12;
-      const role = !loaded ? 'Empty' : audible ? 'On the floor' : d.playing ? 'In your headphones' : api.playedOut?.(side) ? 'Played' : side === r.inc && F.playing ? 'Up next' : 'Ready';
+      const role = !loaded ? 'Empty' : audible ? 'On the floor' : d.playing ? (api.listening?.(side) ? 'In your headphones' : 'Playing quietly') : api.playedOut?.(side) ? 'Played' : side === r.inc && F.playing ? 'Up next' : 'Ready';
       setText($('[data-role]', de), role);
       setText($('[data-name]', de), loaded ? d.track.title : side === pickSide() ? 'Choose a song' : '');
       const left = loaded ? Math.max(0, d.buffer.duration - pos) : 0;
