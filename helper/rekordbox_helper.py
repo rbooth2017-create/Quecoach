@@ -27,7 +27,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import unquote
 
-ALLOWED_ORIGINS = {"http://localhost:8642", "http://127.0.0.1:8642"}
+# The app (npm start / the desktop app) is on 8642; 8650-8654 are the development preview servers (.claude/launch.json).
+ALLOWED_PORTS = (8642, 8650, 8651, 8652, 8653, 8654)
+ALLOWED_ORIGINS = {f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in ALLOWED_PORTS}
 
 # rekordbox hot cue slots stored in DjmdCue.Kind (0 = memory cue, 4 = loop marker)
 HOT_CUE_LETTER = {1: "A", 2: "B", 3: "C", 5: "D", 6: "E", 7: "F", 8: "G", 9: "H"}

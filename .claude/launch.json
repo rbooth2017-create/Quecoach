@@ -1,0 +1,70 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8650",
+        "--bind",
+        "127.0.0.1"
+      ],
+      "port": 8650,
+      "autoPort": false
+    },
+    {
+      "name": "web-2",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8651",
+        "--bind",
+        "127.0.0.1"
+      ],
+      "port": 8651,
+      "autoPort": false
+    },
+    {
+      "name": "web-3",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8652",
+        "--bind",
+        "127.0.0.1"
+      ],
+      "port": 8652,
+      "autoPort": false
+    },
+    {
+      "name": "web-4",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8653",
+        "--bind",
+        "127.0.0.1"
+      ],
+      "port": 8653,
+      "autoPort": false
+    },
+    {
+      "name": "web-5",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8654",
+        "--bind",
+        "127.0.0.1"
+      ],
+      "port": 8654,
+      "autoPort": false
+    }
+  ]
+}

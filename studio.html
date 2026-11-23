@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cue Coach Studio</title>
+<style>
+:root {
+  --bg: #f6f5f1; --card: #ffffff; --card-2: #f1efe9; --line: #e6e3db; --line-2: #d6d2c7;
+  --ink: #1d2230; --ink-2: #5c6272; --ink-3: #9096a3;
+  --left: #2f7df6; --left-soft: #e6f0ff; --right: #ff6b4a; --right-soft: #ffece7;
+  --ok: #17a364; --ok-soft: #e3f6ec; --close: #c98a00; --close-soft: #fff4d6; --warn: #e0533d; --warn-soft: #fde9e5;
+  --focus: 0 0 0 3px color-mix(in srgb, var(--left) 40%, transparent);
+  --r: 16px; --r-sm: 10px;
+  font-family: system-ui, -apple-system, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root[data-theme="auto"] { --bg: #14161b; --card: #1c1f26; --card-2: #23272f; --line: #2c313b; --line-2: #3a404c;
+  --ink: #eef0f4; --ink-2: #a9afbc; --ink-3: #737a88; --left: #5b9bff; --left-soft: #1d2a42; --right: #ff8566; --right-soft: #3a2420;
+  --ok: #3fd18b; --ok-soft: #173326; --close: #f2b631; --close-soft: #3a3016; --warn: #ff7a64; --warn-soft: #3b211d; color-scheme: dark; } }
+:root[data-theme="night"] { --bg: #14161b; --card: #1c1f26; --card-2: #23272f; --line: #2c313b; --line-2: #3a404c;
+  --ink: #eef0f4; --ink-2: #a9afbc; --ink-3: #737a88; --left: #5b9bff; --left-soft: #1d2a42; --right: #ff8566; --right-soft: #3a2420;
+  --ok: #3fd18b; --ok-soft: #173326; --close: #f2b631; --close-soft: #3a3016; --warn: #ff7a64; --warn-soft: #3b211d; color-scheme: dark; }
+:root[data-theme="neon"] { --bg: #0e0a1c; --card: #171129; --card-2: #211938; --line: #2c2249; --line-2: #3d3063;
+  --ink: #f4f0ff; --ink-2: #b6abda; --ink-3: #7e72a6; --left: #22d3ee; --left-soft: #0f2c3a; --right: #f472b6; --right-soft: #3a1631;
+  --ok: #4ade80; --ok-soft: #12321f; --close: #facc15; --close-soft: #352d0c; --warn: #fb7185; --warn-soft: #3a1520; color-scheme: dark; }
+:root[data-theme="sunset"] { --bg: #fcf1e4; --card: #fffaf3; --card-2: #f6e6d3; --line: #ecd8c0; --line-2: #dfc3a3;
+  --ink: #3a2316; --ink-2: #77574a; --ink-3: #a98a78; --left: #0e9384; --left-soft: #dcf3ef; --right: #e8572f; --right-soft: #fde3d8;
+  --ok: #2f8f4e; --ok-soft: #e1f2e4; --close: #b7791f; --close-soft: #fbecd2; --warn: #c2412d; --warn-soft: #f9ddd6; color-scheme: light; }
+:root[data-theme="studio"] { --bg: #0c0d0e; --card: #161718; --card-2: #1f2022; --line: #27292c; --line-2: #383b3f;
+  --ink: #f2f2f2; --ink-2: #a3a6aa; --ink-3: #6c7075; --left: #2aa6ff; --left-soft: #0f2333; --right: #ffb020; --right-soft: #33260b;
+  --ok: #3ddc84; --ok-soft: #10301f; --close: #ffd23f; --close-soft: #332b0d; --warn: #ff5a4e; --warn-soft: #351614; color-scheme: dark; }
+:root[data-theme="graphite"] { --bg: #161616; --card: #1e1e1e; --card-2: #272727; --line: #2d2d2d; --line-2: #3d3d3d;
+  --ink: #ececea; --ink-2: #a6a6a2; --ink-3: #72726e; --left: #f07a1c; --left-soft: #38230f; --right: #c9ccc6; --right-soft: #2b2c2a;
+  --ok: #7ccf8a; --ok-soft: #1a2d1e; --close: #e8c04a; --close-soft: #332b12; --warn: #ff4a3d; --warn-soft: #3a1714; color-scheme: dark; }
+:root[data-theme="concrete"] { --bg: #d9d9d7; --card: #ececea; --card-2: #d0d0cd; --line: #c6c6c3; --line-2: #b2b2ae;
+  --ink: #1a1a1a; --ink-2: #4a4a48; --ink-3: #7a7a76; --left: #e2691a; --left-soft: #f4dcc6; --right: #262626; --right-soft: #c8c8c5;
+  --ok: #2f8f4e; --ok-soft: #dcebdf; --close: #a8760e; --close-soft: #efe2c2; --warn: #c2412d; --warn-soft: #f1d6cf; color-scheme: light; }
+
+/* lane colours */
+:root { --l-drums: #ff6b4a; --l-perc: #f59e0b; --l-bass: #8b5cf6; --l-chords: #2f7df6; --l-lead: #06b6d4; --l-vocals: #ec4899; --l-fx: #10b981; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font-size: 13px; display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: none; box-shadow: var(--focus); }
+.hidden { display: none !important; }
+small, .muted { color: var(--ink-2); }
+
+/* ---------- title bar ---------- */
+.titlebar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--card); border-bottom: 1px solid var(--line); -webkit-app-region: drag; min-height: 52px; flex-wrap: wrap; }
+.titlebar > * { -webkit-app-region: no-drag; }
+.is-mac .titlebar { padding-left: 84px; }
+.brand { font-weight: 700; display: flex; align-items: center; gap: 8px; -webkit-app-region: drag; white-space: nowrap; }
+.brand .dot { width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(135deg, var(--left), var(--right)); }
+.field { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
+.field input, .field select { background: var(--card-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; color: var(--ink); }
+#title { width: 180px; font-weight: 600; }
+#bpm { width: 64px; }
+.spacer { flex: 1; }
+.btn { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 6px 11px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { border-color: var(--line-2); }
+.btn.primary { background: var(--left); border-color: var(--left); color: #fff; }
+.btn.go { background: var(--ok); border-color: var(--ok); color: #fff; }
+.btn.small { padding: 3px 8px; font-size: 12px; border-radius: 8px; }
+.btn:disabled { opacity: .5; cursor: default; }
+.icon-btn { background: none; border: 1px solid transparent; border-radius: 8px; padding: 4px; display: inline-grid; place-items: center; color: var(--ink-2); }
+.icon-btn:hover { background: var(--card-2); color: var(--ink); }
+.icon-btn[aria-pressed="true"] { background: var(--left-soft); color: var(--left); }
+.transport { display: flex; align-items: center; gap: 6px; }
+#playBtn { width: 38px; height: 34px; justify-content: center; padding: 0; }
+#clock { font-variant-numeric: tabular-nums; min-width: 92px; color: var(--ink-2); font-size: 12px; }
+.meter { width: 70px; height: 6px; border-radius: 3px; background: var(--card-2); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), var(--close) 75%, var(--warn)); transition: width .05s; }
+.menu-wrap { position: relative; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 30px rgb(0 0 0 / .18); padding: 6px; min-width: 240px; z-index: 50; }
+.menu button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 7px 10px; border-radius: 8px; }
+.menu button:hover { background: var(--card-2); }
+.menu button small { display: block; font-size: 11px; }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+
+/* ---------- layout ---------- */
+main { display: grid; grid-template-columns: 280px 1fr 320px; min-height: 0; }
+aside { background: var(--card); min-height: 0; overflow: auto; }
+.browser { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+.side { border-left: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.tabs { display: flex; gap: 4px; padding: 10px 10px 0; }
+.tabs button { flex: 1; background: none; border: 0; border-bottom: 2px solid transparent; padding: 6px 4px 8px; color: var(--ink-2); font-weight: 600; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--left); }
+.pane { padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow: auto; flex: 1; }
+.group h4 { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+.sound { display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 8px; border-radius: 9px; border: 1px solid transparent; cursor: grab; user-select: none; }
+.sound:hover { background: var(--card-2); }
+.sound .swatch { width: 8px; height: 22px; border-radius: 3px; flex: none; }
+.sound .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sound .nm small { display: block; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.drop-zone { border: 1.5px dashed var(--line-2); border-radius: 12px; padding: 14px; text-align: center; color: var(--ink-2); }
+.drop-zone.over { border-color: var(--left); background: var(--left-soft); }
+.search { display: flex; gap: 6px; }
+.search input { flex: 1; min-width: 0; background: var(--card-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { background: var(--card-2); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 12px; }
+.note { background: var(--card-2); border-radius: 10px; padding: 9px 10px; color: var(--ink-2); font-size: 12px; line-height: 1.45; }
+.note a { color: var(--left); }
+.note input { width: 100%; margin: 6px 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+
+/* ---------- arranger ---------- */
+.arranger { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.arr-tools { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.arr-scroll { flex: 1; overflow: auto; position: relative; }
+.grid { display: grid; position: relative; min-width: max-content; padding-bottom: 20px; }
+.lane-head { position: sticky; left: 0; z-index: 3; background: var(--card); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 6px 8px; display: flex; flex-direction: column; justify-content: center; gap: 3px; width: 150px; }
+.lane-head .row { display: flex; align-items: center; gap: 4px; }
+.lane-head b { flex: 1; display: flex; align-items: center; gap: 6px; }
+.lane-head b::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--lc); }
+.lane-head input[type=range] { width: 100%; accent-color: var(--lc); height: 14px; }
+.ms { border: 1px solid var(--line); background: var(--card-2); border-radius: 5px; font-size: 10px; font-weight: 700; width: 20px; height: 18px; padding: 0; color: var(--ink-3); }
+.ms[aria-pressed="true"].m { background: var(--warn); color: #fff; border-color: var(--warn); }
+.ms[aria-pressed="true"].s { background: var(--close); color: #000; border-color: var(--close); }
+.sec-head { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: 5px 6px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sec-head.corner { left: 0; z-index: 4; justify-content: flex-end; }
+.sec-head .top { display: flex; align-items: center; gap: 3px; }
+.sec-head select { background: none; border: 0; font-weight: 700; padding: 0; min-width: 0; flex: 1; color: var(--ink); }
+.sec-head .bars { display: flex; align-items: center; gap: 2px; color: var(--ink-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sec-head .bars button, .sec-head .top button { background: none; border: 0; padding: 0 2px; color: var(--ink-3); line-height: 1; }
+.sec-head .bars button:hover, .sec-head .top button:hover { color: var(--ink); }
+.sec-head[data-kind="intro"], .sec-head[data-kind="outro"] { box-shadow: inset 0 3px 0 var(--ok); }
+.sec-head[data-kind="drop"] { box-shadow: inset 0 3px 0 var(--right); }
+.sec-head[data-kind="build"] { box-shadow: inset 0 3px 0 var(--close); }
+.sec-head[data-kind="break"] { box-shadow: inset 0 3px 0 var(--left); }
+.cell { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px; min-height: 52px; position: relative; }
+.cell.mix-zone { background: color-mix(in srgb, var(--ok) 5%, transparent); }
+.cell.over { background: var(--left-soft); }
+.cell.sel { box-shadow: inset 0 0 0 2px var(--left); }
+.clip { height: 100%; min-height: 42px; border-radius: 7px; padding: 4px 6px; font-size: 11px; font-weight: 600; color: #fff; background: var(--lc); overflow: hidden; position: relative; cursor: pointer;
+  background-image: repeating-linear-gradient(90deg, transparent 0 calc(var(--bw) - 1px), rgb(255 255 255 / .22) calc(var(--bw) - 1px) var(--bw)); }
+.clip span { position: relative; text-shadow: 0 1px 2px rgb(0 0 0 / .3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.clip.warn::after { content: "!"; position: absolute; right: 4px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--warn); font-size: 10px; display: grid; place-items: center; }
+.empty { height: 100%; min-height: 42px; border-radius: 7px; border: 1px dashed transparent; display: grid; place-items: center; color: transparent; font-size: 18px; cursor: pointer; }
+.cell:hover .empty { border-color: var(--line-2); color: var(--ink-3); }
+.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--right); z-index: 5; pointer-events: none; box-shadow: 0 0 8px var(--right); }
+.ruler-click { cursor: pointer; }
+
+/* ---------- side ---------- */
+.card { background: var(--card-2); border-radius: var(--r); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.card h3 { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.card textarea { resize: vertical; min-height: 64px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+.card .row { display: flex; gap: 6px; flex-wrap: wrap; }
+.checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.checks li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; align-items: start; line-height: 1.35; }
+.checks li i { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 11px; font-weight: 700; color: #fff; }
+.checks li.ok i { background: var(--ok); }
+.checks li.warn i { background: var(--close); color: #000; }
+.checks li.bad i { background: var(--warn); }
+.checks small { display: block; font-size: 11px; }
+.score { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: auto; }
+.score.good { background: var(--ok-soft); color: var(--ok); }
+.score.meh { background: var(--close-soft); color: var(--close); }
+.steps { display: grid; grid-template-columns: 40px repeat(16, 1fr); gap: 2px; align-items: center; font-size: 10px; }
+.steps button { aspect-ratio: 1; border: 0; border-radius: 3px; background: var(--card); padding: 0; }
+.steps button.beat { background: color-mix(in srgb, var(--ink) 9%, var(--card)); }
+.steps button.x { background: var(--lc); }
+.steps button.o { background: color-mix(in srgb, var(--lc) 50%, var(--card)); }
+.steps button.now { outline: 1px solid var(--ink-2); }
+.ptext summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.ptext textarea { width: 100%; margin: 6px 0; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; white-space: pre; overflow-x: auto; resize: vertical; }
+.ptext .row { align-items: center; }
+.cell-info select { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 5px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 12px; }
+.kv input, .kv select { background: var(--card); border: 1px solid var(--line); border-radius: 7px; padding: 3px 6px; min-width: 0; }
+.spin { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 999px; font-weight: 600; z-index: 99; transition: opacity .25s; max-width: 80vw; }
+.toast.gone { opacity: 0; pointer-events: none; }
+dialog { border: 1px solid var(--line); border-radius: 18px; background: var(--card); color: var(--ink); padding: 18px; max-width: 520px; }
+dialog::backdrop { background: rgb(0 0 0 / .35); }
+dialog h2 { margin: 0 0 10px; font-size: 17px; }
+.plist { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow: auto; margin: 8px 0; }
+.plist .item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--card-2); }
+.plist .item b { flex: 1; }
+@media (max-width: 1180px) { main { grid-template-columns: 240px 1fr 260px; } #title { width: 130px; } }
+</style>
+</head>
+<body>
+<header class="titlebar">
+  <div class="brand"><span class="dot"></span>Studio</div>
+  <label class="field"><input id="title" aria-label="Track name" maxlength="60"></label>
+  <label class="field">Style <select id="style"></select></label>
+  <label class="field">BPM <input id="bpm" type="number" min="70" max="180" step="0.5"></label>
+  <label class="field">Key <select id="key"></select></label>
+  <label class="field">Chords <select id="prog"></select></label>
+  <button class="icon-btn" id="pumpBtn" title="Pump: duck the music on every kick, the classic house feel" aria-pressed="true">Pump</button>
+  <div class="spacer"></div>
+  <div class="transport">
+    <button class="btn primary" id="playBtn" title="Play or stop (Space)" aria-label="Play"></button>
+    <button class="icon-btn" id="loopBtn" title="Loop the selected section" aria-pressed="false"></button>
+    <span id="clock">0:00 · bar 1</span>
+    <div class="meter" title="Output level"><i id="meterBar"></i></div>
+  </div>
+  <span class="menu-wrap"><button class="btn" id="projBtn"></button>
+    <div class="menu hidden" id="projMenu" role="menu">
+      <button data-p="new">New track<small>A blank layout in the current style</small></button>
+      <button data-p="open">Open…<small>Tracks you've made</small></button>
+      <button data-p="dup">Save a copy</button>
+      <hr><button data-p="delete">Delete this track</button>
+    </div></span>
+  <span class="menu-wrap"><button class="btn go" id="exportBtn"></button>
+    <div class="menu hidden" id="exportMenu" role="menu">
+      <button data-x="library" id="toLibrary">Add to My library<small>Ready to mix: exact beat grid and phrases, no analysis needed</small></button>
+      <button data-x="wav">Save as WAV<small>The whole track, 44.1 kHz 16-bit</small></button>
+      <button data-x="stems">Save stems<small>One WAV per lane, to finish in other music software</small></button>
+    </div></span>
+</header>
+
+<main>
+  <aside class="browser">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="built" aria-selected="true">Built-in</button>
+      <button role="tab" data-tab="mine" aria-selected="false">My samples</button>
+      <button role="tab" data-tab="fs" aria-selected="false">Freesound</button>
+    </div>
+    <div class="pane" id="pane-built"></div>
+    <div class="pane hidden" id="pane-mine">
+      <div class="drop-zone" id="dropZone">Drop loops and sounds here<br><small>WAV, MP3, AIFF, FLAC. Name them like "Bass_124bpm_Am.wav" and the tempo and key are read for you.</small><br><button class="btn small" id="addFilesBtn" style="margin-top:8px">Choose files…</button></div>
+      <input type="file" id="fileInput" accept="audio/*,.wav,.aif,.aiff,.flac,.mp3,.m4a,.ogg" multiple hidden>
+      <div id="mineList"></div>
+      <div class="note"><b>Where to get samples</b><br>Free loops and vocals you can use in your own tracks: Freesound (the tab above, public domain only), Looperman, Bandlab Sounds, and the free packs from Splice, Loopmasters and Native Instruments. Check each pack's licence before you release a track.<br><br>Made loops in other software? Export them as WAV and drop them here.</div>
+    </div>
+    <div class="pane hidden" id="pane-fs">
+      <div class="note hidden" id="fsKeyBox">Freesound is a huge free sound library. Studio only shows sounds that are <b>public domain (CC0)</b>, so you can release what you make.<br><br>
+        1. Make a free account and get an API key at <a href="#" id="fsApply">freesound.org/apiv2/apply</a><br>2. Paste the key ("Client secret/Api key") here:
+        <input id="fsKey" placeholder="Freesound API key" autocomplete="off"><button class="btn small primary" id="fsKeySave">Save key</button></div>
+      <div id="fsSearchBox">
+        <div class="search"><input id="fsQuery" placeholder="Search: vocal, bass loop 124…" enterkeyhint="search"><button class="btn small" id="fsGo"></button></div>
+        <div class="chips" style="margin-top:6px"></div>
+        <div id="fsResults" style="margin-top:6px"></div>
+        <button class="btn small hidden" id="fsMore">More results</button>
+        <p class="muted" style="font-size:11px">Public domain (CC0) only. Downloads are Freesound's high-quality MP3 previews. <a href="#" id="fsForget">Forget key</a></p>
+      </div>
+    </div>
+  </aside>
+
+  <section class="arranger">
+    <div class="arr-tools">
+      <button class="btn small" id="addSecBtn"></button>
+      <span class="muted" id="arrHint">Drag loops from the left onto the grid. Each block repeats for its whole section.</span>
+      <div class="spacer"></div>
+      <button class="icon-btn" id="zoomOut" title="Zoom out"></button><button class="icon-btn" id="zoomIn" title="Zoom in"></button>
+    </div>
+    <div class="arr-scroll" id="arrScroll"><div class="grid" id="grid"></div></div>
+  </section>
+
+  <aside class="side">
+    <div class="card" id="aiCard">
+      <h3 id="aiTitle"></h3>
+      <textarea id="brief" placeholder="Describe a track: &quot;dark rolling tech house with a big acid drop&quot;"></textarea>
+      <div class="row"><button class="btn primary" id="aiBtn"></button><button class="btn" id="surpriseBtn"></button></div>
+      <div class="note hidden" id="aiKeyBox">Writing tracks with AI uses your own Anthropic API key (the same one as the AI coach). It's stored <span id="aiWhere">on this computer</span>.
+        <input id="aiKey" placeholder="sk-ant-…" autocomplete="off" type="password"><button class="btn small primary" id="aiKeySave">Save key</button></div>
+      <small id="aiStatus"></small>
+    </div>
+    <div class="card" id="cellCard"><h3>Nothing selected</h3><small>Click a block on the grid to change or edit it.</small></div>
+    <div class="card"><h3>Ready to mix? <span class="score" id="score"></span></h3><ul class="checks" id="checks"></ul></div>
+  </aside>
+</main>
+
+<dialog id="openDlg"><h2>Your tracks</h2><div class="plist" id="plist"></div><div style="text-align:right"><button class="btn" id="openClose">Close</button></div></dialog>
+<div class="toast gone" id="toast"></div>
+<script type="module" src="js/studio.js"></script>
+</body>
+</html>

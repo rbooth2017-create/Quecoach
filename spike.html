@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio spike</title>
+<style>
+:root {
+  --bg: #0d0f13; --panel: #161a21; --panel-2: #1d222b; --line: #2a303b;
+  --text: #e6e9ef; --muted: #8b93a3;
+  --a: #3fb6ff; --b: #ff8a3d; --ok: #3ddc84; --warn: #ffcc4d; --bad: #ff5d6c;
+  --radius: 10px;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; }
+button, select, input { font: inherit; color: inherit; }
+button, select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.on { background: var(--ok); border-color: var(--ok); color: #000; }
+main { padding: 16px; display: grid; gap: 14px; max-width: 1100px; margin: 0 auto; }
+h1 { font-size: 18px; margin: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; display: grid; gap: 10px; }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; font-weight: 600; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.muted { color: var(--muted); }
+.decks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.deck { border-top: 3px solid var(--deck); }
+.deck[data-deck="1"] { --deck: var(--a); } .deck[data-deck="2"] { --deck: var(--b); }
+.big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+input[type=range] { flex: 1; min-width: 120px; }
+.pill { padding: 3px 10px; border-radius: 99px; font-size: 13px; background: var(--panel-2); }
+.pill.ok { background: #143d27; color: var(--ok); } .pill.bad { background: #44171d; color: var(--bad); } .pill.warn { background: #3d3414; color: var(--warn); }
+pre { background: #0a0c10; border-radius: 7px; padding: 10px; margin: 0; white-space: pre-wrap; font-size: 12px; max-height: 260px; overflow: auto; }
+@media (max-width: 760px) { .decks { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="row"><h1>Audio spike</h1><span class="muted">Can our own decks replace rekordbox for training? Go criteria: separate headphone cue, under 25 ms, clean key lock at ±8 %.</span></div>
+
+  <section class="panel">
+    <h2>1 · Output</h2>
+    <div class="row">
+      <label>Device <select id="device"><option value="">System default</option></select></label>
+      <label>Headphones on <select id="cuePair"><option value="2">outputs 3/4</option><option value="3">outputs 5/6</option></select></label>
+      <button id="apply">Use this device</button>
+    </div>
+    <div id="outInfo" class="muted">Click "Use this device" to start audio.</div>
+    <div class="row">
+      <button id="beepMaster">Beep the room (1/2)</button>
+      <button id="beepCue">Beep the headphones</button>
+      <label><input type="checkbox" id="heardSeparate"> I heard the low beep only in the speakers and the high beep only in the headphones</label>
+    </div>
+  </section>
+
+  <section class="decks" id="decks"></section>
+
+  <section class="panel">
+    <h2>3 · Mixer and beatmatch</h2>
+    <div class="row"><span>Left</span><input type="range" id="xfader" min="0" max="1" step="0.01" value="0.5"><span>Right</span></div>
+    <div class="row"><span id="match" class="pill">Play both decks</span></div>
+    <div class="row">
+      <label>Stretch block <select id="blockMs"><option value="120">120 ms (best sound)</option><option value="60">60 ms</option><option value="40">40 ms (fastest)</option></select></label>
+      <label><input type="checkbox" id="keyLockClean"> Key lock sounds clean at ±8 % with this block size</label>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>4 · Controller</h2>
+    <div id="midiInfo" class="muted">Looking for a controller…</div>
+  </section>
+
+  <section class="panel">
+    <h2>5 · Result</h2>
+    <div class="row" id="verdict"></div>
+    <pre id="report"></pre>
+    <div class="row"><button id="copy">Copy report</button><span class="muted">Paste it back into the chat, or save it with the spike notes.</span></div>
+  </section>
+</main>
+<script type="module" src="js/spike-audio.js"></script>
+</body>
+</html>

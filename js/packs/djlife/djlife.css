@@ -1,0 +1,168 @@
+/* DJ Life expansion pack. Uses the Play view's neon tokens (--pv-*), which .career-layer and .playview define. */
+
+/* ---------- chips in the Play view's top bar ---------- */
+.pv-packchips { display: contents; }
+.dl-gigs { background: color-mix(in srgb, var(--pv-b) 22%, transparent); border-color: var(--pv-b); }
+button.dl-gigs:hover { background: color-mix(in srgb, var(--pv-b) 34%, transparent); }
+.dl-gigs.ping { animation: dl-ping 1.6s ease-in-out infinite; }
+@keyframes dl-ping { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--pv-b) 25%, transparent); } }
+.dl-cash { color: var(--pv-gold); font-variant-numeric: tabular-nums; }
+.dl-day { color: var(--pv-ink-2); font-weight: 600; }
+.dl-cash .dl-day::before { content: "·"; margin: 0 6px; color: var(--pv-ink-3); }
+@media (max-width: 1100px) { .dl-day { display: none; } }
+
+/* ---------- the overlay ---------- */
+.dl-layer { z-index: 46; align-items: start; }
+.dl-card { display: flex; flex-direction: column; gap: 14px; max-height: calc(100vh - 48px); }
+.dl-card.dl-small { width: min(560px, 100%); }
+.dl-head { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; padding-right: 40px; }
+.dl-head > div:first-child { flex: 1; min-width: 220px; }
+.dl-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.dl-stats > span { display: grid; gap: 2px; padding: 8px 14px; border-radius: 14px; background: var(--pv-card); border: 1px solid var(--pv-line); min-width: 96px; }
+.dl-stats small { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--pv-ink-3); }
+.dl-stats b { font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.dl-stats > span:first-child b { color: var(--pv-gold); }
+.dl-meter { display: inline-block; width: 60px; height: 6px; border-radius: 3px; background: var(--pv-line); overflow: hidden; }
+.dl-meter s { display: block; height: 100%; background: var(--pv-a); text-decoration: none; }
+.dl-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--pv-line); }
+.dl-tabs button { position: relative; border: none; background: transparent; border-radius: 10px 10px 0 0; padding: 9px 16px; color: var(--pv-ink-2); font-weight: 700; }
+.dl-tabs button:hover { background: var(--pv-card); color: var(--pv-ink); }
+.dl-tabs button[aria-selected="true"] { color: var(--pv-ink); box-shadow: inset 0 -3px 0 var(--pv-b); }
+.dl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pv-gold); display: inline-block; margin-left: 2px; }
+.dl-body { overflow: auto; min-height: 0; display: grid; gap: 14px; padding-right: 4px; }
+.dl-h { margin: 4px 0 0; font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--pv-ink-2); }
+.dl-h small { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--pv-ink-3); margin-left: 8px; font-size: 13px; }
+.dl-empty { color: var(--pv-ink-3); font-size: 13.5px; margin: 0; }
+.dl-sub { color: var(--pv-ink-2); font-size: 13.5px; }
+.dl-acts { display: flex; gap: 10px; flex-wrap: wrap; }
+.dl-card .cl-go, .dl-card .cl-ghost { height: 42px; font-size: 14.5px; padding: 0 18px; }
+.dl-card button:disabled { opacity: .45; filter: none; box-shadow: none; }
+.dl-tag { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--pv-ink-3); padding: 6px 10px; }
+.dl-tag.ok, .dl-card .ok { color: var(--pv-ok); }
+.dl-card .warn { color: var(--pv-warn); }
+
+/* the gig you're on, or a booking waiting */
+.dl-now { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; padding: 16px 20px; border-radius: 18px; background: rgba(23,17,41,.9); border: 2px solid var(--pv-ok); }
+.dl-now > div:first-child { flex: 1; display: grid; gap: 6px; min-width: 240px; }
+.dl-now b { font-size: 18px; }
+.dl-now.booked { border-color: var(--pv-b); }
+
+/* gig offers */
+.dl-offers { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.dl-offer { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 18px; background: var(--pv-card); border: 1px solid var(--pv-line-2); }
+.dl-offer.hosted { border-color: var(--pv-a); }
+.dl-offer.locked { opacity: .7; background: #110c1f; }
+.dl-offer.next { border-style: dashed; }
+.dl-offer > b { font-size: 16px; }
+.dl-ohead { display: flex; justify-content: space-between; align-items: center; }
+.dl-when { font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--pv-b-2); }
+.dl-pay { font-weight: 800; color: var(--pv-gold); }
+.dl-where { color: var(--pv-ink-2); font-size: 13px; }
+.dl-facts { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 4px; font-size: 13px; color: var(--pv-ink-2); }
+.dl-facts li { display: flex; gap: 7px; align-items: flex-start; }
+.dl-facts .ic { flex: none; margin-top: 2px; color: var(--pv-ink-3); }
+.dl-facts .goal { color: var(--pv-gold); } .dl-facts .goal .ic { color: var(--pv-gold); }
+.dl-needs { display: flex; gap: 7px; font-size: 12.5px; color: var(--pv-ink-3); margin-top: auto; padding-top: 8px; border-top: 1px solid var(--pv-line); }
+.dl-needs .ic { flex: none; margin-top: 2px; }
+.dl-accept { margin-top: auto; }
+.dl-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--pv-line); }
+.dl-foot > span { color: var(--pv-ink-3); font-size: 13px; flex: 1; min-width: 220px; }
+
+/* shop and homes */
+.dl-slot { display: grid; gap: 8px; }
+.dl-items, .dl-homes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.dl-item, .dl-home { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--pv-card); border: 1px solid var(--pv-line); }
+.dl-item > div, .dl-home > div { flex: 1; display: grid; gap: 3px; min-width: 0; }
+.dl-item span, .dl-home span { color: var(--pv-ink-2); font-size: 13px; }
+.dl-item small, .dl-home small { color: var(--pv-a-2); font-size: 12px; }
+.dl-item.on, .dl-home.on { border-color: var(--pv-ok); }
+.dl-item .cl-go, .dl-item .cl-ghost, .dl-home .cl-go, .dl-home .cl-ghost { height: 36px; font-size: 13px; padding: 0 14px; flex: none; }
+
+/* diary */
+.dl-diary { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.dl-diary li { display: grid; grid-template-columns: 130px minmax(0, 1fr) 70px 70px 70px; gap: 10px; align-items: center; padding: 9px 14px; border-radius: 12px; background: var(--pv-card); font-size: 13.5px; }
+.dl-diary li > span { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) { .dl-diary li { grid-template-columns: 1fr 1fr; } }
+
+/* intro, payday, week */
+.dl-how { margin: 4px 0; padding-left: 20px; display: grid; gap: 8px; color: var(--pv-ink-2); font-size: 14.5px; }
+.dl-how b { color: var(--pv-ink); }
+.dl-payday h2 { font-size: clamp(40px, 6vw, 60px); color: var(--pv-gold); }
+.dl-stars { display: flex; align-items: center; gap: 4px; margin: 0; color: var(--pv-ink-2); font-size: 13.5px; }
+.dl-stars > span:last-child { margin-left: 8px; }
+.dl-star { width: 22px; height: 22px; fill: var(--pv-line-2); }
+.dl-stars .on .dl-star { fill: var(--pv-gold); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--pv-gold) 60%, transparent)); }
+.dl-diary .dl-star { width: 14px; height: 14px; fill: var(--pv-gold); }
+.dl-sum { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.dl-sum td { padding: 8px 0; border-bottom: 1px solid var(--pv-line); }
+.dl-sum td:last-child { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dl-miss { margin: 0; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--pv-warn) 12%, transparent); color: var(--pv-ink); font-size: 13.5px; }
+.dl-gains { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; color: var(--pv-ink-2); }
+
+/* ---------- your room, behind the decks ---------- */
+.sc.sc-pack { display: block; inset: 0; }
+.dl-room { position: absolute; inset: 0; }
+.dl-room > i { position: absolute; display: block; }
+.dl-room[data-home="flat"] { background: radial-gradient(ellipse at 80% 20%, rgba(34,211,238,.06), transparent 60%); }
+.dl-room[data-home="studio"] { background: radial-gradient(ellipse at 20% 20%, rgba(167,139,250,.1), transparent 60%); }
+.dl-room[data-home="loft"] { background: repeating-linear-gradient(0deg, transparent 0 28px, rgba(255,255,255,.025) 28px 30px), radial-gradient(ellipse at 50% 0%, rgba(244,114,182,.08), transparent 60%); }
+.dl-room[data-home="house"] { background: radial-gradient(ellipse at 50% 0%, rgba(250,204,21,.08), transparent 60%); }
+.dl-led { left: 0; right: 0; top: 64px; height: 3px; background: linear-gradient(90deg, var(--pv-a), var(--pv-b), var(--pv-a)); box-shadow: 0 0 18px var(--pv-b), 0 0 40px var(--pv-a); opacity: .7; animation: dl-led 6s linear infinite; background-size: 200% 100%; }
+@keyframes dl-led { to { background-position: 200% 0; } }
+.dl-heads b { position: absolute; top: 60px; width: 120px; height: 70vh; transform-origin: 50% 0; background: linear-gradient(180deg, rgba(103,232,249,.22), transparent 80%); clip-path: polygon(45% 0, 55% 0, 100% 100%, 0 100%); animation: dl-sweep 4s ease-in-out infinite alternate; }
+.dl-heads b:first-child { left: 18%; }
+.dl-heads b:last-child { right: 18%; background: linear-gradient(180deg, rgba(249,168,212,.22), transparent 80%); animation-delay: -2s; }
+@keyframes dl-sweep { from { transform: rotate(-22deg); } to { transform: rotate(22deg); } }
+.dl-laser b { position: absolute; left: 50%; top: 60px; width: 2px; height: 90vh; background: #4ade80; box-shadow: 0 0 8px #4ade80; opacity: .35; transform-origin: 50% 0; animation: dl-laser 3s linear infinite; }
+.dl-laser b:nth-child(2) { animation-delay: -1s; } .dl-laser b:nth-child(3) { animation-delay: -2s; }
+@keyframes dl-laser { 0% { transform: rotate(-50deg); } 50% { transform: rotate(50deg); } 100% { transform: rotate(-50deg); } }
+.dl-spk { bottom: 120px; width: 70px; height: 110px; border-radius: 8px; background: radial-gradient(circle at 50% 66%, #0b0816 0 18px, #2c2249 19px 22px, transparent 23px), radial-gradient(circle at 50% 24%, #0b0816 0 8px, #2c2249 9px 11px, transparent 12px), #1a1330; border: 1px solid #3d3063; }
+.dl-spk.l { left: 2%; } .dl-spk.r { right: 2%; }
+.dl-room[data-speakers="2"] .dl-spk { width: 90px; height: 150px; }
+.dl-poster { left: 15%; top: 110px; width: 90px; height: 124px; border-radius: 4px; background: linear-gradient(170deg, var(--pv-b), #7c3aed 55%, var(--pv-a)); opacity: .45; transform: rotate(-4deg); }
+.dl-plant { right: 9%; bottom: 120px; width: 60px; height: 120px; background: radial-gradient(ellipse at 30% 30%, #166534 0 22px, transparent 23px), radial-gradient(ellipse at 70% 25%, #15803d 0 20px, transparent 21px), radial-gradient(ellipse at 50% 55%, #14532d 0 22px, transparent 23px), linear-gradient(transparent 70%, #3d3063 70%); opacity: .6; }
+.dl-shelf { left: 9%; top: 270px; width: 160px; height: 70px; border-bottom: 4px solid #3d3063; background: repeating-linear-gradient(90deg, #2c2249 0 6px, #43316e 6px 8px, #241a3d 8px 14px); opacity: .55; }
+.dl-neon { right: 16%; top: 96px; font: 800 28px/1 system-ui, sans-serif; font-style: italic; color: var(--pv-b-2); text-shadow: 0 0 8px var(--pv-b), 0 0 22px var(--pv-b); opacity: .7; transform: rotate(-4deg); }
+.dl-disco { left: 50%; top: 34px; width: 46px; height: 46px; margin-left: -23px; border-radius: 50%; background: repeating-conic-gradient(#e2e8f0 0 10deg, #64748b 10deg 20deg); box-shadow: 0 0 30px rgba(255,255,255,.3); opacity: .7; animation: dl-spin 8s linear infinite; }
+@keyframes dl-spin { to { transform: rotate(360deg); } }
+.dl-sofa { left: 50%; bottom: 96px; width: 260px; height: 56px; margin-left: -130px; border-radius: 20px 20px 8px 8px; background: #3a1631; opacity: .35; }
+@media (prefers-reduced-motion: reduce) { .dl-led, .dl-heads b, .dl-laser b, .dl-disco, .dl-gigs.ping { animation: none; } }
+
+/* ---------- your room (world.js): walk round it ---------- */
+.dl-world { --pv-bg: #0b0816; --pv-card: #171129; --pv-card-2: #211938; --pv-line: #2c2249; --pv-line-2: #3d3063;
+  --pv-ink: #f4f0ff; --pv-ink-2: #c9c0e8; --pv-ink-3: #a59bc9; --pv-a: #22d3ee; --pv-b: #f472b6; --pv-ok: #4ade80; --pv-gold: #facc15;
+  position: fixed; inset: 0; z-index: 44; background: radial-gradient(ellipse at 50% 30%, #1d1236 0%, #07050f 70%); color: var(--pv-ink); outline: none; }
+.dl-world canvas { position: absolute; inset: 0; display: block; touch-action: none; }
+.dl-whud { position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 18px; pointer-events: none; }
+.dl-whud > * { pointer-events: auto; }
+/* The desktop app's title bar (top 46px) drags the window, and it's still there under this full-screen room.
+   Say no-drag over the room so clicks reach the buttons and the floor; the empty strip of the top bar still drags. */
+.dl-world { -webkit-app-region: no-drag; }
+.dl-whud { -webkit-app-region: drag; }
+.dl-whud > *, .dl-whud button { -webkit-app-region: no-drag; }
+.dl-wl { display: grid; gap: 2px; padding-left: 64px; }
+.dl-wl b { font-size: 20px; font-weight: 850; letter-spacing: -.01em; }
+.dl-wl span { font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--pv-b); }
+.dl-wr { display: flex; gap: 8px; align-items: center; }
+.dl-world .pv-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 8px 15px; border-radius: 99px; border: 1px solid var(--pv-line-2); background: rgba(23,17,41,.85); color: var(--pv-ink); font-weight: 650; font-size: 13px; }
+.dl-world button.pv-chip:hover { background: var(--pv-card-2); }
+.dl-world .pv-x { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--pv-line-2); background: rgba(23,17,41,.85); color: var(--pv-ink); display: grid; place-items: center; padding: 0; }
+.dl-prompt { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 10px 18px 10px 10px; border-radius: 99px; background: rgba(23,17,41,.92); border: 1px solid var(--pv-ok); box-shadow: 0 0 24px color-mix(in srgb, var(--pv-ok) 30%, transparent); font-weight: 700; cursor: pointer; animation: dl-pop .18s ease-out; }
+@keyframes dl-pop { from { transform: translate(-50%, 8px); opacity: 0; } }
+.dl-world kbd { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 8px; background: var(--pv-ink); color: #0b0816; font: 800 13px/1 system-ui, sans-serif; }
+.dl-prompt kbd { background: var(--pv-ok); }
+.dl-whelp { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); color: var(--pv-ink-3); font-size: 12.5px; white-space: nowrap; }
+.dl-whelp kbd { min-width: 20px; height: 20px; font-size: 11px; background: var(--pv-line-2); color: var(--pv-ink); }
+.dl-roombtn { align-self: flex-start; height: 36px !important; font-size: 13px !important; gap: 8px; }
+@media (max-width: 700px) { .dl-wl { padding-left: 0; } .dl-wl b { font-size: 16px; } .dl-wr .pv-chip:not(.dl-cash) { display: none; } .dl-whelp { white-space: normal; text-align: center; width: 90%; } }
+
+/* ---------- town, homes for sale, cars, build mode ---------- */
+.dl-btns { display: flex; flex-direction: column; gap: 6px; align-items: stretch; flex: none; }
+.dl-swatch { width: 36px; height: 22px; border-radius: 8px 12px 6px 6px; background: var(--c); flex: none; box-shadow: inset 0 -5px 0 rgba(0,0,0,.25), 0 0 14px color-mix(in srgb, var(--c) 40%, transparent); }
+.dl-world .pv-chip.on { background: color-mix(in srgb, var(--pv-ok) 25%, transparent); border-color: var(--pv-ok); }
+.dl-world .pv-chip[hidden] { display: none; }
+.dl-card > .dl-acts .dl-roombtn { align-self: auto; }
+
+/* ---------- what to do next (new players) ---------- */
+.dl-goal { position: absolute; left: 50%; top: 72px; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 9px 18px; border-radius: 99px; background: #facc15; color: #1a1200; font-weight: 800; font-size: 15px; text-align: center; box-shadow: 0 0 24px rgba(250,204,21,.35); pointer-events: none; animation: dl-pop .18s ease-out; }
+.dl-goal.hidden { display: none; }
