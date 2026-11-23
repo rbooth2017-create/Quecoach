@@ -3,12 +3,41 @@
 import * as S from './studiomodel.js';
 import { SR, renderBar, renderFx } from './studiosynth.js';
 
+// Signalsmith Stretch (MIT, WASM in an AudioWorklet): the same time-stretcher as the decks' key lock.
+let stretchLoader = null;
+const loadStretch = () => (stretchLoader ??= import('../node_modules/signalsmith-stretch/SignalsmithStretch.mjs').then((m) => m.default));
+
+/**
+ * A copy of `buf` played `rate` times as fast and moved by `semitones`, rendered ahead of time so the
+ * live mix stays light. The stretcher answers 0.12 s late, so it's fed that much "before the start" and
+ * that lead-in is cut off again: the result starts right on the beat.
+ */
+export async function stretchBuffer(buf, { rate = 1, semitones = 0, voice = false } = {}) {
+  const Stretch = await loadStretch();
+  const nch = buf.numberOfChannels, sr = buf.sampleRate;
+  const outLen = Math.ceil(buf.duration / rate * sr);
+  const probe = new OfflineAudioContext(nch, 1, sr);
+  const lat = await (await Stretch(probe, { outputChannelCount: [nch] })).latency();
+  const pre = Math.ceil(lat * sr);
+  const ctx = new OfflineAudioContext(nch, outLen + pre, sr);
+  const node = await Stretch(ctx, { outputChannelCount: [nch] });
+  node.connect(ctx.destination);
+  await node.addBuffers(Array.from({ length: nch }, (_, c) => buf.getChannelData(c)));
+  node.schedule({ output: 0, active: true, input: -lat * rate, rate, semitones, ...(voice ? { formantCompensation: true, formantBaseHz: 0 } : {}) });
+  const full = await ctx.startRendering();
+  const out = new AudioBuffer({ numberOfChannels: nch, length: outLen, sampleRate: sr });
+  for (let c = 0; c < nch; c++) out.copyToChannel(full.getChannelData(c).subarray(pre, pre + outLen), c);
+  return out;
+}
+
 export class StudioEngine {
   constructor() {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     this.bars = new Map();      // rendered pattern bars
     this.versions = new Map();  // ref → edit count, so edited patterns render again
     this.decoded = new Map();   // sample id → AudioBuffer
+    this.stretched = new Map(); // sample id|plan → AudioBuffer fitted to the track's tempo and key
+    this.stretching = new Map(); // the same, while it's being made
     this.live = this.chain(this.ctx);
     this.meter = new AnalyserNode(this.ctx, { fftSize: 1024 });
     this.live.out.connect(this.meter);
@@ -63,11 +92,35 @@ export class StudioEngine {
     return b;
   }
 
-  /** Decode every sample the track uses (and keep them for next time). */
+  /** Decode every sample the track uses and fit each one to its tempo and key (kept for next time). */
   async loadSamples(p, samples) {
     const ids = new Set();
     for (const c of Object.values(p.cells)) for (const r of Object.values(c)) if (r?.startsWith('s:')) ids.add(r.slice(2));
-    await Promise.all([...ids].map((id) => this.decode(samples[id])));
+    await Promise.all([...ids].map(async (id) => { await this.decode(samples[id]); await this.fit(samples[id], p); }));
+  }
+  /** The sample fitted to the track (stretched and moved into its key), or null to play it as it is. */
+  fitted(s, p) {
+    const plan = S.stretchPlan(s, p.bpm, p.key);
+    return plan.needed ? this.stretched.get(`${s.id}|${plan.id}`) || null : null;
+  }
+  async fit(s, p) {
+    const plan = S.stretchPlan(s, p.bpm, p.key);
+    if (!s || !plan.needed) return null;
+    const k = `${s.id}|${plan.id}`;
+    if (this.stretched.has(k)) return this.stretched.get(k);
+    if (!this.stretching.has(k)) {
+      this.stretching.set(k, (async () => {
+        const buf = await this.decode(s);
+        if (!buf) return null;
+        try {
+          const out = await stretchBuffer(buf, { rate: plan.rate, semitones: plan.semitones, voice: s.lane === 'vocals' });
+          for (const old of [...this.stretched.keys()]) if (old.startsWith(`${s.id}|`)) this.stretched.delete(old); // one fitted copy per sample
+          this.stretched.set(k, out);
+          return out;
+        } catch (err) { console.warn('stretch failed', err); return null; } finally { this.stretching.delete(k); }
+      })());
+    }
+    return this.stretching.get(k);
   }
   async decode(s) {
     if (!s?.blob || this.decoded.has(s.id)) return this.decoded.get(s?.id) || null;
@@ -95,11 +148,12 @@ export class StudioEngine {
         else start(this.barBuffer(p, ref, r, bar, slot.barIn));
         continue;
       }
-      const buf = this.decoded.get(r.id);
+      const fit = this.fitted(r, p), buf = fit || this.decoded.get(r.id);
       if (!buf) continue;
-      const rate = S.sampleRate(r, p.bpm);
+      // fitted copies already run at the track's tempo; otherwise play faster or slower (pitch moves with it)
+      const rate = fit ? 1 : S.sampleRate(r, p.bpm);
       if (r.mode === 'loop') {
-        const per = 240 / r.bpm, off = (slot.barIn % Math.max(1, r.bars)) * per;
+        const per = fit ? barSec : 240 / r.bpm, off = (slot.barIn % Math.max(1, r.bars)) * per;
         if (off < buf.duration - 0.001) start(buf, { offset: off, dur: Math.min(per, buf.duration - off), rate });
       } else {
         const every = Math.max(1, r.bars || 1);
@@ -167,8 +221,8 @@ export class StudioEngine {
     const srcs = [], t = this.ctx.currentTime + 0.05, barSec = S.barSeconds(p.bpm);
     const go = (buf, when, o = {}) => { const s = new AudioBufferSourceNode(this.ctx, { buffer: buf, playbackRate: o.rate || 1 }); s.connect(out); s.start(when, o.offset || 0, o.dur); srcs.push(s); };
     if (r.kind === 'sample') {
-      const buf = await this.decode(r);
-      if (buf) go(buf, t, { rate: S.sampleRate(r, p.bpm), dur: Math.min(buf.duration, 12) });
+      const fit = await this.fit(r, p), buf = fit || await this.decode(r);
+      if (buf) go(buf, this.ctx.currentTime + 0.05, { rate: fit ? 1 : S.sampleRate(r, p.bpm), dur: Math.min(buf.duration, 12) });
     } else if (r.type === 'fx') go(this.fxBuffer(r.fx, 4 * barSec), t);
     else for (let b = 0; b < Math.max(bars, r.bars || 1); b++) go(this.barBuffer(p, ref, r, b, b), t + b * barSec);
     this.previewing = { srcs, out };

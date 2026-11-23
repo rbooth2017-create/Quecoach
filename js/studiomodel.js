@@ -373,6 +373,32 @@ export const sampleRate = (s, trackBpm) => (s?.mode === 'loop' && s.bpm ? trackB
 /** Semitones of pitch change that speed causes (players without time-stretch). */
 export const rateSemitones = (r) => 12 * Math.log2(r);
 
+/**
+ * Semitones to move a sample in `from` so it sits in the track's key `to` (−6…+5, the smallest move).
+ * Minor and major keys are compared through their relative keys (A minor fits C major as it is).
+ */
+export function keyShift(from, to) {
+  if (!from || !to) return 0;
+  const a = parseKey(from), b = parseKey(to);
+  const home = (k) => (k.minor ? k.pc + 3 : k.pc) % 12; // the relative major
+  const d = ((home(b) - home(a)) % 12 + 12) % 12;
+  return d > 5 ? d - 12 : d;
+}
+/**
+ * How a sample is fitted to the track. Loops are time-stretched to the track's tempo; with keepPitch (the
+ * default) their pitch stays put, without it they change pitch like a record played faster. With matchKey
+ * (the default when the sample's key is known) they're also moved into the track's key.
+ * Returns { needed, rate, semitones, id }: `needed` false means play the file as it is (or at `rate`).
+ */
+export function stretchPlan(s, trackBpm, trackKey) {
+  const rate = s?.mode === 'loop' && s.bpm > 0 ? trackBpm / s.bpm : 1;
+  const keep = s?.keepPitch !== false;
+  const shift = s?.matchKey !== false && s?.key ? keyShift(s.key, trackKey) : 0;
+  const semitones = shift + (keep ? 0 : rateSemitones(rate));
+  const needed = (keep && Math.abs(rate - 1) > 0.002) || shift !== 0;
+  return { needed, rate, semitones: Math.round(semitones * 1000) / 1000, shift, id: `${rate.toFixed(5)}|${semitones.toFixed(3)}` };
+}
+
 // ---------- generation without AI ("Surprise me") ----------
 export function seeded(seed) { let s = (Math.abs(Math.floor(seed)) % 2147483646) + 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
 const pick = (rnd, a) => a[Math.floor(rnd() * a.length)];
@@ -434,18 +460,12 @@ export function aiSchema() {
       patterns: {
         type: 'array',
         items: {
-          type: 'object', additionalProperties: false,
-          required: ['id', 'name', 'type', 'bars', 'tone', 'follow', 'kick', 'clap', 'hat', 'open', 'perc', 'notes', 'hits'],
+          type: 'object', additionalProperties: false, required: ['id', 'name', 'lane', 'text'],
           properties: {
             id: { type: 'string', description: 'Your own short id, e.g. "p1".' },
             name: { type: 'string' },
-            type: { type: 'string', enum: ['drums', 'bass', 'chords', 'lead'] },
-            bars: { type: 'integer', description: '1, 2 or 4.' },
-            tone: { type: 'string', enum: [...new Set([...TONES.bass, ...TONES.lead, ...TONES.chords])] },
-            follow: { type: 'boolean', description: 'Bass/lead notes move with the chord progression.' },
-            kick: { type: 'string' }, clap: { type: 'string' }, hat: { type: 'string' }, open: { type: 'string' }, perc: { type: 'string' },
-            notes: { type: 'array', items: { type: 'array', items: { type: 'integer' } }, description: '[step, degree, lengthInSteps] for bass and lead.' },
-            hits: { type: 'string', description: 'Chords: 16 characters, x = play the chord on that 16th. "x" alone = sustained pad.' },
+            lane: { type: 'string', enum: ['drums', 'perc', 'bass', 'chords', 'lead'] },
+            text: { type: 'string', description: 'The loop in Studio pattern text (see the format in the prompt).' },
           },
         },
       },
@@ -463,7 +483,11 @@ export function cleanPattern(x, lane) {
   if (type === 'drums') {
     const steps = {};
     for (const v of DRUM_VOICES) { const s = x.steps?.[v] ?? x[v]; if (s && /[xo]/i.test(s)) steps[v] = cleanSteps(s, len); }
-    return Object.keys(steps).length ? { lane: lane || 'drums', name, type, bars, steps } : null;
+    if (!Object.keys(steps).length) return null;
+    const pat = { lane: lane === 'perc' ? 'perc' : 'drums', name, type, bars, steps };
+    const swing = Number(x.swing);
+    if (swing > 0) pat.swing = Math.min(0.4, Math.round(swing * 100) / 100);
+    return pat;
   }
   if (type === 'chords') {
     const tone = TONES.chords.includes(x.tone) ? x.tone : 'stab';
@@ -486,7 +510,7 @@ export function projectFromAI(data, { style = 'house', samples = {} } = {}) {
   if (prog.length) p.prog = prog;
   const ids = new Map();
   for (const x of data?.patterns || []) {
-    const pat = cleanPattern(x);
+    const pat = typeof x?.text === 'string' ? parsePatternText(x.text, { lane: x.lane, name: x.name }).pattern : cleanPattern(x);
     if (!pat) continue;
     const id = newId('p'); p.patterns[id] = pat; ids.set(String(x.id), `p:${id}`);
   }
@@ -511,6 +535,105 @@ export function projectFromAI(data, { style = 'house', samples = {} } = {}) {
     }
   }
   return p;
+}
+
+// ---------- pattern text ----------
+// A short, readable way to write a loop, inspired by the step notation of Strudel / TidalCycles:
+//
+//   drums swing=0.1          bass acid follow          chords stab
+//   kick  x... x... x... x...  notes . . 0 _ . . 0 _ | …   hits ..x. .... ..x. ....
+//   clap  .... x... .... x...
+//
+// The first line says what it is (drums, bass, lead or chords), its sound and options. Then one row per
+// drum, or a `notes` row (one token per 16th: a scale degree starts a note, _ holds it, . is a rest), or a
+// `hits` row for chords. Spaces and | are only there to make it readable. Each bar is 16 steps.
+const VOICE_ALIAS = { kick: 'kick', bd: 'kick', clap: 'clap', cp: 'clap', snare: 'clap', sd: 'clap', hat: 'hat', hh: 'hat', ch: 'hat', open: 'open', oh: 'open', perc: 'perc', rim: 'perc', conga: 'perc' };
+const ALL_TONES = [...new Set([...TONES.bass, ...TONES.lead, ...TONES.chords])];
+const group = (str, w = 4) => str.match(new RegExp(`.{1,${w}}`, 'g')) || [];
+const bars16 = (tokens, sep = ' ') => group(tokens.join(''), 16).map((b) => group(b).join(' ')).join(` | `);
+
+/** A pattern as text (the inverse of parsePatternText). */
+export function patternToText(pat) {
+  if (!pat || pat.type === 'fx') return '';
+  const len = (pat.bars || 1) * 16;
+  if (pat.type === 'drums') {
+    const head = `drums${pat.swing ? ` swing=${pat.swing}` : ''}`;
+    const rows = DRUM_VOICES.filter((v) => /[xo]/.test(pat.steps?.[v] || ''))
+      .map((v) => `${v.padEnd(5)} ${bars16([...(pat.steps[v] || '').padEnd(len, '-').slice(0, len)].map((c) => (c === 'x' || c === 'o' ? c : '.')))}`);
+    return [head, ...rows].join('\n');
+  }
+  if (pat.type === 'chords') {
+    const hits = pat.tone === 'pad' ? 'x' + '.'.repeat(15) : (pat.hits || '').padEnd(16, '-').slice(0, 16).replace(/[^x]/g, '.');
+    return `chords ${pat.tone || 'stab'}\nhits  ${bars16([...hits])}`;
+  }
+  const tok = Array(len).fill('.');
+  for (const [st, d, l] of pat.notes || []) {
+    if (st < 0 || st >= len) continue;
+    tok[st] = String(d);
+    for (let i = st + 1; i < Math.min(len, st + l); i++) tok[i] = '_';
+  }
+  const bars = [];
+  for (let b = 0; b < len / 16; b++) bars.push(tok.slice(b * 16, b * 16 + 16).join(' '));
+  return `${pat.type} ${pat.tone || ''}${pat.follow ? ' follow' : ''}\nnotes ${bars.join(' | ')}`;
+}
+
+/**
+ * Read pattern text into a playable pattern. Returns { pattern } or { error } (a sentence for the producer).
+ * opts: { lane, name } — lane decides drums vs percussion; name is kept.
+ */
+export function parsePatternText(text, { lane = null, name = '' } = {}) {
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.replace(/(#|\/\/).*$/, '').trim()).filter(Boolean);
+  if (!lines.length) return { error: 'The pattern is empty.' };
+  const head = lines[0].toLowerCase().split(/\s+/);
+  const type = ['drums', 'bass', 'lead', 'chords'].find((t) => head[0] === t || head[0] === t.replace(/s$/, ''));
+  if (!type) return { error: 'Start with what it is: drums, bass, lead or chords.' };
+  const tone = head.find((w) => ALL_TONES.includes(w));
+  const follow = head.includes('follow');
+  const swing = Number((head.find((w) => w.startsWith('swing=')) || '').slice(6)) || 0;
+  const raw = { type, name: name || `${type[0].toUpperCase()}${type.slice(1)} loop`, tone, follow, swing };
+  const body = lines.slice(1);
+  const bad = (n, what) => ({ error: `${what} needs 16 steps per bar, and this has ${n}.` });
+  if (type === 'drums') {
+    const steps = {}; let bars = 1;
+    for (const l of body) {
+      const [w, ...rest] = l.split(/\s+/);
+      const v = VOICE_ALIAS[w.toLowerCase()];
+      if (!v) return { error: `"${w}" isn't a drum. Use kick, clap, hat, open or perc.` };
+      const str = rest.join('').replace(/\|/g, '').toLowerCase().replace(/[^xo]/g, '-');
+      if (!str.length || str.length % 16 || str.length > 64) return bad(str.length, `The ${v} row`);
+      steps[v] = (steps[v] || '') + str;
+      bars = Math.max(bars, steps[v].length / 16);
+    }
+    if (![1, 2, 4].includes(bars)) return { error: 'Drum loops can be 1, 2 or 4 bars long.' };
+    for (const v of Object.keys(steps)) while (steps[v].length < bars * 16) steps[v] += steps[v].slice(0, 16); // shorter rows repeat
+    const pattern = cleanPattern({ ...raw, bars, steps }, lane);
+    return pattern ? { pattern } : { error: 'Add at least one hit (x).' };
+  }
+  if (type === 'chords') {
+    const row = body.find((l) => /^hits\b/i.test(l));
+    if (!row && tone !== 'pad') return { error: 'Chords need a "hits" row, like: hits ..x. .... ..x. ....' };
+    const str = row ? row.replace(/^hits/i, '').replace(/[\s|]/g, '').toLowerCase().replace(/[^x]/g, '-') : 'x';
+    if (row && str.length !== 16) return bad(str.length, 'The hits row');
+    const pattern = cleanPattern({ ...raw, hits: str, bars: 1 });
+    return { pattern };
+  }
+  const toks = body.filter((l) => /^notes\b/i.test(l)).flatMap((l) => l.replace(/^notes/i, '').replace(/\|/g, ' ').trim().split(/\s+/)).filter(Boolean);
+  if (!toks.length) return { error: 'Add a "notes" row, like: notes 0 _ . . 7 . . . 0 _ . . 3 . . .' };
+  const wrong = toks.find((t) => !/^(-?\d+|[._~-])$/.test(t));
+  if (wrong) return { error: `"${wrong}" isn't a note. Use a number (0 is the key's root), _ to hold, . for a rest.` };
+  if (toks.length % 16 || toks.length > 64) return bad(toks.length, 'The notes row');
+  const notes = [];
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t === '.' || t === '~') continue;
+    if (t === '_' || t === '-') { if (notes.length && notes.at(-1)[0] + notes.at(-1)[2] === i) notes.at(-1)[2]++; continue; }
+    if (!/^-?\d+$/.test(t)) return { error: `"${t}" isn't a note. Use a number (0 is the key's root), _ to hold, . for a rest.` };
+    notes.push([i, Number(t), 1]);
+  }
+  if (!notes.length) return { error: 'Add at least one note (a number).' };
+  const bars = toks.length / 16;
+  if (![1, 2, 4].includes(bars)) return { error: 'Loops can be 1, 2 or 4 bars long.' };
+  return { pattern: cleanPattern({ ...raw, bars, notes }) };
 }
 
 /** What the AI is told about the loops it may use. */

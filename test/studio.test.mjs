@@ -176,3 +176,70 @@ test('WAV encoding', () => {
   assert.equal(v.getInt16(44 + 4, true), 0x7fff);
   assert.equal(v.getInt16(44 + 8, true), -0x8000);
 });
+
+test('pattern text: every built-in loop survives a round trip', () => {
+  for (const [id, b] of Object.entries(S.BUILTINS)) {
+    if (b.type === 'fx') continue;
+    const r = S.parsePatternText(S.patternToText(b), { lane: b.lane, name: b.name });
+    assert.ok(r.pattern, `${id}: ${r.error}`);
+    const { kind, ...want } = { ...b, kind: 0 };
+    for (const k of ['type', 'bars', 'tone', 'steps', 'notes', 'hits', 'swing', 'lane']) {
+      if (want[k] === undefined) continue;
+      const w = k === 'steps' ? Object.fromEntries(Object.entries(want.steps).filter(([, v]) => /[xo]/.test(v))) : want[k];
+      assert.deepEqual(r.pattern[k], w, `${id}.${k}`);
+    }
+    assert.equal(!!r.pattern.follow, !!b.follow, `${id}.follow`);
+  }
+});
+
+test('pattern text: reading what people (and the AI) write', () => {
+  const d = S.parsePatternText('drums swing=0.15\nbd x... x... x... x...\nsd .... x... .... x...\nhh ..x. # offbeat\n', { lane: 'perc' });
+  assert.ok(d.error); // the hat row is too short
+  const ok = S.parsePatternText('drums swing=0.15\nbd x... x... x... x...\ncp .... x... .... x... | .... x... .... xxxx', { lane: 'perc' }).pattern;
+  assert.equal(ok.bars, 2);
+  assert.equal(ok.lane, 'perc');
+  assert.equal(ok.swing, 0.15);
+  assert.equal(ok.steps.kick, 'x---x---x---x---'.repeat(2)); // a shorter row repeats
+  const b = S.parsePatternText('bass reese follow\nnotes 0 _ _ . 7 . -2 _ . . 3 . . . 0 _').pattern;
+  assert.deepEqual(b.notes, [[0, 0, 3], [4, 7, 1], [6, -2, 2], [10, 3, 1], [14, 0, 2]]);
+  assert.equal(b.tone, 'reese');
+  assert.equal(b.follow, true);
+  assert.match(S.parsePatternText('bass\nnotes 0 x . .').error, /"x" isn't a note/);
+  assert.match(S.parsePatternText('piano\nnotes 0').error, /drums, bass, lead or chords/);
+  assert.match(S.parsePatternText('drums\ncowbell x...').error, /isn't a drum/);
+  assert.equal(S.parsePatternText('chords pad').pattern.hits, 'x');
+});
+
+test('AI tracks written as pattern text', () => {
+  const lanes = (o) => ({ drums: '', perc: '', bass: '', chords: '', lead: '', vocals: '', fx: '', ...o });
+  const p = S.projectFromAI({
+    title: 'T', about: '', bpm: 126, key: 'Am', progression: [0],
+    sections: [{ kind: 'intro', bars: 16, lanes: lanes({ drums: 'd' }) }, { kind: 'drop', bars: 16, lanes: lanes({ drums: 'd', bass: 'b', perc: 'bad' }) }],
+    patterns: [
+      { id: 'd', name: 'Beat', lane: 'drums', text: 'drums\nkick x... x... x... x...' },
+      { id: 'b', name: 'Bass', lane: 'bass', text: 'bass sub follow\nnotes . . 0 _ . . 0 _ . . 0 _ . . 0 _' },
+      { id: 'bad', name: 'Broken', lane: 'perc', text: 'drums\nperc x' },
+    ],
+  });
+  const drop = p.cells[p.sections[1].id];
+  assert.equal(S.resolve(p, drop.bass).notes.length, 4);
+  assert.equal(S.resolve(p, drop.drums).name, 'Beat');
+  assert.equal(drop.perc, undefined);
+});
+
+test('samples are fitted to the track tempo and key', () => {
+  assert.equal(S.keyShift('Am', 'Am'), 0);
+  assert.equal(S.keyShift('Am', 'C'), 0); // relative keys fit as they are
+  assert.equal(S.keyShift('Am', 'Cm'), 3);
+  assert.equal(S.keyShift('Am', 'Gm'), -2);
+  assert.equal(S.keyShift('F#m', 'Am'), 3);
+  for (const a of S.KEYS) for (const b of S.KEYS) { const k = S.keyShift(a, b); assert.ok(k >= -6 && k <= 5); }
+  const loop = { mode: 'loop', bpm: 120, key: 'Gm' };
+  assert.deepEqual(S.stretchPlan(loop, 124, 'Am'), { needed: true, rate: 124 / 120, semitones: 2, shift: 2, id: `${(124 / 120).toFixed(5)}|2.000` });
+  assert.equal(S.stretchPlan({ ...loop, matchKey: false }, 124, 'Am').semitones, 0);
+  assert.equal(S.stretchPlan({ ...loop, key: '' }, 120, 'Am').needed, false); // same tempo, no key: play as it is
+  const tape = S.stretchPlan({ ...loop, keepPitch: false, matchKey: false }, 124, 'Am');
+  assert.equal(tape.needed, false); // no stretch: just play faster, pitch and all
+  assert.ok(Math.abs(S.stretchPlan({ ...loop, keepPitch: false }, 124, 'Am').semitones - (2 + 12 * Math.log2(124 / 120))) < 0.001);
+  assert.equal(S.stretchPlan({ mode: 'once', bpm: 90, key: 'Dm' }, 124, 'Am').rate, 1); // one-shots keep their timing
+});

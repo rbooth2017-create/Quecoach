@@ -164,6 +164,9 @@ aside { background: var(--card); min-height: 0; overflow: auto; }
 .steps button.x { background: var(--lc); }
 .steps button.o { background: color-mix(in srgb, var(--lc) 50%, var(--card)); }
 .steps button.now { outline: 1px solid var(--ink-2); }
+.ptext summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.ptext textarea { width: 100%; margin: 6px 0; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; white-space: pre; overflow-x: auto; resize: vertical; }
+.ptext .row { align-items: center; }
 .cell-info select { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 5px; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 12px; }
 .kv input, .kv select { background: var(--card); border: 1px solid var(--line); border-radius: 7px; padding: 3px 6px; min-width: 0; }

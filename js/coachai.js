@@ -226,7 +226,19 @@ Make it easy for DJs to mix:
 - Every section is 8, 16 or 32 bars. Include at least one build and one drop, and a break between drops.
 - Keep the kick on every beat in intros, drops and outros.
 
-Patterns you write: drum voices (kick, clap, hat, open, perc) are strings of 16 characters per bar: "x" hit, "o" soft hit, "-" rest; leave unused voices "". Bass and lead notes are [step, scale degree, length in 16th steps]: step counts from 0 across all the pattern's bars, degree 0 is the key's root, 7 an octave up, negative goes below. Set follow true on bass so it moves with the chords. Chords use "hits" (16 characters) and play the progression. Leave fields that don't apply to a pattern's type empty.
+Write each new loop as pattern text. First line: what it is (drums, bass, lead or chords), then its sound and options. Each bar is 16 steps (16th notes); loops are 1, 2 or 4 bars; spaces and | are only for reading.
+- Drums: one row per drum (kick, clap, hat, open, perc): x = hit, o = soft hit, . = rest. Optional swing=0.1 on the first line.
+  drums
+  kick  x... x... x... x...
+  clap  .... x... .... x...
+  hat   o.o. o.o. o.o. o.o.
+- Bass and lead: sound is one of sub, reese, acid, pluck (bass) or pluck, saw, bell, acid (lead). Add "follow" so the notes move with the chords (always for bass). A "notes" row has one token per step: a scale degree starts a note (0 = the key's root, 7 = an octave up, -2 = below), _ holds it, . is a rest.
+  bass sub follow
+  notes . . 0 _ . . 0 _ . . 0 _ . . 7 _
+- Chords: sound is stab, organ or pad; they play the progression. A "hits" row of 16 steps (x = play); a pad needs no hits row.
+  chords stab
+  hits  ..x. .... ..x. ....
+Give each loop the lane it plays in (drums or perc for drum loops).
 In each section's lanes give a pattern id you wrote, a built-in loop id, a sample id (s:...), or "" for silence. Only put loops in the lane they belong to.
 
 ${catalog}`;

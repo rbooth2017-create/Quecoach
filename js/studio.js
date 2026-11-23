@@ -42,6 +42,7 @@ function changed({ grid = true, keepRedo = false } = {}) {
   if (grid) renderGrid();
   renderChecks();
   renderCell();
+  if (engine.playing) engine.loadSamples(p, samples).catch(() => {}); // loops follow tempo and key changes
 }
 /** Call before a change, so it can be undone. */
 function snapshot() {
@@ -416,6 +417,7 @@ function renderCell() {
   if (r?.kind === 'pattern' && r.type === 'drums') h += drumEditor(r);
   else if (r?.kind === 'pattern' && (r.type === 'bass' || r.type === 'lead' || r.type === 'chords')) h += synthEditor(r);
   else if (r?.kind === 'sample') h += sampleEditor(r);
+  if (r?.kind === 'pattern' && r.type !== 'fx') h += textEditor(r);
   card.innerHTML = h;
   $('#cellPick').addEventListener('change', (e) => { snapshot(); S.setCell(p, s.id, lane.id, e.target.value || null); changed(); });
   $('#cellHear').addEventListener('click', () => engine.preview(p, ref, samples));
@@ -449,14 +451,27 @@ function synthEditor(r) {
   if (r.type !== 'chords') h += '<div class="row"><button class="btn small" id="octDown">Octave down</button><button class="btn small" id="octUp">Octave up</button></div>';
   return h;
 }
+/** The loop as pattern text: write or paste a pattern, or read what the AI wrote. */
+function textEditor(r) {
+  return `<details class="ptext"${shared.get('studio.textOpen', false) ? ' open' : ''}><summary>Pattern text</summary>
+    <textarea id="patText" spellcheck="false" rows="${Math.min(8, S.patternToText(r).split('\n').length + 1)}">${esc(S.patternToText(r))}</textarea>
+    <div class="row"><button class="btn small" id="patApply">Apply</button><small id="patErr" class="muted">x hit, o soft, . rest · notes: 0 = root, 7 = octave up, _ hold</small></div></details>`;
+}
 function sampleEditor(r) {
-  const rate = S.sampleRate(r, p.bpm), semis = S.rateSemitones(rate);
-  return `<div class="kv"><span>Plays as</span><select id="smpMode"><option value="loop"${r.mode === 'loop' ? ' selected' : ''}>Loop (fits the tempo)</option><option value="once"${r.mode !== 'loop' ? ' selected' : ''}>One-shot (as recorded)</option></select>
+  const plan = S.stretchPlan(r, p.bpm, p.key), tape = S.rateSemitones(plan.rate);
+  const keyOpts = ['', ...S.KEYS].map((k) => `<option value="${k}"${k === (r.key || '') ? ' selected' : ''}>${k ? (k.endsWith('m') ? `${k.slice(0, -1)} minor` : `${k} major`) : 'Unknown'}</option>`).join('');
+  const fitNote = [];
+  if (r.mode === 'loop' && Math.abs(plan.rate - 1) > 0.002) fitNote.push(r.keepPitch !== false ? `Stretched from ${r.bpm} to ${p.bpm} BPM, pitch kept.` : `Played ${plan.rate > 1 ? 'faster' : 'slower'}, which also moves its pitch ${Math.abs(tape).toFixed(1)} semitones.`);
+  if (plan.shift) fitNote.push(`Moved ${plan.shift > 0 ? 'up' : 'down'} ${Math.abs(plan.shift)} semitone${Math.abs(plan.shift) > 1 ? 's' : ''} from ${r.key} into ${p.key}.`);
+  return `<div class="kv"><span>Its key</span><select id="smpKey">${keyOpts}</select>
+    <span>Fit</span><span><label><input type="checkbox" id="smpKeep"${r.keepPitch !== false ? ' checked' : ''}> keep its pitch at any tempo</label><br>
+      <label title="${r.key ? '' : 'Set its key first'}"><input type="checkbox" id="smpMatch"${r.matchKey !== false && r.key ? ' checked' : ''}${r.key ? '' : ' disabled'}> move it into the track's key</label></span></div>
+    ${fitNote.length ? `<small>${esc(fitNote.join(' '))}</small>` : ''}
+    <div class="kv"><span>Plays as</span><select id="smpMode"><option value="loop"${r.mode === 'loop' ? ' selected' : ''}>Loop (fits the tempo)</option><option value="once"${r.mode !== 'loop' ? ' selected' : ''}>One-shot (as recorded)</option></select>
     <span>Its tempo</span><input id="smpBpm" type="number" min="60" max="200" step="0.01" value="${r.bpm || ''}" placeholder="BPM">
     <span>Length</span><select id="smpBars">${[1, 2, 4, 8, 16, 32].map((b) => `<option value="${b}"${b === r.bars ? ' selected' : ''}>${b} bar${b > 1 ? 's' : ''}</option>`).join('')}</select>
     <span>Lane</span><select id="smpLane">${S.LANES.map((l) => `<option value="${l.id}"${l.id === r.lane ? ' selected' : ''}>${l.name}</option>`).join('')}</select>
     ${r.mode !== 'loop' ? `<span>Repeat</span><label><input type="checkbox" id="smpRepeat"${r.repeat !== false ? ' checked' : ''}> every ${r.bars} bar${r.bars > 1 ? 's' : ''}</label>` : ''}</div>
-    ${r.mode === 'loop' && Math.abs(semis) > 1 ? `<small>Playing ${rate > 1 ? 'faster' : 'slower'} to fit ${p.bpm} BPM also shifts its pitch by ${Math.abs(semis).toFixed(1)} semitones. Loops near the track's tempo sound best.</small>` : ''}
     ${r.source === 'freesound' ? `<small>From Freesound by ${esc(r.author)}, public domain (CC0). <a href="#" id="smpLink">Open its page</a></small>` : ''}
     <div class="row"><button class="btn small" id="smpDelete">${icon('trash', 13)} Remove from My samples</button></div>`;
 }
@@ -478,6 +493,19 @@ function wireEditors(s, lane, ref, r) {
   $('#toneSel', card)?.addEventListener('change', (e) => { snapshot(); const pat = own(); pat.tone = e.target.value; if (pat.type === 'chords' && pat.tone !== 'pad' && pat.hits === 'x') pat.hits = '--x-----x-----x-'; changed(); });
   $('#followChk', card)?.addEventListener('change', (e) => { snapshot(); own().follow = e.target.checked; changed(); });
   for (const [id, d] of [['#octDown', -7], ['#octUp', 7]]) $(id, card)?.addEventListener('click', () => { snapshot(); const pat = own(); pat.notes = pat.notes.map(([st, deg, l]) => [st, Math.max(-14, Math.min(21, deg + d)), l]); changed(); engine.preview(p, p.cells[s.id][lane.id], samples); });
+  const det = $('.ptext', card);
+  det?.addEventListener('toggle', () => shared.set('studio.textOpen', det.open));
+  const applyText = () => {
+    const res = S.parsePatternText($('#patText', card).value, { lane: lane.id, name: r.name });
+    if (res.error) { $('#patErr', card).textContent = res.error; $('#patErr', card).style.color = 'var(--warn)'; return; }
+    snapshot();
+    const mine = S.ownPattern(p, ref), id = mine.slice(2);
+    p.patterns[id] = { ...res.pattern, name: p.patterns[id].name };
+    engine.edited(mine); changed();
+    engine.preview(p, mine, samples);
+  };
+  $('#patApply', card)?.addEventListener('click', applyText);
+  $('#patText', card)?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); applyText(); } });
   if (r?.kind === 'sample') {
     const smp = samples[r.id];
     const upd = (f) => { f(smp); store.saveSample(smp); renderMine(); changed(); };
@@ -486,6 +514,9 @@ function wireEditors(s, lane, ref, r) {
     $('#smpBars', card).addEventListener('change', (e) => upd((x) => { x.bars = Number(e.target.value); }));
     $('#smpLane', card).addEventListener('change', (e) => upd((x) => { x.lane = e.target.value; }));
     $('#smpRepeat', card)?.addEventListener('change', (e) => upd((x) => { x.repeat = e.target.checked; }));
+    $('#smpKey', card).addEventListener('change', (e) => upd((x) => { x.key = e.target.value; }));
+    $('#smpKeep', card).addEventListener('change', (e) => upd((x) => { x.keepPitch = e.target.checked; }));
+    $('#smpMatch', card).addEventListener('change', (e) => upd((x) => { x.matchKey = e.target.checked; }));
     $('#smpLink', card)?.addEventListener('click', (e) => { e.preventDefault(); openLink(smp.url); });
     $('#smpDelete', card).addEventListener('click', async () => {
       const uses = (await store.listProjects()).filter((q) => Object.values(q.cells).some((c) => Object.values(c).includes(`s:${smp.id}`))).length;
