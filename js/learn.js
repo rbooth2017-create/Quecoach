@@ -636,6 +636,20 @@ function setTracks(tracks, name, kind) {
 }
 
 // ---------- library ----------
+/** The three biggest download shops for dance music, short notes for the music menu. */
+const SHOPS = ['beatport', 'traxsource', 'juno'].map((id) => stream.MUSIC_GUIDE.stores.find((x) => x.id === id)).filter(Boolean)
+  .map((x) => ({ ...x, note: { beatport: 'The biggest dance music shop', traxsource: 'House, soulful and deep', juno: 'Every dance style, huge catalogue' }[x.id] }));
+/** Open a download shop in the browser (Young DJ mode shows the guide instead: ask a grown-up). */
+function openShop(id) {
+  const s = SHOPS.find((x) => x.id === id); if (!s) return;
+  if (state.prefs.young) return openMusicGuide();
+  window.open(s.url, '_blank', 'noopener');
+  toast(`Buy WAV, AIFF or MP3 at 320 kbps, then come back and use Import music.`);
+}
+function openStudio() {
+  if (window.cueDesktop?.openStudio) return window.cueDesktop.openStudio();
+  window.open('studio.html', 'cuecoach-studio')?.focus();
+}
 const SOURCE_ICON = { managed: 'library', folder: 'folder', rekordbox: 'disc', practice: 'sparkle' };
 function renderSource() {
   const a = state.analysing;
@@ -655,12 +669,22 @@ function renderSource() {
         <hr><button data-a="import-playlist">${icon('list', 16)}<span>Playlist from Spotify or Apple Music…<small>Make a crate, see which tracks you still need</small></span></button>
       </div>` : ''}` : ''}
     <button data-a="menu" aria-haspopup="menu" aria-expanded="${state.menuOpen}">${icon(SOURCE_ICON[state.source] || 'sparkle', 15)} ${esc(state.sourceName || 'Choose music')} ${icon('chevron', 14)}</button>
-    ${state.menuOpen ? `<div class="menu" role="menu">
+    ${state.menuOpen ? `<div class="menu source-menu" role="menu">
+      <div class="menu-sec">Import music</div>
+      ${managed ? `<button data-import="files">${icon('upload', 16)}<span>Import files…<small>Copy tracks into My library</small></span></button>
+      <button data-import="folder">${icon('folder', 16)}<span>Import a folder…<small>Copy every track in a folder</small></span></button>`
+    : `<button data-source="folder">${icon('folder', 16)}<span>Choose a music folder…<small>MP3, WAV, AIFF, FLAC</small></span></button>`}
+      <div class="menu-sec">Your library</div>
       ${choice('managed', 'library', 'My library', managed ? 'Copied into Cue Coach, always there' : 'In the desktop app', !managed)}
-      ${choice('practice', 'sparkle', 'Practice tracks', 'Built in, made for learning')}
-      ${choice('folder', 'folder', 'Music folder…', 'MP3, WAV, AIFF, FLAC')}
+      ${managed ? choice('folder', 'folder', 'Music folder…', 'Play from a folder without copying') : ''}
       ${choice('rekordbox', 'disc', 'rekordbox library', state.rbAvailable ? 'Your tracks, grids and keys' : (state.rbNote || 'Not connected'), !state.rbAvailable)}
-      <hr><button data-a="music-guide">${icon('external', 16)}<span>Where to get music…<small>Free tracks and download shops for DJs</small></span></button>
+      <div class="menu-sec">Practice tracks</div>
+      ${choice('practice', 'sparkle', 'Practice tracks', 'Built in, made for learning')}
+      <div class="menu-sec">Download from websites</div>
+      ${SHOPS.map((s) => `<button data-shop="${s.id}">${icon('external', 16)}<span>${esc(s.label)}<small>${esc(s.note)}</small></span></button>`).join('')}
+      <button data-a="music-guide">${icon('book', 16)}<span>More places and free music…<small>Bandcamp, free downloads, tips</small></span></button>
+      <div class="menu-sec">Make tracks</div>
+      <button data-a="studio">${icon('music', 16)}<span>Studio<small>Make your own tracks from loops, ready to mix</small></span></button>
       ${copyAll ? `<hr><button data-a="copy-all">${icon('upload', 16)}<span>Copy all to My library<small>${state.tracks.filter(lib.canImport).length} tracks, with their beat grids and cues</small></span></button>` : ''}
     </div>` : ''}`;
 }
@@ -2882,10 +2906,7 @@ function bind() {
   $('#lessonsBtn').addEventListener('click', () => setPane(!state.paneOpen));
   $('#aiBtn').addEventListener('click', openAI);
   $('#studioBtn').innerHTML = `${icon('music', 16)} Studio`;
-  $('#studioBtn').addEventListener('click', () => {
-    if (window.cueDesktop?.openStudio) return window.cueDesktop.openStudio();
-    window.open('studio.html', 'cuecoach-studio')?.focus();
-  });
+  $('#studioBtn').addEventListener('click', openStudio);
   $('#ctlBtn').addEventListener('click', openCtl);
   $('#sinkSel').addEventListener('change', (e) => useSink(e.target.value));
   navigator.mediaDevices?.addEventListener?.('devicechange', () => { if ($('#ctlDlg').open) listSinks(); applyRoute(true); });
@@ -2938,8 +2959,18 @@ function bind() {
     else if (b.dataset.a === 'levelup') { state.cleanMixes = 0; store.set('cleanMixes', 0); setLevel(b.dataset.level); mixAgain(); }
   });
   $('#launchView').addEventListener('click', (e) => { const b = e.target.closest('[data-launch]'); if (b) chooseLaunch(b.dataset.launch); });
+  $('#welcomeShops').innerHTML = SHOPS.map((x) => `<button data-shop="${x.id}" title="${esc(x.note)}">${icon('external', 13)}${esc(x.label)}</button>`).join('');
+  $$('#welcomeView [data-icon-sm]').forEach((x) => { x.outerHTML = icon(x.dataset.iconSm, 14); });
   $('#welcomeView').addEventListener('click', async (e) => {
-    if (e.target.closest('[data-a="music-guide"]')) return openMusicGuide();
+    const a = e.target.closest('[data-a]')?.dataset.a;
+    if (a === 'music-guide') return openMusicGuide();
+    if (a === 'studio') return openStudio();
+    const shop = e.target.closest('[data-shop]'); if (shop) return openShop(shop.dataset.shop);
+    if (a === 'import-files' || a === 'import-folder') {
+      const r = await importDialog(a === 'import-files' ? 'files' : 'folder');
+      if (r && await useSource('managed')) { $('#welcomeView').classList.add('hidden'); openLaunch(true); }
+      return;
+    }
     const b = e.target.closest('[data-source]'); if (!b || b.disabled) return;
     if (await useSource(b.dataset.source)) { $('#welcomeView').classList.add('hidden'); openLaunch(true); }
   });
@@ -2956,9 +2987,12 @@ function bind() {
     if (a === 'import-menu') { state.importMenu = !state.importMenu; state.menuOpen = false; renderSource(); return; }
     if (a === 'import-playlist') return openPlaylistDlg();
     if (a === 'music-guide') { state.menuOpen = false; renderSource(); return openMusicGuide(); }
+    if (a === 'studio') { state.menuOpen = false; renderSource(); return openStudio(); }
+    const shop = e.target.closest('[data-shop]'); if (shop) { state.menuOpen = false; renderSource(); return openShop(shop.dataset.shop); }
     if (a === 'cancel-import') { state.importCancelled = true; desktop?.library?.cancelImport(); return; }
     if (a === 'copy-all') { state.menuOpen = false; renderSource(); return importLibTracks(state.tracks.filter(lib.canImport)); }
-    const imp = e.target.closest('[data-import]'); if (imp) return importDialog(imp.dataset.import);
+    const imp = e.target.closest('[data-import]');
+    if (imp) { state.menuOpen = false; const r = await importDialog(imp.dataset.import); if (r && state.source !== 'managed') useSource('managed'); return; }
     const b = e.target.closest('[data-source]'); if (b && !b.disabled) useSource(b.dataset.source);
   });
   document.addEventListener('pointerdown', (e) => {

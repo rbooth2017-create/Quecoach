@@ -385,6 +385,9 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .library > .lib-head { position: relative; z-index: 6; }
 /* the library sits at the bottom of the window, so its menus open upwards */
 .lib-source .menu { top: auto; bottom: calc(100% + 6px); }
+.source-menu { max-height: min(640px, calc(100vh - 120px)); overflow: auto; min-width: 280px; }
+.menu-sec { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 8px 10px 3px; }
+.menu-sec:first-child { padding-top: 4px; }
 .lib-body { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .library.with-crates .lib-body { grid-template-columns: 172px minmax(0, 1fr); }
 .library.filedrop { box-shadow: 0 0 0 2px var(--left); }
@@ -481,6 +484,17 @@ input[type=range].vfader::-webkit-slider-thumb { width: 26px; height: 14px; bord
 .choice[disabled] { opacity: .5; transform: none; }
 /* the start screen: carry on with DJ Life, or just the decks */
 .launch .choices { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.web-only { display: grid; }
+html.darwin .web-only, html.win32 .web-only, html.linux .web-only { display: none !important; }
+.import-choice .row-btns { display: flex; gap: 6px; margin-top: 2px; }
+.import-choice .row-btns button, .more-box .row-btns button { font-size: 12px; padding: 4px 10px; }
+.welcome-more { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; text-align: center; }
+.more-box { display: grid; align-content: start; justify-items: center; gap: 6px; padding: 14px 16px; border-radius: 12px; border: 1px dashed var(--line-2); }
+.more-box > span { color: var(--ink-2); font-size: 12px; }
+.more-box .row-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.more-box .row-btns button { display: inline-flex; align-items: center; gap: 5px; }
+.more-box .link { font-size: 12px; }
+@media (max-width: 640px) { .welcome-more { grid-template-columns: 1fr; } }
 .launch .choice { padding: 20px; }
 .launch .choice.last { border-color: var(--left); box-shadow: 0 0 0 1px var(--left); }
 .launch .choice .tag.last-tag { background: color-mix(in srgb, var(--left) 16%, transparent); color: var(--left); }
@@ -1495,12 +1509,20 @@ body:not(.play-mode) #toast { bottom: 64px; }
     <h1>Welcome to Cue Coach</h1>
     <p class="lead">Learn to mix two tracks like a DJ. No controller needed. Where's your music?</p>
     <div class="choices">
-      <button class="choice" data-source="practice"><span data-icon="sparkle"></span><b>Practice tracks</b><span>Built-in tracks made for learning. Nothing to set up.</span><span class="tag">Best to start</span></button>
-      <button class="choice" data-source="folder"><span data-icon="folder"></span><b>My music folder</b><span>MP3, WAV, AIFF or FLAC. We read the BPM and key for you.</span></button>
-      <button class="choice desktop-only" data-source="managed"><span data-icon="library"></span><b>My library</b><span>Copy your music into Cue Coach so it's always there, even with the drive unplugged.</span></button>
+      <div class="choice desktop-only import-choice"><span data-icon="upload"></span><b>Import music</b><span>Copy your tracks into Cue Coach. We read the BPM and key for you.</span>
+        <span class="row-btns"><button data-a="import-files">Files…</button><button data-a="import-folder">A folder…</button></span></div>
+      <button class="choice web-only" data-source="folder"><span data-icon="upload"></span><b>Import music</b><span>Choose your music folder: MP3, WAV, AIFF or FLAC. We read the BPM and key for you.</span></button>
+      <button class="choice desktop-only" data-source="managed"><span data-icon="library"></span><b>My library</b><span>Music you've copied in, always there, even with the drive unplugged.</span></button>
       <button class="choice" data-source="rekordbox" id="rbChoice"><span data-icon="disc"></span><b>My rekordbox library</b><span id="rbChoiceNote">Use the tracks, beat grids and keys you already have.</span></button>
+      <button class="choice" data-source="practice"><span data-icon="sparkle"></span><b>Practice tracks</b><span>Built-in tracks made for learning. Nothing to set up.</span><span class="tag">Best to start</span></button>
     </div>
-    <p class="note">No music of your own yet? Start with the practice tracks, and <button class="link" data-a="music-guide">see where DJs get theirs</button>.</p>
+    <div class="welcome-more">
+      <div class="more-box"><b>Download from websites</b><span>Buy tracks to keep from the biggest dance music shops.</span>
+        <span class="row-btns" id="welcomeShops"></span>
+        <button class="link" data-a="music-guide">More places and free music</button></div>
+      <div class="more-box"><b>Make tracks</b><span>Build your own tracks from loops in Studio, ready to mix.</span>
+        <span class="row-btns"><button data-a="studio"><span data-icon-sm="music"></span>Open Studio</button></span></div>
+    </div>
   </div>
 </div>
 
