@@ -18,7 +18,7 @@ const PANEL_W = 420;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png' };
 // Files the page may load: the app, the audio spike, expansion packs (js/packs/<name>/, scripts, styles and art), and the
 // time-stretch library. Folder names are letters, digits, - and _ only, so a path can't climb out with "..".
-const SERVED = /^\/(index\.html|spike\.html|learn\.html|library\.html|js\/[\w.-]+\.js|js\/packs\/(?:[\w-]+\/){0,2}[\w-]+\.(?:js|css|png)|node_modules\/signalsmith-stretch\/SignalsmithStretch\.mjs)$/;
+const SERVED = /^\/(index\.html|spike\.html|learn\.html|library\.html|studio\.html|js\/[\w.-]+\.js|js\/packs\/(?:[\w-]+\/){0,2}[\w-]+\.(?:js|css|png)|node_modules\/signalsmith-stretch\/SignalsmithStretch\.mjs)$/;
 
 let win = null;
 let server = null;
@@ -261,6 +261,7 @@ function createStudioWindow() {
   studioWin.on('closed', () => { studioWin = null; });
   const showLoadError = (why) => studioWin?.loadURL(errorPage('Studio couldn\'t open', why));
   studioWin.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => { if (isMainFrame && code !== -3) showLoadError(`The Studio page didn't load (${desc}). Quit Cue Coach and open it again.`); });
+  studioWin.webContents.on('did-navigate', (_e, url, status) => { if (url.startsWith(ORIGIN) && status >= 400) showLoadError(`The Studio page wasn't found (error ${status}). If another copy of Cue Coach is open, quit every copy and open it again.`); });
   studioWin.loadURL(`${ORIGIN}/studio.html`);
 }
 
