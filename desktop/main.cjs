@@ -237,6 +237,33 @@ function createManagerWindow() {
   managerWin.loadURL(`${ORIGIN}/library.html`);
 }
 
+// ---------- Studio: the track maker, in its own window ----------
+let studioWin = null;
+function createStudioWindow() {
+  if (studioWin) { studioWin.show(); return studioWin.focus(); }
+  const st = readWinState(), wa = screen.getPrimaryDisplay().workArea;
+  const width = Math.min(1440, wa.width), height = Math.min(900, wa.height);
+  const bounds = onScreen(st.studioBounds) ? st.studioBounds : { width, height, x: wa.x + Math.round((wa.width - width) / 2), y: wa.y + Math.round((wa.height - height) / 2) };
+  const bg = st.chrome?.bg || '#f6f5f1', fg = st.chrome?.fg || '#1d2230';
+  studioWin = new BrowserWindow({
+    ...bounds, minWidth: 1100, minHeight: 640, title: 'Cue Coach Studio', show: false, backgroundColor: bg,
+    icon: fs.existsSync(ICON) ? ICON : undefined,
+    ...(IS_MAC ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 18 } }
+      : { titleBarStyle: 'hidden', titleBarOverlay: { color: bg, symbolColor: fg, height: 52 } }),
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  studioWin.once('ready-to-show', () => studioWin.show());
+  studioWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  studioWin.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(ORIGIN)) e.preventDefault(); });
+  const save = () => { if (studioWin && !studioWin.isDestroyed()) writeWinState({ studioBounds: studioWin.getNormalBounds() }); };
+  let t; for (const ev of ['resize', 'move']) studioWin.on(ev, () => { clearTimeout(t); t = setTimeout(save, 400); });
+  studioWin.on('close', save);
+  studioWin.on('closed', () => { studioWin = null; });
+  const showLoadError = (why) => studioWin?.loadURL(errorPage('Studio couldn\'t open', why));
+  studioWin.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => { if (isMainFrame && code !== -3) showLoadError(`The Studio page didn't load (${desc}). Quit Cue Coach and open it again.`); });
+  studioWin.loadURL(`${ORIGIN}/studio.html`);
+}
+
 const sendCommand = (cmd) => { if (!learnWin) createLearnWindow(); learnWin.webContents.send('command', cmd); };
 
 // Extra full-size windows (the audio spike test page).
@@ -269,6 +296,7 @@ function buildMenu() {
         cmd('Import Playlist from Spotify or Apple Music…', 'library-import-playlist'),
         { type: 'separator' },
         { label: 'Library Manager…', accelerator: 'CmdOrCtrl+Shift+L', click: () => createManagerWindow() },
+        { label: 'Studio (Make Tracks)…', accelerator: 'CmdOrCtrl+Shift+M', click: () => createStudioWindow() },
         cmd('Find Music…', 'search', 'CmdOrCtrl+F'),
         cmd('Where to Get Music…', 'music-guide'),
         { type: 'separator' },
@@ -325,13 +353,17 @@ ipcMain.handle('get-pin', () => pinned);
 // AI coach (Claude): only the Learn window may use it. The key stays in this process, encrypted on disk.
 const fromLearn = (e) => fromUs(e) && learnWin && e.sender === learnWin.webContents;
 // My library can be used by the Learn window and the library manager window.
-const fromApp = (e) => fromLearn(e) || (fromUs(e) && managerWin && e.sender === managerWin.webContents);
+// Studio (the track maker) may use the AI and add the tracks it makes to My library.
+const fromStudio = (e) => fromUs(e) && studioWin && e.sender === studioWin.webContents;
+const fromApp = (e) => fromLearn(e) || fromStudio(e) || (fromUs(e) && managerWin && e.sender === managerWin.webContents);
+const aiOk = (e) => fromLearn(e) || fromStudio(e);
+ipcMain.handle('open-studio', (e) => { if (fromApp(e)) createStudioWindow(); });
 ipcMain.handle('open-library-manager', (e) => { if (fromApp(e)) createManagerWindow(); });
-ipcMain.handle('ai-status', (e) => (fromLearn(e) ? ai.status() : null));
+ipcMain.handle('ai-status', (e) => (aiOk(e) ? ai.status() : null));
 ipcMain.handle('show-menu', (e, pos) => { if (fromLearn(e)) Menu.getApplicationMenu()?.popup({ window: learnWin, x: Math.round(pos?.x || 0), y: Math.round(pos?.y || 0) }); });
-ipcMain.handle('ai-set-key', (e, key) => (fromLearn(e) ? ai.setKey(key) : null));
-ipcMain.handle('ai-clear-key', (e) => (fromLearn(e) ? ai.clearKey() : null));
-ipcMain.handle('ai-request', (e, payload) => (fromLearn(e) ? ai.request(payload) : { error: 'Not allowed.' }));
+ipcMain.handle('ai-set-key', (e, key) => (aiOk(e) ? ai.setKey(key) : null));
+ipcMain.handle('ai-clear-key', (e) => (aiOk(e) ? ai.clearKey() : null));
+ipcMain.handle('ai-request', (e, payload) => (aiOk(e) ? ai.request(payload) : { error: 'Not allowed.' }));
 // ---------- My library: music copied into Cue Coach's own folder ----------
 // userData/Music holds the files, userData/library.json the tracks and crates (see libstore.cjs).
 const libModel = require('./libmodel.cjs');

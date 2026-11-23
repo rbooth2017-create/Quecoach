@@ -30,6 +30,7 @@
       "spike.html",
       "learn.html",
       "library.html",
+      "studio.html",
       "js/**",
       "desktop/**",
       "package.json",

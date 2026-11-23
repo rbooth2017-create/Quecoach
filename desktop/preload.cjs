@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('cueDesktop', {
   onCommand: (cb) => ipcRenderer.on('command', (_e, c) => cb(String(c))),
   // Windows/Linux: the app menu, opened from the ☰ button (the custom title bar hides the menu bar)
   openLibraryManager: () => ipcRenderer.invoke('open-library-manager'),
+  openStudio: () => ipcRenderer.invoke('open-studio'),
   showMenu: (x, y) => ipcRenderer.invoke('show-menu', { x: Number(x) || 0, y: Number(y) || 0 }),
   // The real path of a dropped or picked file ('' when it has none, e.g. made in memory).
   filePath: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },

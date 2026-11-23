@@ -208,3 +208,27 @@ ${candidates.map((t) => JSON.stringify(slimTrack(t))).join('\n') || '(none)'}`;
   const data = await ask({ system: SYSTEM, prompt, schema: TRACK_SCHEMA, effort: 'low' });
   return { summary: data.summary, when: data.when, howto: (data.howto || []).slice(0, 3), next: (data.next || []).filter((n) => byId.has(n.id)).slice(0, 2).map((n) => ({ track: byId.get(n.id), why: n.why })) };
 }
+
+// ---------- Studio: write a track ----------
+const PRODUCER = 'You are Cue Coach Studio, a dance music producer helping a beginner make a club track in a simple loop arranger. '
+  + 'Tracks are built from sections (whole phrases) and lanes; each cell holds one loop that repeats for the section.';
+
+/**
+ * Ask Claude to write a track: sections, which loop plays in each lane, and new drum/bass/chord/lead patterns.
+ * `catalog` lists the built-in loops and the producer's samples; `schema` comes from studiomodel.aiSchema().
+ * The answer is checked by studiomodel.projectFromAI() before it is used.
+ */
+export async function composeTrackAI({ brief, style, bpm, key, catalog, schema }) {
+  const prompt = `Write a ${style} track${bpm ? ` at ${bpm} BPM` : ''}${key ? ` in ${key}` : ''}.${brief ? `\nThe producer says: "${brief}".` : ''}
+
+Make it easy for DJs to mix:
+- Start with an intro of 32 bars and end with an outro of 32 bars, using only the drums, perc and fx lanes there.
+- Every section is 8, 16 or 32 bars. Include at least one build and one drop, and a break between drops.
+- Keep the kick on every beat in intros, drops and outros.
+
+Patterns you write: drum voices (kick, clap, hat, open, perc) are strings of 16 characters per bar: "x" hit, "o" soft hit, "-" rest; leave unused voices "". Bass and lead notes are [step, scale degree, length in 16th steps]: step counts from 0 across all the pattern's bars, degree 0 is the key's root, 7 an octave up, negative goes below. Set follow true on bass so it moves with the chords. Chords use "hits" (16 characters) and play the progression. Leave fields that don't apply to a pattern's type empty.
+In each section's lanes give a pattern id you wrote, a built-in loop id, a sample id (s:...), or "" for silence. Only put loops in the lane they belong to.
+
+${catalog}`;
+  return ask({ system: PRODUCER, prompt, schema, effort: 'medium' });
+}

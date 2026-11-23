@@ -2881,6 +2881,11 @@ function bind() {
   $('#lessonsBtn').innerHTML = icon('book', 18); $('#aiBtn').innerHTML = icon('wand', 18);
   $('#lessonsBtn').addEventListener('click', () => setPane(!state.paneOpen));
   $('#aiBtn').addEventListener('click', openAI);
+  $('#studioBtn').innerHTML = `${icon('music', 16)} Studio`;
+  $('#studioBtn').addEventListener('click', () => {
+    if (window.cueDesktop?.openStudio) return window.cueDesktop.openStudio();
+    window.open('studio.html', 'cuecoach-studio')?.focus();
+  });
   $('#ctlBtn').addEventListener('click', openCtl);
   $('#sinkSel').addEventListener('change', (e) => useSink(e.target.value));
   navigator.mediaDevices?.addEventListener?.('devicechange', () => { if ($('#ctlDlg').open) listSinks(); applyRoute(true); });
