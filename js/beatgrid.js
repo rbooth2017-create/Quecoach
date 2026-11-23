@@ -246,6 +246,53 @@ export function bandPeaks(x, sr, rate = 150) {
   return { low, mid, high, rate: sr / step };
 }
 
+/**
+ * "Kick & bass": just the kick drum and bassline, without sounding muffled.
+ * A low-pass alone keeps the boom but loses the kick's click (its attack, a few kHz up), which is
+ * the part you line a beat grid up with. So: the low end (two cascaded one-poles), plus the
+ * 150 Hz–5 kHz band let through for ~25 ms at each low-end hit, so every kick keeps its snap
+ * while hats, vocals and pads in between stay out.
+ * Takes the channels (Float32Arrays) and sample rate; returns { channels, hits } (hit times, seconds).
+ */
+export function kickBass(channels, sr) {
+  const n = channels[0].length, nc = channels.length;
+  const lp2 = (x, hz) => lowpass(lowpass(x, sr, hz), sr, hz);
+  // where the low end hits: a fast follower jumping well above a slow one
+  const mono = new Float32Array(n);
+  for (const c of channels) for (let i = 0; i < n; i++) mono[i] += c[i] / nc;
+  const low = lp2(mono, 150);
+  const fa = 1 - Math.exp(-1 / (0.004 * sr)), sa = 1 - Math.exp(-1 / (0.12 * sr));
+  let f = 0, sl = 0, peak = 1e-9;
+  const fast = new Float32Array(n), slow = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const r = Math.abs(low[i]); f += fa * (r - f); sl += sa * (r - sl); fast[i] = f; slow[i] = sl; if (f > peak) peak = f; }
+  const cand = [], gap = Math.round(0.12 * sr);
+  for (let i = 1, last = -gap; i < n; i++) {
+    if (i - last < gap || fast[i] < 0.1 * peak || fast[i] < slow[i] * 1.6) continue;
+    cand.push({ i, rise: fast[i] - slow[i] }); last = i;
+  }
+  // louder hits (kicks) open the gate fully; softer ones (bass notes) a little
+  const ref = cand.map((c) => c.rise).sort((a, b) => a - b)[Math.floor(cand.length * 0.8)] || 1;
+  const gate = new Float32Array(n);
+  const pre = Math.round(0.006 * sr), open = Math.round(0.001 * sr), hold = Math.round(0.02 * sr), rel = 0.035 * sr;
+  for (const { i, rise } of cand) {
+    const g = Math.min(1, rise / ref) ** 1.5, s0 = Math.max(0, i - pre);
+    for (let k = 0; s0 + k < n; k++) {
+      const v = k < open ? k / open : k < open + hold ? 1 : Math.exp(-(k - open - hold) / rel);
+      if (v < 0.003) break;
+      if (g * v > gate[s0 + k]) gate[s0 + k] = g * v;
+    }
+  }
+  const out = channels.map((x) => {
+    const lo = lp2(x, 200), body = lp2(x, 150), top = lp2(x, 5000), y = new Float32Array(n);
+    for (let i = 0; i < n; i++) y[i] = lo[i] * 1.4 + (top[i] - body[i]) * gate[i] * 0.9;
+    return y;
+  });
+  let m = 1e-9; for (const y of out) for (let i = 0; i < n; i++) { const a = Math.abs(y[i]); if (a > m) m = a; }
+  const k = Math.min(4, 0.9 / m);
+  for (const y of out) for (let i = 0; i < n; i++) y[i] *= k;
+  return { channels: out, hits: cand.map((c) => Math.max(0, c.i - pre) / sr) };
+}
+
 /** Average low-end energy per bar, 0..1. */
 export function barEnergies(x, sr, grid) {
   const lp = lowpass(x, sr, 150), bl = 240 / grid.bpm;

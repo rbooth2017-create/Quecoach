@@ -55,6 +55,8 @@ const THEMES = [
   { id: 'neon', name: 'Neon', bg: '#0e0a1c', left: '#22d3ee', right: '#f472b6' },
   { id: 'sunset', name: 'Sunset', bg: '#fcf1e4', left: '#0e9384', right: '#e8572f' },
   { id: 'studio', name: 'Studio', bg: '#0c0d0e', left: '#2aa6ff', right: '#ffb020' },
+  { id: 'graphite', name: 'Graphite', bg: '#161616', left: '#f07a1c', right: '#c9ccc6' },
+  { id: 'concrete', name: 'Concrete', bg: '#d9d9d7', left: '#e2691a', right: '#262626' },
 ];
 const desktop = window.cueDesktop || null;
 

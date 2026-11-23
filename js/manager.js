@@ -4,7 +4,7 @@
 import { icon } from './icons.js';
 import * as lib from './musiclib.js';
 import { ctx, synthDemoTrack, estimateGrid } from './audio.js';
-import { bandPeaks, barEnergies, phrasesFromEnergy } from './beatgrid.js';
+import { bandPeaks, barEnergies, phrasesFromEnergy, kickBass } from './beatgrid.js';
 import { phraseColor } from './songguide.js';
 import { energyOf } from './energy.js';
 import { setArc, energyChartSVG } from './setchart.js';
@@ -34,7 +34,7 @@ const S = {
   editName: null, rows: [],
 };
 /** The track editor: audio, waveform, player. */
-const E = { t: null, buffer: null, bands: null, loading: false, err: null, playing: false, offset: 0, anchor: 0, src: null, span: 8, click: false, lastClick: -1, taps: [], tab: 'edit', token: 0, drag: null };
+const E = { t: null, buffer: null, bands: null, loading: false, err: null, playing: false, offset: 0, anchor: 0, src: null, span: 8, click: false, lows: false, lastClick: -1, taps: [], tab: 'edit', token: 0, drag: null };
 
 // ---------- shared cue storage (the Learn window reads the same keys) ----------
 const getMap = (k) => shared.get(k, {}) || {};
@@ -411,7 +411,7 @@ function focusTrack(id) {
   renderTable();
   const t = S.tracks.find((x) => x.id === id);
   if (t && E.t?.id !== id) {
-    pause(); E.t = t; E.buffer = null; E.bands = null; E.err = null; E.loading = true; E.offset = cuePointOf(t); E.taps = [];
+    pause(); E.t = t; E.buffer = null; E.bands = null; E.lowsBuf = null; E.err = null; E.loading = true; E.offset = cuePointOf(t); E.taps = [];
     renderEditor(); $('#app').classList.remove('no-editor');
     clearTimeout(openTimer); openTimer = setTimeout(() => loadAudio(t), 220);
   }
@@ -421,6 +421,23 @@ const selectedIds = () => S.rows.map((t) => t.id).filter((id) => S.sel.has(id));
 
 // ---------- the editor: audio ----------
 const out = ctx.createGain(); out.connect(ctx.destination);
+// "Kick & bass": a copy of the track with only the kick drum (keeping its click) and bassline, made once per track.
+function lowsBuffer() {
+  const b = E.buffer; if (!b) return null;
+  if (E.lowsBuf?.src !== b) {
+    const chans = Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c));
+    const r = kickBass(chans, b.sampleRate), nb = ctx.createBuffer(chans.length, b.length, b.sampleRate);
+    r.channels.forEach((y, c) => nb.copyToChannel(y, c));
+    E.lowsBuf = { src: b, buf: nb };
+  }
+  return E.lowsBuf.buf;
+}
+function setLows(on) {
+  E.lows = on;
+  if (on && !E.lowsBuf) toast('Taking out everything but the kick and bass…');
+  const go = () => { if (E.playing) seek(pos()); renderEditor(); };
+  if (on) setTimeout(() => { lowsBuffer(); go(); }, 30); else go();
+}
 const dur = () => E.buffer?.duration || E.t?.duration || 0;
 const pos = () => (E.playing ? Math.min(dur(), E.offset + (ctx.currentTime - E.anchor)) : E.offset);
 function stopSrc() { const s = E.src; E.src = null; if (s) { try { s.stop(); } catch { /* not started */ } s.disconnect(); } }
@@ -428,7 +445,7 @@ function play() {
   if (!E.buffer) return;
   ctx.resume(); stopSrc();
   if (E.offset >= dur() - 0.05) E.offset = 0;
-  const s = ctx.createBufferSource(); s.buffer = E.buffer; s.connect(out);
+  const s = ctx.createBufferSource(); s.buffer = (E.lows && lowsBuffer()) || E.buffer; s.connect(out);
   E.anchor = ctx.currentTime; s.start(0, E.offset); E.src = s; E.playing = true; E.lastClick = E.offset - 0.001;
   s.onended = () => { if (E.src === s) { E.offset = dur(); E.playing = false; E.src = null; renderTransport(); } };
   renderTransport(); loop();
@@ -439,7 +456,7 @@ function seek(t) {
   const was = E.playing; if (was) { E.playing = false; stopSrc(); }
   E.offset = clamp(t, 0, dur()); if (was) play(); else { renderTransport(); draw(); }
 }
-function closeEditor() { pause(); E.t = null; E.buffer = null; E.bands = null; E.token++; }
+function closeEditor() { pause(); E.t = null; E.buffer = null; E.bands = null; E.lowsBuf = null; E.token++; }
 
 function phrasesFor(buffer, grid) {
   try { return phrasesFromEnergy(barEnergies(buffer.getChannelData(0), buffer.sampleRate, grid), grid); } catch { return []; }
@@ -502,6 +519,7 @@ function gridAction(a, e = {}) {
     if (!r.bpm) return toast(`Keep tapping on the beat (${r.more} more)`);
     return applyGrid(M.gridSetBpm(g, r.bpm) || g);
   }
+  if (a === 'lows') return setLows(!E.lows);
   if (a === 'click') { E.click = !E.click; E.lastClick = pos() - 0.001; return renderEditor(); }
   if (a === 'again') {
     if (!E.buffer) return;
@@ -614,7 +632,7 @@ function toolsHTML(t) {
         <button data-grid="beat" ${dis} title="The beats line up, but the bar starts on the wrong one">Move the 1 a beat</button></div>
       <div class="row"><span class="lbl" style="margin-left:0">BPM</span><button data-grid="bpm-" ${dis} aria-label="BPM down 0.01 (Shift: 0.1)">−</button><input type="number" id="bpmIn" step="0.01" min="40" max="250" value="${g ? g.bpm.toFixed(2) : ''}" ${dis} aria-label="BPM"><button data-grid="bpm+" ${dis} aria-label="BPM up 0.01 (Shift: 0.1)">+</button>
         <button data-grid="half" ${dis} title="Half">÷2</button><button data-grid="double" ${dis} title="Double">×2</button><button data-grid="whole" ${dis} title="Round to a whole number">Whole</button><button data-grid="tap" ${dis} title="Tap along with the beat (T)">Tap</button></div>
-      <div class="row"><button data-grid="click" class="${E.click ? 'on' : ''}" aria-pressed="${E.click}" ${dis}>${icon('metronome', 13)} Click</button><button class="ghost" data-grid="again" ${dis}>Analyse again</button>${rbNote || '<span class="small muted">Shift-drag the waveform to slide the grid.</span>'}</div>
+      <div class="row"><button data-grid="click" class="${E.click ? 'on' : ''}" aria-pressed="${E.click}" ${dis}>${icon('metronome', 13)} Click</button><button data-grid="lows" class="${E.lows ? 'on' : ''}" aria-pressed="${E.lows}" ${dis} title="Hear only the kick drum and bassline (and see only them on the waveform), so it's easier to line the grid up with the kicks (B)">Kick &amp; bass</button><button class="ghost" data-grid="again" ${dis}>Analyse again</button>${rbNote || '<span class="small muted">Shift-drag the waveform to slide the grid.</span>'}</div>
     </div>
     <div class="group"><h3>Cues<span class="grow"></span><button class="ghost small" data-ed="mem" ${dis} title="Add a memory cue here (M)">${icon('plus', 12)} Memory cue</button></h3>
       <div class="pads">${pads}</div>
@@ -652,7 +670,7 @@ function drawBands(g, w, h, t0, t1, top = 0, height = h) {
   const mid = top + height / 2, half = height / 2 - 1, per = (t1 - t0) / w;
   const cols = [[B.low, C.left, 1], [B.mid, C.right, 0.85], [B.high, C.ink2, 0.7]];
   for (const [arr, color, k] of cols) {
-    g.fillStyle = color; g.globalAlpha = color === C.ink2 ? 0.55 : 0.9;
+    g.fillStyle = color; g.globalAlpha = E.lows && arr !== B.low ? 0.12 : color === C.ink2 ? 0.55 : 0.9;
     for (let x = 0; x < w; x++) {
       const a = Math.floor((t0 + x * per) * B.rate), b = Math.max(a + 1, Math.floor((t0 + (x + 1) * per) * B.rate));
       if (b <= 0 || a >= arr.length) continue;
@@ -1032,13 +1050,14 @@ function onKey(e) {
   if (lk === 'm') return addMemory();
   if (lk === 't') return gridAction('tap', e);
   if (lk === 'k') return gridAction('click', e);
+  if (lk === 'b') return gridAction('lows', e);
   if (k === 'Home') { pause(); return seek(cuePointOf(E.t)); }
   if (k === '+' || k === '=') return zoom(1 / 1.4);
   if (k === '-') return zoom(1.4);
 }
 function showHelp() {
   const rows = [['Space', 'Play / pause'], ['1 – 8', 'Set or jump to a hot cue (Shift: clear)'], ['C', 'Set the CUE point here'], ['Home', 'Back to the CUE point'], ['M', 'Add a memory cue'],
-    ['← →', 'Back / forward a beat (Shift: a bar)'], ['[ ]', 'Slide the grid 5 ms (Shift: 20 ms)'], ['T', 'Tap the tempo'], ['K', 'Metronome click'], ['+ −', 'Zoom the waveform'],
+    ['← →', 'Back / forward a beat (Shift: a bar)'], ['[ ]', 'Slide the grid 5 ms (Shift: 20 ms)'], ['T', 'Tap the tempo'], ['K', 'Metronome click'], ['B', 'Kick & bass only'], ['+ −', 'Zoom the waveform'],
     ['↑ ↓', 'Next / previous track'], ['Delete', 'Remove from the set list or crate'], ['Shift-drag', 'Slide the grid on the waveform']];
   openMenu(innerWidth - 340, 52, [{ head: 'Keyboard shortcuts' }, ...rows.map(([a, b]) => ({ label: `${a}   ${b}`, run: () => {} }))]);
 }

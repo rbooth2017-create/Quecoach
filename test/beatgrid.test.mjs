@@ -97,3 +97,20 @@ test('the grid says when it is unsure: a steady kick is sure, noise is not', () 
   assert.equal(gridUnsure({ ...unsure, adjusted: true }), false); // the DJ fixed it
   assert.equal(gridUnsure({ bpm: 120, firstDownbeat: 0 }), false); // rekordbox's grid
 });
+
+test('kickBass keeps the kicks (with their click) and drops the hats between them', async () => {
+  const { kickBass } = await import('../js/beatgrid.js');
+  const bpm = 125, { x } = synthTrack(bpm, 0.5);
+  const { channels: [y], hits } = kickBass([x], SR);
+  assert.equal(y.length, x.length);
+  // a hit near the first few drop kicks (bars 33+), each within ~15 ms of the beat
+  const beat = 60 / bpm, drop = 0.5 + 32 * 4 * beat;
+  for (let b = 0; b < 8; b++) {
+    const t = drop + b * beat;
+    assert.ok(hits.some((h) => Math.abs(h - t) < 0.015), `no hit near beat ${b} of the drop`);
+  }
+  // high-frequency content: present right at a kick, nearly gone at an offbeat hat in the intro
+  const hp = (a, t, len) => { let s = 0; const o = Math.round(t * SR); for (let i = 1; i < len * SR; i++) s += Math.abs(a[o + i] - a[o + i - 1]); return s; };
+  const kickT = 0.5 + 4 * beat, hatT = kickT + beat / 2;
+  assert.ok(hp(y, kickT, 0.01) > 4 * hp(y, hatT + 0.001, 0.01), 'kick click kept, hat removed');
+});

@@ -47,6 +47,20 @@
   --ok: #3ddc84; --ok-soft: #10301f; --close: #ffd23f; --close-soft: #332b0d; --warn: #ff5a4e; --warn-soft: #351614;
   color-scheme: dark;
 }
+:root[data-theme="graphite"] { /* modular hi-fi: charcoal, hairlines, one orange accent */
+  --bg: #161616; --card: #1e1e1e; --card-2: #272727; --line: #2d2d2d; --line-2: #3d3d3d;
+  --ink: #ececea; --ink-2: #a6a6a2; --ink-3: #72726e;
+  --left: #f07a1c; --left-soft: #38230f; --right: #c9ccc6; --right-soft: #2b2c2a;
+  --ok: #7ccf8a; --ok-soft: #1a2d1e; --close: #e8c04a; --close-soft: #332b12; --warn: #ff4a3d; --warn-soft: #3a1714;
+  color-scheme: dark;
+}
+:root[data-theme="concrete"] { /* the same, printed on light grey */
+  --bg: #d9d9d7; --card: #ececea; --card-2: #d0d0cd; --line: #c6c6c3; --line-2: #b2b2ae;
+  --ink: #1a1a1a; --ink-2: #4a4a48; --ink-3: #7a7a76;
+  --left: #e2691a; --left-soft: #f4dcc6; --right: #262626; --right-soft: #c8c8c5;
+  --ok: #2f8a4e; --ok-soft: #d3e6d6; --close: #a87400; --close-soft: #eee0bf; --warn: #d42f25; --warn-soft: #f1cfcb;
+  color-scheme: light;
+}
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.4; -webkit-font-smoothing: antialiased; }
@@ -1350,6 +1364,37 @@ body:not(.play-mode) #toast { bottom: 64px; }
 :root[data-theme="neon"] .bpm b, :root[data-theme="neon"] .deck-head .title { letter-spacing: -.01em; }
 :root[data-theme="neon"] .titlebar { background: linear-gradient(90deg, color-mix(in srgb, var(--card) 92%, var(--left)), var(--card) 40%, var(--card) 60%, color-mix(in srgb, var(--card) 92%, var(--right))); }
 
+
+/* Graphite and Concrete: modular hi-fi. Flat surfaces, hairlines, no glow; the Play view becomes a graphite booth with record-label platters */
+:root:is([data-theme="graphite"], [data-theme="concrete"]) :is(.playview, .career-layer) {
+  --pv-bg: #141414; --pv-card: #1e1e1e; --pv-card-2: #282828; --pv-line: #2f2f2f; --pv-line-2: #424242;
+  --pv-ink: #f0f0ee; --pv-ink-2: #c4c4c0; --pv-ink-3: #8f8f8a;
+  --pv-a: #f07a1c; --pv-a-2: #ffa25a; --pv-b: #d6d8d2; --pv-b-2: #f0f0ee; --pv-ok: #7ccf8a; --pv-gold: #f2c14a; --pv-warn: #ff4a3d;
+  --pv-shadow: #050505;
+}
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .playview { background: radial-gradient(ellipse at 50% 120%, #262626 0%, var(--pv-bg) 62%); }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-glow { opacity: .4; }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-arc circle { stroke-width: 3; }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-platter {
+  background: conic-gradient(from 20deg, #1b1b1b, #232323 12%, #1b1b1b 25%, #232323 37%, #1b1b1b 50%, #232323 62%, #1b1b1b 75%, #232323 87%, #1b1b1b);
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+}
+/* a tick ring hugging the play button, which becomes the record's label */
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-platter::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; opacity: .9;
+  background: repeating-conic-gradient(var(--c) 0 1.6deg, transparent 1.6deg 6deg);
+  -webkit-mask: radial-gradient(circle, transparent 0 37px, #000 37.5px 45px, transparent 45.5px); mask: radial-gradient(circle, transparent 0 37px, #000 37.5px 45px, transparent 45.5px);
+}
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-mark { top: 1.5%; width: 3px; height: 6%; margin-left: -1.5px; border-radius: 2px; background: var(--pv-ink); box-shadow: none; }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-play { background: var(--c); border: none; color: var(--pv-bg) !important; }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-play:hover { background: color-mix(in srgb, var(--c) 82%, #fff); }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-deck.empty .pv-play { background: transparent; border: 1px dashed var(--c); color: var(--pv-ink) !important; }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) :is(.pv-next, .pv-phrase, .cl-gig, .cl-new) { background: color-mix(in srgb, var(--pv-card) 92%, transparent); }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .cl-card { background: radial-gradient(ellipse at 85% 0%, #2a2a2a 0%, var(--pv-bg) 60%); }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) :is(.pv-picker, .career-layer) { background: rgba(0,0,0,.6); }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-cue.on { box-shadow: none; }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .pv-steps li.current { box-shadow: none; }
+:root:is([data-theme="graphite"], [data-theme="concrete"]) .titlebar { border-bottom: 1px solid var(--line); }
 
 /* D2: the side panel never grows past its width: its column can shrink, tabs scroll, buttons and selects wrap */
 .tutor { grid-template-columns: minmax(0, 1fr); }
